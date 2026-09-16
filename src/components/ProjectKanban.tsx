@@ -3,10 +3,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Plus, CheckCircle2, Clock, AlertTriangle, User, Tag, 
-  Calendar, CheckSquare, MoreVertical, X, Filter, Sparkles
+  Calendar, CheckSquare, MoreVertical, X, Filter, Sparkles,
+  Trash2, GripVertical
 } from 'lucide-react';
 import { ProjectTask, TaskPriority, TaskStatus, TaskSubItem } from '../types';
 
@@ -15,13 +16,17 @@ interface ProjectKanbanProps {
   onAddTask: (task: Omit<ProjectTask, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onUpdateTaskStatus: (taskId: string, status: TaskStatus) => void;
   onDeleteTask?: (taskId: string) => void;
+  onClearAllTasks?: () => void;
 }
 
-export default function ProjectKanban({ tasks, onAddTask, onUpdateTaskStatus }: ProjectKanbanProps) {
+export default function ProjectKanban({ tasks, onAddTask, onUpdateTaskStatus, onDeleteTask, onClearAllTasks }: ProjectKanbanProps) {
   const [filterPriority, setFilterPriority] = useState<string>('ALL');
   const [filterCategory, setFilterCategory] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
+  const [dragOverColId, setDragOverColId] = useState<string | null>(null);
+  const draggedTaskIdRef = useRef<string | null>(null);
 
   // New task form state
   const [newTitle, setNewTitle] = useState<string>('');
@@ -85,13 +90,13 @@ export default function ProjectKanban({ tasks, onAddTask, onUpdateTaskStatus }: 
   const getPriorityBadge = (priority: TaskPriority) => {
     switch (priority) {
       case 'CRITICAL':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">CRITICAL</span>;
+        return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">CRITICAL</span>;
       case 'HIGH':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">HIGH</span>;
+        return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">HIGH</span>;
       case 'MEDIUM':
-        return <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-blue-500/20 text-blue-400 border border-blue-500/40">MEDIUM</span>;
+        return <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/20 text-blue-400 border border-blue-500/40">MEDIUM</span>;
       default:
-        return <span className="px-2 py-0.5 rounded text-[10px] font-medium bg-slate-500/20 text-slate-400 border border-slate-500/40">LOW</span>;
+        return <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-500/20 text-slate-400 border border-slate-500/40">LOW</span>;
     }
   };
 
@@ -100,7 +105,7 @@ export default function ProjectKanban({ tasks, onAddTask, onUpdateTaskStatus }: 
       {/* Header & Controls */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
               <Sparkles className="w-5 h-5 text-emerald-400" />
               Project Task Board (Kanban WBS)
@@ -108,9 +113,12 @@ export default function ProjectKanban({ tasks, onAddTask, onUpdateTaskStatus }: 
             <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 text-xs px-2.5 py-0.5 rounded-full font-mono font-semibold">
               {tasks.length} Total Tasks
             </span>
+            <span className="hidden sm:inline text-[11px] text-emerald-400/80 bg-emerald-950/40 border border-emerald-800/40 px-2 py-0.5 rounded-md font-mono">
+              ✨ Drag &amp; Drop Enabled
+            </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            Real estate construction sprints, engineering clearances, and contractor assignments.
+            Real estate construction sprints, engineering clearances, and contractor assignments. Drag any card to change status.
           </p>
         </div>
 
@@ -120,13 +128,13 @@ export default function ProjectKanban({ tasks, onAddTask, onUpdateTaskStatus }: 
             placeholder="Search tasks or assignees..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            className="bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500 flex-1 md:w-56"
           />
 
           <select
             value={filterPriority}
             onChange={(e) => setFilterPriority(e.target.value)}
-            className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
           >
             <option value="ALL">All Priorities</option>
             <option value="CRITICAL">Critical</option>
@@ -138,7 +146,7 @@ export default function ProjectKanban({ tasks, onAddTask, onUpdateTaskStatus }: 
           <select
             value={filterCategory}
             onChange={(e) => setFilterCategory(e.target.value)}
-            className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
           >
             <option value="ALL">All Categories</option>
             <option value="CIVIL_WORKS">Civil Works</option>
@@ -147,6 +155,22 @@ export default function ProjectKanban({ tasks, onAddTask, onUpdateTaskStatus }: 
             <option value="LEGAL">Titling & Deeds</option>
             <option value="QA">Quality Assurance</option>
           </select>
+
+          {tasks.length > 0 && onClearAllTasks && (
+            <button
+              type="button"
+              onClick={() => {
+                if (window.confirm(`Are you sure you want to clear all ${tasks.length} tasks from the board?`)) {
+                  onClearAllTasks();
+                }
+              }}
+              className="flex items-center gap-1.5 bg-slate-800 hover:bg-rose-950/70 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-700/50 text-xs font-semibold px-3 py-2 rounded-xl transition-all cursor-pointer"
+              title="Clear all tasks from the board"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Clear Board</span>
+            </button>
+          )}
 
           <button
             onClick={() => setIsModalOpen(true)}
@@ -158,12 +182,57 @@ export default function ProjectKanban({ tasks, onAddTask, onUpdateTaskStatus }: 
         </div>
       </div>
 
-      {/* Kanban Columns Grid */}
+      {/* Kanban Columns Grid with Drag & Drop */}
       <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3.5 items-start">
         {columns.map((col) => {
           const colTasks = filteredTasks.filter((t) => t.status === col.id);
+          const isOver = dragOverColId === col.id;
+
           return (
-            <div key={col.id} className={`rounded-2xl border ${col.color} p-3 flex flex-col min-h-[480px]`}>
+            <div 
+              key={col.id} 
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = 'move';
+                if (dragOverColId !== col.id) {
+                  setDragOverColId(col.id);
+                }
+              }}
+              onDragEnter={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setDragOverColId(col.id);
+              }}
+              onDragLeave={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (e.currentTarget === e.target) {
+                  setDragOverColId(null);
+                }
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const taskId = 
+                  e.dataTransfer.getData('text/plain') || 
+                  e.dataTransfer.getData('text') || 
+                  draggedTaskIdRef.current || 
+                  (window as any).__kanbanDraggingTaskId || 
+                  draggingTaskId;
+                
+                if (taskId) {
+                  onUpdateTaskStatus(taskId, col.id);
+                }
+                draggedTaskIdRef.current = null;
+                (window as any).__kanbanDraggingTaskId = null;
+                setDraggingTaskId(null);
+                setDragOverColId(null);
+              }}
+              className={`rounded-2xl border ${col.color} p-3 flex flex-col min-h-[520px] transition-all duration-150 ${
+                isOver ? 'ring-2 ring-emerald-400 bg-slate-900/95 shadow-xl shadow-emerald-500/20 scale-[1.01]' : ''
+              }`}
+            >
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <span className="font-bold text-xs text-white uppercase tracking-wider">{col.title}</span>
@@ -171,24 +240,87 @@ export default function ProjectKanban({ tasks, onAddTask, onUpdateTaskStatus }: 
                     {colTasks.length}
                   </span>
                 </div>
+                {isOver && (
+                  <span className="text-[10px] font-mono font-bold text-emerald-400 animate-pulse">
+                    Drop Here
+                  </span>
+                )}
               </div>
 
               {/* Task Cards Stack */}
-              <div className="space-y-2.5 flex-1">
+              <div className="space-y-2.5 flex-1 min-h-[360px] pb-6 flex flex-col">
                 {colTasks.map((task) => {
                   const completedSubtasks = task.subtasks?.filter((s) => s.completed).length || 0;
                   const totalSubtasks = task.subtasks?.length || 0;
+                  const isDragging = draggingTaskId === task.id;
 
                   return (
                     <div
                       key={task.id}
-                      className="bg-slate-900/90 border border-slate-800 hover:border-slate-600 rounded-xl p-3 shadow-md hover:shadow-xl transition-all group"
+                      draggable={true}
+                      onDragStart={(e) => {
+                        e.dataTransfer.setData('text/plain', task.id);
+                        e.dataTransfer.setData('text', task.id);
+                        e.dataTransfer.effectAllowed = 'move';
+                        draggedTaskIdRef.current = task.id;
+                        (window as any).__kanbanDraggingTaskId = task.id;
+                        setDraggingTaskId(task.id);
+                      }}
+                      onDragEnd={() => {
+                        draggedTaskIdRef.current = null;
+                        (window as any).__kanbanDraggingTaskId = null;
+                        setDraggingTaskId(null);
+                        setDragOverColId(null);
+                      }}
+                      onDragOver={(e) => {
+                        e.preventDefault();
+                        e.dataTransfer.dropEffect = 'move';
+                      }}
+                      onDrop={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const taskId = 
+                          e.dataTransfer.getData('text/plain') || 
+                          e.dataTransfer.getData('text') || 
+                          draggedTaskIdRef.current || 
+                          (window as any).__kanbanDraggingTaskId;
+                        if (taskId) {
+                          onUpdateTaskStatus(taskId, col.id);
+                        }
+                        draggedTaskIdRef.current = null;
+                        (window as any).__kanbanDraggingTaskId = null;
+                        setDraggingTaskId(null);
+                        setDragOverColId(null);
+                      }}
+                      className={`
+                        bg-slate-900/90 border rounded-xl p-3 shadow-md hover:shadow-xl transition-all group select-none cursor-grab active:cursor-grabbing
+                        ${isDragging ? 'opacity-30 scale-95 border-emerald-500 ring-2 ring-emerald-500/40' : 'border-slate-800 hover:border-slate-600'}
+                      `}
                     >
                       <div className="flex items-start justify-between gap-1 mb-1.5">
-                        <span className="text-[10px] font-mono text-emerald-400 font-semibold uppercase">
-                          {task.category || 'TASK'}
-                        </span>
-                        {getPriorityBadge(task.priority)}
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <GripVertical className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-400 shrink-0" />
+                          <span className="text-[10px] font-mono text-emerald-400 font-semibold uppercase truncate">
+                            {task.category || 'TASK'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {getPriorityBadge(task.priority)}
+                          {onDeleteTask && (
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onDeleteTask(task.id);
+                              }}
+                              className="p-1 rounded bg-slate-800/80 hover:bg-rose-950 text-slate-400 hover:text-rose-300 border border-slate-700/60 hover:border-rose-700/60 transition-all cursor-pointer"
+                              title="Delete task"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
                       </div>
 
                       <h4 className="text-xs font-bold text-white leading-snug mb-1.5 group-hover:text-emerald-300 transition-colors">
@@ -222,42 +354,32 @@ export default function ProjectKanban({ tasks, onAddTask, onUpdateTaskStatus }: 
 
                       {/* Footer Info */}
                       <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-400">
-                        <span className="flex items-center gap-1 font-medium text-slate-300">
-                          <User className="w-3 h-3 text-slate-500" />
-                          {task.assigneeName ? task.assigneeName.split(' ')[0] : 'Unassigned'}
+                        <span className="flex items-center gap-1 font-medium text-slate-300 truncate max-w-[120px]">
+                          <User className="w-3 h-3 text-slate-500 shrink-0" />
+                          <span className="truncate">{task.assigneeName ? task.assigneeName.split(' ')[0] : 'Unassigned'}</span>
                         </span>
 
                         {task.dueDate && (
-                          <span className="flex items-center gap-1 font-mono text-[10px] text-slate-400">
+                          <span className="flex items-center gap-1 font-mono text-[10px] text-slate-400 shrink-0">
                             <Calendar className="w-3 h-3 text-slate-500" />
                             {new Date(task.dueDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
                           </span>
                         )}
                       </div>
-
-                      {/* Move Status Buttons */}
-                      <div className="mt-2 pt-1.5 border-t border-slate-800/40 flex items-center gap-1 overflow-x-auto">
-                        {columns.map((c) => {
-                          if (c.id === task.status) return null;
-                          return (
-                            <button
-                              key={c.id}
-                              onClick={() => onUpdateTaskStatus(task.id, c.id)}
-                              className="text-[9px] px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors whitespace-nowrap cursor-pointer"
-                              title={`Move to ${c.title}`}
-                            >
-                              → {c.title}
-                            </button>
-                          );
-                        })}
-                      </div>
                     </div>
                   );
                 })}
 
-                {colTasks.length === 0 && (
-                  <div className="h-32 border border-dashed border-slate-800/60 rounded-xl flex items-center justify-center text-[11px] text-slate-600">
-                    No tasks
+                {isOver && (
+                  <div className="h-16 border-2 border-dashed border-emerald-400/80 bg-emerald-500/10 rounded-xl flex items-center justify-center text-xs font-bold text-emerald-300 animate-pulse mt-1">
+                    Drop into {col.title}
+                  </div>
+                )}
+
+                {colTasks.length === 0 && !isOver && (
+                  <div className="h-32 border border-dashed border-slate-800/60 rounded-xl flex flex-col items-center justify-center text-[11px] p-2 text-center text-slate-600">
+                    <span>No tasks</span>
+                    <span className="text-[9px] text-slate-500 mt-0.5">Drag card here</span>
                   </div>
                 )}
               </div>

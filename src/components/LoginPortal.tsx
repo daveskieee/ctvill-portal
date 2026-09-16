@@ -249,6 +249,42 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
                   </>
                 )}
               </button>
+
+              {/* Quick Role Fill Pills for Fast Testing */}
+              <div className="pt-4 border-t border-slate-800/80 space-y-2">
+                <div className="text-[10px] font-mono text-slate-500 uppercase tracking-wider text-center">
+                  Quick Demo Access Accounts
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('davematthewreglos@gmail.com');
+                      setPassword('admin123');
+                    }}
+                    className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-amber-500/50 rounded-xl text-left transition cursor-pointer group"
+                  >
+                    <div className="text-[11px] font-bold text-amber-400 flex items-center gap-1">
+                      <span>Operations Admin</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono truncate">Full Executive Access</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEmail('pm@ctvill.com');
+                      setPassword('pm123');
+                    }}
+                    className="p-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-indigo-500/50 rounded-xl text-left transition cursor-pointer group"
+                  >
+                    <div className="text-[11px] font-bold text-indigo-400 flex items-center gap-1">
+                      <span>Project Manager</span>
+                    </div>
+                    <div className="text-[10px] text-slate-400 font-mono truncate">Site-Scoped PMS</div>
+                  </button>
+                </div>
+              </div>
             </form>
           </div>
         </div>

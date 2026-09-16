@@ -159,7 +159,10 @@ export type CTVillDepartment =
   | 'Design & Pre-Construction'
   | 'Project Management & Construction'
   | 'Property Management & Maintenance'
-  | 'Corporate Support';
+  | 'Corporate Support'
+  | 'Design & Pre-Construction ("CREATE" Phase)'
+  | 'Project Management & Construction ("CONSTRUCT" Phase)'
+  | 'Property Management & Maintenance ("AFTER CARE" Phase)';
 
 export type CTVillRole =
   // Executive Leadership
@@ -191,12 +194,15 @@ export interface Contractor {
   name: string;
   company: string;
   specialty?: string;
+  tradeType?: string;
   employmentType?: 'INTERNAL' | 'OUTSOURCED';
   department?: CTVillDepartment | string;
   roleTitle?: CTVillRole | string;
   dailyRate?: number;
   monthlySalary?: number;
-  status?: 'ACTIVE' | 'ON_LEAVE' | 'INACTIVE';
+  status?: 'ACTIVE' | 'ON_LEAVE' | 'INACTIVE' | 'BREAK' | 'OFFLINE';
+  workforceCategory?: 'PROFESSIONAL' | 'SKILLED' | 'GENERAL_LABOR';
+  allocationStatus?: 'ASSIGNED' | 'STANDBY' | 'REALLOCATED' | 'DEMOBILIZED';
   contractAmount: number;
   paidAmount: number;
   activeManpower: number;
@@ -205,6 +211,15 @@ export interface Contractor {
   contact?: string;
   activeProjectSite?: string;
   createdAt?: string;
+  avatar?: string;
+  activePresence?: 'ONLINE' | 'BREAK' | 'OFFLINE';
+  lastSeen?: string;
+  assignedZone?: string;
+  email?: string;
+  phone?: string;
+  shiftHours?: string;
+  certifications?: string[];
+  dispatchNotes?: { id: string; sender: string; text: string; timestamp: string; isSelf?: boolean }[];
 }
 
 export interface PayrollRecord {
@@ -280,7 +295,7 @@ export interface UserSession {
   id?: string;
   email: string;
   name: string;
-  role: 'Admin' | 'Inspector' | 'Client';
+  role: 'Admin' | 'ProjectManager' | 'Client' | string;
   clientId?: string; // If role is 'Client'
   accountStatus?: 'INVITED' | 'ACTIVE' | 'SUSPENDED';
   token?: string;
@@ -364,14 +379,18 @@ export interface ProjectRisk {
 export interface ChangeOrder {
   id: string;
   orderNumber: string;
+  projectId?: string;
   title: string;
   contractorName: string;
   requestedAmount: number;
-  approvedAmount?: number;
+  approvedAmount?: number | null;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
-  justification: string;
+  justification?: string;
   approvedBy?: string;
+  submittedDate?: string;
+  approvedDate?: string | null;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 // --- AUTOCAD / CAD PARSER INTERFACES ---
@@ -466,6 +485,12 @@ export interface ProjectProfile {
   startDate: string;
   assignedWorkersCount: number;
   assignedContractorIds: string[];
+  assignedProjectManagerId?: string;
+  assignedProjectManagerName?: string;
+  latitude?: number;
+  longitude?: number;
+  weatherSuspended?: boolean;
+  isPrivateAccounting?: boolean;
   tasksCount: number;
   milestonesCount: number;
 }
@@ -488,4 +513,59 @@ export interface ExtendedPayrollItem {
   paymentMethod: string;
 }
 
+export interface WorkforceReallocationRecommendation {
+  id: string;
+  workerId: string;
+  workerName: string;
+  roleTitle: string;
+  workforceCategory: 'PROFESSIONAL' | 'SKILLED' | 'GENERAL_LABOR';
+  originProjectId: string;
+  originProjectName: string;
+  originProgress: number;
+  targetProjectId: string;
+  targetProjectName: string;
+  targetStatus: string;
+  targetProgress: number;
+  rationale: string;
+  priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  applied: boolean;
+}
 
+export interface FeatureFlags {
+  showStatutoryAndPayroll: boolean;
+}
+
+export interface ProjectRFI {
+  id: string;
+  rfiNumber: string;
+  projectId?: string;
+  projectName: string;
+  subject: string;
+  question: string;
+  suggestedSolution?: string;
+  answer?: string;
+  status: 'OPEN' | 'UNDER_REVIEW' | 'ANSWERED' | 'CLOSED';
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
+  assignedTo?: string;
+  submittedBy: string;
+  drawingRef?: string;
+  dueDate?: string;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface FitoutQuotationItem {
+  id: string;
+  clientName: string;
+  clientEmail: string;
+  clientPhone?: string;
+  projectScope: string;
+  estimatedCost: number;
+  estimatedWeeks: number;
+  estimatorArea: number;
+  spaceType?: string;
+  finishTier?: string;
+  projectNotes?: string;
+  status: 'NEW_INQUIRY' | 'CONTACTED' | 'PROPOSAL_SENT' | 'CONVERTED';
+  createdAt?: string;
+}

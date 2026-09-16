@@ -22,7 +22,7 @@ const adapter = new PrismaPg(pool);
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  console.log('Clearing all sample data from database...');
+  console.log('Clearing all data from database...');
   
   // Clean up in reverse relation dependency order
   await prisma.processAuditLog.deleteMany({});
@@ -44,9 +44,8 @@ async function main() {
   await prisma.changeOrder.deleteMany({});
   await prisma.user.deleteMany({});
 
+  // ─── Admin Account ─────────────────────────────────────────────────────────
   console.log('Seeding admin account...');
-
-  // Primary Admin Account
   await prisma.user.create({
     data: {
       email: 'davematthewreglos@gmail.com',
@@ -57,8 +56,25 @@ async function main() {
       contact: '',
     },
   });
+  console.log('  ✅ Admin → davematthewreglos@gmail.com / admin123');
 
-  console.log('Seeding initial system initialization audit record...');
+  // ─── Project Manager Account ───────────────────────────────────────────────
+  console.log('Seeding project manager account...');
+  await prisma.user.create({
+    data: {
+      id: 'USER-PM-001',
+      email: 'pm@ctvill.com',
+      name: 'Project Manager',
+      role: Role.PROJECT_MANAGER,
+      accountStatus: AccountStatus.ACTIVE,
+      passwordHash: hashPassword('pm123'),
+      contact: '',
+    },
+  });
+  console.log('  ✅ Project Manager → pm@ctvill.com / pm123');
+
+  // ─── Audit Log ─────────────────────────────────────────────────────────────
+  console.log('Logging system initialization audit record...');
   await prisma.processAuditLog.create({
     data: {
       entityType: 'PARCEL',
@@ -70,7 +86,9 @@ async function main() {
     }
   });
 
-  console.log('100% Clean Slate Initialized with 0 sample records! 🚀');
+  console.log('\n🚀 System initialized! Staff accounts ready:');
+  console.log('   Admin         → davematthewreglos@gmail.com  /  admin123');
+  console.log('   Project Manager → pm@ctvill.com             /  pm123');
 }
 
 main()

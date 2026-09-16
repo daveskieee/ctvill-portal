@@ -712,18 +712,6 @@ export default function DocumentManager({
 
               <div className="flex items-center gap-2">
                 {/* Cross-module jump shortcuts */}
-                {isCadDocument(previewDoc) && (
-                  <button
-                    onClick={() => {
-                      setPreviewDoc(null);
-                      if (onNavigateTab) onNavigateTab('gis-scanner');
-                    }}
-                    className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-amber-500/20 cursor-pointer"
-                  >
-                    <MapPin className="w-3.5 h-3.5" />
-                    <span>Open in Project Map</span>
-                  </button>
-                )}
 
                 {isExcelScheduleDocument(previewDoc) && (
                   <button

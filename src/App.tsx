@@ -9,7 +9,7 @@ import {
   CompanyBudget, UserSession, PunchListDefect, CivilWorksMilestone, ProcessAuditLog, DailyManpowerAudit,
   LaborAllocation, AIManpowerRecommendation, ProjectTask, DailySiteLog, ProjectDocument, ProjectRisk,
   ChangeOrder, CADParsedLot, TaskStatus, GovernmentPermit, ScheduleEvent,
-  ProjectProfile, ExtendedPayrollItem
+  ProjectProfile, ExtendedPayrollItem, ProjectRFI, FitoutQuotationItem
 } from './types';
 import LandingPage from './components/LandingPage';
 import LoginPortal from './components/LoginPortal';
@@ -40,6 +40,8 @@ export default function App() {
   const [documents, setDocuments] = useState<ProjectDocument[]>([]);
   const [risks, setRisks] = useState<ProjectRisk[]>([]);
   const [changeOrders, setChangeOrders] = useState<ChangeOrder[]>([]);
+  const [rfis, setRfis] = useState<ProjectRFI[]>([]);
+  const [quotations, setQuotations] = useState<FitoutQuotationItem[]>([]);
   const [permits, setPermits] = useState<GovernmentPermit[]>([]);
   const [scheduleEvents, setScheduleEvents] = useState<ScheduleEvent[]>([]);
   const [projects, setProjects] = useState<ProjectProfile[]>([]);
@@ -220,6 +222,27 @@ export default function App() {
     } catch { /* silent */ }
   }, []);
 
+  const fetchChangeOrders = useCallback(async () => {
+    try {
+      const res = await fetch('/api/change-orders');
+      if (res.ok) setChangeOrders(await res.json());
+    } catch { /* silent */ }
+  }, []);
+
+  const fetchRfis = useCallback(async () => {
+    try {
+      const res = await fetch('/api/rfis');
+      if (res.ok) setRfis(await res.json());
+    } catch { /* silent */ }
+  }, []);
+
+  const fetchQuotations = useCallback(async () => {
+    try {
+      const res = await fetch('/api/quotations');
+      if (res.ok) setQuotations(await res.json());
+    } catch { /* silent */ }
+  }, []);
+
   // --- PERSISTENCE STATE SYNCHRONIZER (FETCH FROM DB) ---
   // Used for initial page load only. After that, SSE + granular fetches handle updates.
   const reloadAllData = async () => {
@@ -245,6 +268,8 @@ export default function App() {
       setDocuments(data.documents || []);
       setRisks(data.risks || []);
       setChangeOrders(data.changeOrders || []);
+      setRfis(data.rfis || []);
+      setQuotations(data.quotations || []);
       setPermits(data.permits || []);
       setScheduleEvents(data.scheduleEvents || []);
       setProjects(data.projects || []);
@@ -295,14 +320,16 @@ export default function App() {
           case 'schedule':   fetchSchedule(); break;
           case 'projects':   fetchProjects(); break;
           case 'extendedPayroll': fetchExtendedPayroll(); break;
+          case 'changeOrders': fetchChangeOrders(); break;
+          case 'rfis':       fetchRfis(); break;
+          case 'quotations': fetchQuotations(); break;
+          case 'aiRecommendations': reloadAllData(); break;
+          case 'manpowerAudits': reloadAllData(); break;
           case 'risks':
             // Risks not on a granular endpoint — skip
             break;
           case 'qaLogs':
             // QA logs not on a granular endpoint — skip
-            break;
-          case 'manpowerAudits':
-            // Manpower audits not on a granular endpoint — skip
             break;
           default: break;
         }
@@ -316,7 +343,7 @@ export default function App() {
       if (sseReconnectTimer.current) clearTimeout(sseReconnectTimer.current);
       sseReconnectTimer.current = setTimeout(connectSSE, 3000);
     };
-  }, [fetchClients, fetchSlots, fetchPunchLists, fetchCivilMilestones, fetchAuditLogs, fetchPayroll, fetchTasks, fetchContractors, fetchSiteLogs, fetchDocuments, fetchPermits, fetchSchedule, fetchProjects, fetchExtendedPayroll]);
+  }, [fetchClients, fetchSlots, fetchPunchLists, fetchCivilMilestones, fetchAuditLogs, fetchPayroll, fetchTasks, fetchContractors, fetchSiteLogs, fetchDocuments, fetchPermits, fetchSchedule, fetchProjects, fetchExtendedPayroll, fetchChangeOrders, fetchRfis, fetchQuotations]);
 
   useEffect(() => {
     connectSSE();
@@ -752,24 +779,26 @@ export default function App() {
     }
   };
 
-  const handleDeleteContractor = async (contractorId: string) => {
+  const handleDeleteContractor = useCallback(async (contractorId: string) => {
+    // Optimistic: remove immediately
     setContractors(prev => prev.filter(c => c.id !== contractorId));
     try {
       const res = await fetch(`/api/contractors/${contractorId}`, {
         method: 'DELETE'
       });
       if (!res.ok) {
+        // Rollback: re-fetch real DB state
         fetchContractors();
       }
+      // On success, SSE broadcast triggers fetchContractors() automatically
     } catch (err) {
       fetchContractors();
       console.error('Error deleting contractor/worker:', err);
     }
-  };
+  }, [fetchContractors]);
 
-  const handleUpdateContractors = async (updated: Contractor[]) => {
-    // Optimistic
-    const prevContractors = contractors;
+  const handleUpdateContractors = useCallback(async (updated: Contractor[]) => {
+    // Optimistic: apply all changes immediately
     setContractors(updated);
     try {
       const res = await fetch('/api/contractors/update-progress', {
@@ -778,13 +807,34 @@ export default function App() {
         body: JSON.stringify({ contractors: updated })
       });
       if (!res.ok) {
-        setContractors(prevContractors);
+        fetchContractors();
       }
     } catch (err) {
-      setContractors(prevContractors);
+      fetchContractors();
       console.error('Error syncing contractors:', err);
     }
-  };
+  }, [fetchContractors]);
+
+  const handleUpdateContractor = useCallback(async (contractor: Contractor) => {
+    // Optimistic: apply status/field change immediately
+    setContractors(prev => prev.map(c => c.id === contractor.id ? contractor : c));
+    try {
+      const res = await fetch(`/api/contractors/${contractor.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(contractor)
+      });
+      if (!res.ok) {
+        // Rollback: fetch real DB state on failure
+        fetchContractors();
+      }
+      // On success, SSE broadcast triggers fetchContractors() automatically
+    } catch (err) {
+      fetchContractors();
+      console.error('Error updating worker status:', err);
+    }
+  }, [fetchContractors]);
+
 
   // 12. Weekly Progress QA Log
   const handleAddQALog = async (log: Omit<QALog, 'id' | 'date'>) => {
@@ -847,7 +897,7 @@ export default function App() {
           discrepancy: Number(auditData.claimedHeadcount || 0) - Number(auditData.verifiedHeadcount || 0),
           assignedSectorOrLot: auditData.assignedSectorOrLot,
           supervisorName: auditData.supervisorName || 'Engr. Ricardo Gomez',
-          gpsCoordinates: auditData.gpsCoordinates || '14.2612° N, 121.5124° E (Cavinti Highland Site)',
+          gpsCoordinates: auditData.gpsCoordinates || '14.2789° N, 121.1245° E (NexBridge Commercial Site)',
           verificationStatus: (Number(auditData.claimedHeadcount || 0) - Number(auditData.verifiedHeadcount || 0)) === 0 ? 'VERIFIED_MATCH' : 'DISCREPANCY_FLAGGED',
           photoEvidenceVerified: true,
           remarks: auditData.remarks || '',
@@ -1004,6 +1054,34 @@ export default function App() {
     } catch (e) {
       if (prevTask) setTasks(prev => prev.map(t => t.id === taskId ? prevTask : t));
       console.error('Failed to update task:', e);
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    // Optimistic: remove immediately
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    try {
+      const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        fetchTasks();
+      }
+    } catch (e) {
+      fetchTasks();
+      console.error('Failed to delete task:', e);
+    }
+  };
+
+  const handleClearAllTasks = async () => {
+    const prev = tasks;
+    setTasks([]);
+    try {
+      const res = await fetch('/api/tasks-clear-all', { method: 'DELETE' });
+      if (!res.ok) {
+        setTasks(prev);
+      }
+    } catch (e) {
+      setTasks(prev);
+      console.error('Failed to clear all tasks:', e);
     }
   };
 
@@ -1294,6 +1372,123 @@ export default function App() {
     }
   };
 
+  const handleSubmitChangeOrder = async (order: Partial<ChangeOrder>) => {
+    try {
+      const res = await fetch('/api/change-orders', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(order)
+      });
+      if (res.ok) {
+        fetchChangeOrders();
+      }
+    } catch (err) {
+      console.error('Failed to submit change order:', err);
+    }
+  };
+
+  const handleUpdateChangeOrderStatus = async (id: string, status: 'APPROVED' | 'REJECTED', approvedAmount?: number) => {
+    try {
+      const res = await fetch(`/api/change-orders/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          status, 
+          approvedAmount,
+          approvedBy: (typeof session === 'object' && session?.name) ? session.name : 'Operations Director'
+        })
+      });
+      if (res.ok) {
+        fetchChangeOrders();
+      }
+    } catch (err) {
+      console.error('Failed to update change order status:', err);
+    }
+  };
+
+  const handleSubmitRfi = async (rfi: Partial<ProjectRFI>) => {
+    try {
+      const res = await fetch('/api/rfis', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rfi)
+      });
+      if (res.ok) {
+        fetchRfis();
+      }
+    } catch (err) {
+      console.error('Failed to submit RFI:', err);
+    }
+  };
+
+  const handleAnswerRfi = async (id: string, answer: string, status: 'OPEN' | 'UNDER_REVIEW' | 'ANSWERED' | 'CLOSED') => {
+    try {
+      const res = await fetch(`/api/rfis/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer, status })
+      });
+      if (res.ok) {
+        fetchRfis();
+      }
+    } catch (err) {
+      console.error('Failed to answer RFI:', err);
+    }
+  };
+
+  const handleUpdateQuotationStatus = async (id: string, status: any, notes?: string) => {
+    try {
+      const res = await fetch(`/api/quotations/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, projectNotes: notes })
+      });
+      if (res.ok) {
+        fetchQuotations();
+      }
+    } catch (err) {
+      console.error('Failed to update quotation status:', err);
+    }
+  };
+
+  const handleConvertQuotationToProject = async (quotation: FitoutQuotationItem) => {
+    try {
+      const res = await fetch(`/api/quotations/${quotation.id}/convert-to-project`, {
+        method: 'POST'
+      });
+      if (res.ok) {
+        fetchQuotations();
+        fetchProjects();
+      }
+    } catch (err) {
+      console.error('Failed to convert quotation to project:', err);
+    }
+  };
+
+  const handleTriggerAiLaborScan = async () => {
+    try {
+      await fetch('/api/ai-recommendations/scan', { method: 'POST' });
+      reloadAllData();
+    } catch (err) {
+      console.error('Failed to trigger live AI labor scan:', err);
+    }
+  };
+
+  const handleLogManpowerAudit = async (auditData: any) => {
+    try {
+      const res = await fetch('/api/manpower-audits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(auditData)
+      });
+      if (res.ok) {
+        reloadAllData();
+      }
+    } catch (err) {
+      console.error('Failed to log daily manpower audit:', err);
+    }
+  };
+
   // --- RENDERING ROUTER ---
 
   const renderActiveWorkspace = () => {
@@ -1333,6 +1528,8 @@ export default function App() {
           documents={documents}
           risks={risks}
           changeOrders={changeOrders}
+          rfis={rfis}
+          quotations={quotations}
           permits={permits}
           scheduleEvents={scheduleEvents}
           projects={projects}
@@ -1351,6 +1548,7 @@ export default function App() {
           onUpdateCivilMilestone={handleUpdateCivilMilestone}
           onRegisterContractor={handleRegisterContractor}
           onDeleteContractor={handleDeleteContractor}
+          onUpdateContractor={handleUpdateContractor}
           onUpdateContractors={handleUpdateContractors}
           onAddQALog={handleAddQALog}
           onAddPayroll={handleAddPayroll}
@@ -1359,6 +1557,8 @@ export default function App() {
           onApplyAIRecommendation={handleApplyAIRecommendation}
           onAddTask={handleAddTask}
           onUpdateTaskStatus={handleUpdateTaskStatus}
+          onDeleteTask={handleDeleteTask}
+          onClearAllTasks={handleClearAllTasks}
           onAddSiteLog={handleAddSiteLog}
           onAddDocument={handleAddDocument}
           onUpdateDocument={handleUpdateDocument}
@@ -1384,6 +1584,14 @@ export default function App() {
           onDeleteExtendedPayroll={handleDeleteExtendedPayroll}
           onRecordPayment={handleRecordPayment}
           onDisbursePayroll={handleDisbursePayroll}
+          onSubmitChangeOrder={handleSubmitChangeOrder}
+          onUpdateChangeOrderStatus={handleUpdateChangeOrderStatus}
+          onSubmitRfi={handleSubmitRfi}
+          onAnswerRfi={handleAnswerRfi}
+          onUpdateQuotationStatus={handleUpdateQuotationStatus}
+          onConvertQuotationToProject={handleConvertQuotationToProject}
+          onTriggerAiLaborScan={handleTriggerAiLaborScan}
+          onLogManpowerAudit={handleLogManpowerAudit}
           onLogout={handleInitiateLogout}
           onUpdateSession={handleUpdateSession}
         />

@@ -10,6 +10,7 @@ enum Role {
   ADMIN
   INSPECTOR
   CLIENT
+  PROJECT_MANAGER
 }
 
 enum SlotStatus {
@@ -109,7 +110,8 @@ model Contractor {
   id                String   @id @default(uuid())
   name              String
   contact           String?
-  activeProjectSite String?  @default("NexBridge Software Hub")
+  activeProjectSite String?  @map("active_project_site")
+  assignedZone      String?  @map("assigned_zone")
   company           String?  @default("CTVill Builders Corporation")
   specialty         String?  // e.g., "Land Leveling", "Road Construction", or Trade
   employmentType    String   @default("INTERNAL") // "INTERNAL" (CTVill Staff/Crew) or "OUTSOURCED" (Partner Firm)
@@ -123,11 +125,15 @@ model Contractor {
   activeManpower    Int      @default(1)
   milestoneProgress Float    @default(0.0) // percentage
   rating            Float?   @default(5.0) // scale of 1-5
+  workforceCategory String?  @default("SKILLED")
+  allocationStatus  String?  @default("ASSIGNED")
+  avatar            String?  @map("avatar")
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
   // Relationships
   assignedDefects   PunchListDefect[]
+  tasks             ProjectTask[]
 
   @@map("contractors")
 }
@@ -364,26 +370,82 @@ enum TaskStatus {
   BLOCKED
 }
 
+model CommercialProject {
+  id                         String        @id @default(uuid())
+  name                       String
+  clientName                 String        @map("client_name")
+  description                String?       @db.Text
+  location                   String?
+  budget                     Decimal?      @default(0)
+  fundsCollected             Decimal?      @default(0) @map("funds_collected")
+  progressPercentage         Decimal?      @default(0) @map("progress_percentage")
+  status                     String?       @default("IN_PROGRESS")
+  targetHandoverDate         DateTime?     @map("target_handover_date")
+  startDate                  DateTime?     @map("start_date")
+  assignedWorkersCount       Int?          @default(0) @map("assigned_workers_count")
+  tasksCount                 Int?          @default(0) @map("tasks_count")
+  milestonesCount            Int?          @default(0) @map("milestones_count")
+  isPrivateAccounting        Boolean       @default(false) @map("is_private_accounting")
+  assignedProjectManagerId   String?       @map("assigned_project_manager_id")
+  assignedProjectManagerName String?       @map("assigned_project_manager_name")
+  latitude                   Decimal?
+  longitude                  Decimal?
+  weatherSuspended           Boolean       @default(false) @map("weather_suspended")
+  createdAt                  DateTime?     @default(now()) @map("created_at")
+
+  // Relationships
+  tasks                      ProjectTask[]
+
+  @@map("commercial_projects")
+}
+
 model ProjectTask {
-  id             String       @id @default(uuid())
-  title          String
-  description    String?      @db.Text
-  assigneeName   String?
-  assigneeRole   String?
-  priority       TaskPriority @default(MEDIUM)
-  status         TaskStatus   @default(TODO)
-  dueDate        DateTime?
-  startDate      DateTime?
-  estimatedHours Float?       @default(0)
-  actualHours    Float?       @default(0)
-  category       String?      // "CIVIL_WORKS", "SURVEYING", "PERMITTING", "LEGAL", "SALES", "QA"
-  milestonePhase String?      // e.g., "Phase A", "Phase B"
-  subtasksJson   String?      @db.Text // JSON string: [{id, title, completed}]
-  tags           String?      // comma-separated tags
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id                    String            @id @default(uuid())
+  projectId             String
+  project               CommercialProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  wbsCode               String?
+  text                  String
+  title                 String?
+  description           String?
+  assigneeName          String?
+  assigneeRole          String?
+  priority              TaskPriority?     @default(MEDIUM)
+  status                TaskStatus?       @default(TODO)
+  category              String?
+  milestonePhase        String?
+  subtasksJson          String?
+  tags                  String?
+  dueDate               DateTime?
+  startDate             DateTime
+  endDate               DateTime
+  duration              Int
+  progress              Float             @default(0.0)
+  baselineStart         DateTime?
+  baselineEnd           DateTime?
+  type                  String            @default("task")
+  parentTaskId          String?
+  sortOrder             Int               @default(0)
+  assignedContractorId  String?
+  assignedContractor    Contractor?       @relation(fields: [assignedContractorId], references: [id])
+  targetLinks           TaskLink[]        @relation("TargetTasks")
+  sourceLinks           TaskLink[]        @relation("SourceTasks")
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
 
   @@map("project_tasks")
+}
+
+model TaskLink {
+  id          String      @id @default(uuid())
+  projectId   String
+  sourceId    String
+  sourceTask  ProjectTask @relation("SourceTasks", fields: [sourceId], references: [id], onDelete: Cascade)
+  targetId    String
+  targetTask  ProjectTask @relation("TargetTasks", fields: [targetId], references: [id], onDelete: Cascade)
+  type        String      @default("0")
+  lagDays     Int         @default(0)
+
+  @@map("task_links")
 }
 
 model DailySiteLog {
@@ -457,4 +519,120 @@ model SystemSetting {
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
   @@map("system_settings")
+}
+
+model WeatherCache {
+  siteKey     String   @id @map("site_key")
+  weatherData Json     @map("weather_data")
+  cachedAt    DateTime @default(now()) @map("cached_at")
+
+  @@map("weather_cache")
+}
+
+model ExtendedPayroll {
+  id                String    @id @default(uuid())
+  workerName        String    @map("worker_name")
+  contractorCompany String    @map("contractor_company")
+  projectName       String    @map("project_name")
+  role              String
+  hoursWorked       Decimal?  @default(0) @map("hours_worked")
+  daysWorked        Decimal?  @default(0) @map("days_worked")
+  dailyRate         Decimal?  @default(0) @map("daily_rate")
+  overtimeHours     Decimal?  @default(0) @map("overtime_hours")
+  grossPay          Decimal?  @default(0) @map("gross_pay")
+  deductions        Decimal?  @default(0)
+  netPay            Decimal?  @default(0) @map("net_pay")
+  status            String?   @default("Pending")
+  disbursementDate  DateTime? @map("disbursement_date")
+  paymentMethod     String?   @default("Bank Transfer") @map("payment_method")
+  createdAt         DateTime? @default(now()) @map("created_at")
+
+  @@map("extended_payroll")
+}
+
+model GovernmentPermit {
+  id              String    @id @default(uuid())
+  projectId       String?   @map("project_id")
+  projectName     String    @map("project_name")
+  permitName      String    @map("permit_name")
+  permitType      String    @map("permit_type")
+  issuingAgency   String    @map("issuing_agency")
+  referenceNo     String?   @map("reference_no")
+  status          String?   @default("PENDING")
+  applicationDate DateTime? @map("application_date")
+  approvalDate    DateTime? @map("approval_date")
+  expiryDate      DateTime? @map("expiry_date")
+  notes           String?   @db.Text
+  documentUrl     String?   @map("document_url")
+  createdAt       DateTime? @default(now()) @map("created_at")
+
+  @@map("government_permits")
+}
+
+model ScheduleEvent {
+  id          String    @id @default(uuid())
+  projectId   String?   @map("project_id")
+  projectName String?   @map("project_name")
+  title       String
+  eventType   String?   @default("MEETING") @map("event_type")
+  eventDate   DateTime  @map("event_date")
+  startTime   String?   @map("start_time")
+  endTime     String?   @map("end_time")
+  location    String?
+  attendees   String?
+  notes       String?   @db.Text
+  status      String?   @default("SCHEDULED")
+  createdAt   DateTime? @default(now()) @map("created_at")
+
+  @@map("schedule_events")
+}
+
+model LaborAllocation {
+  id                String    @id @default(uuid())
+  contractorId      String    @map("contractor_id")
+  contractorName    String    @map("contractor_name")
+  sectorName        String    @map("sector_name")
+  targetLots        String    @map("target_lots")
+  assignedHeadcount Int?      @default(0) @map("assigned_headcount")
+  workScope         String    @map("work_scope")
+  status            String?   @default("ACTIVE")
+  notes             String?   @db.Text
+  updatedAt         DateTime? @default(now()) @map("updated_at")
+  createdAt         DateTime? @default(now()) @map("created_at")
+
+  @@map("labor_allocations")
+}
+
+model AIManpowerRecommendation {
+  id                   String    @id @default(uuid())
+  title                String
+  targetLots           String    @map("target_lots")
+  contractorId         String    @map("contractor_id")
+  contractorName       String    @map("contractor_name")
+  currentHeadcount     Int       @map("current_headcount")
+  recommendedHeadcount Int       @map("recommended_headcount")
+  rationale            String    @db.Text
+  priority             String?   @default("MEDIUM")
+  applied              Boolean?  @default(false)
+  createdAt            DateTime? @default(now()) @map("created_at")
+
+  @@map("ai_manpower_recommendations")
+}
+
+model FitoutQuotation {
+  id             String    @id @default(uuid())
+  clientName     String    @map("client_name")
+  clientEmail    String    @map("client_email")
+  clientPhone    String?   @map("client_phone")
+  projectScope   String    @map("project_scope")
+  estimatedCost  Decimal?  @default(0) @map("estimated_cost")
+  estimatedWeeks Decimal?  @default(0) @map("estimated_weeks")
+  estimatorArea  Decimal?  @default(0) @map("estimator_area")
+  spaceType      String?   @map("space_type")
+  finishTier     String?   @map("finish_tier")
+  projectNotes   String?   @db.Text @map("project_notes")
+  status         String?   @default("PENDING")
+  createdAt      DateTime? @default(now()) @map("created_at")
+
+  @@map("fitout_quotations")
 }

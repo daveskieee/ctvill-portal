@@ -88,3 +88,41 @@ export function getDepartmentBadge(dept: CTVillDepartment | string | undefined |
   const found = CTVILL_ORGANIZATION_HIERARCHY.find(d => d.department === dept);
   return found?.badgeColor || 'border-slate-700 text-slate-300 bg-slate-900';
 }
+
+export type StandardWorkforceCategory = 'PROFESSIONAL' | 'SKILLED' | 'GENERAL_LABOR';
+
+export function getWorkforceCategory(roleTitle: string | undefined | null): StandardWorkforceCategory {
+  if (!roleTitle) return 'SKILLED';
+  const lower = roleTitle.toLowerCase();
+
+  // 1. PROFESSIONAL
+  if (
+    lower.includes('architect') ||
+    lower.includes('engineer') ||
+    lower.includes('project manager') ||
+    lower.includes('pm') ||
+    lower.includes('estimator') ||
+    lower.includes('surveyor') ||
+    lower.includes('safety officer') ||
+    lower.includes('ehso') ||
+    lower.includes('director') ||
+    lower.includes('officer') ||
+    lower.includes('specialist')
+  ) {
+    return 'PROFESSIONAL';
+  }
+
+  // 2. GENERAL LABOR
+  if (
+    lower.includes('helper') ||
+    lower.includes('labor') ||
+    lower.includes('maintenance') ||
+    lower.includes('cleaner') ||
+    lower.includes('utility')
+  ) {
+    return 'GENERAL_LABOR';
+  }
+
+  // 3. SKILLED (Default for trades, foremen, operators, carpenters, etc.)
+  return 'SKILLED';
+}

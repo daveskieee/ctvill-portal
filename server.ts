@@ -10,6 +10,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import * as crypto from 'crypto';
 import nodemailer from 'nodemailer';
+import { createGanttRouter } from './server/routes/gantt';
 
 dotenv.config();
 
@@ -46,6 +47,9 @@ app.use((req, res, next) => {
 // Support up to 50MB payloads for base64 encoded photo uploads and document assets
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Mount Enterprise Gantt Scheduling API
+app.use('/api/projects', createGanttRouter(prisma));
 
 // Ensure system_settings table exists in PostgreSQL for account and persistent system state
 pool.query(`
@@ -131,7 +135,21 @@ pool.query(`
     assigned_workers_count INTEGER DEFAULT 12,
     tasks_count INTEGER DEFAULT 15,
     milestones_count INTEGER DEFAULT 5,
+    is_private_accounting BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  );
+  ALTER TABLE commercial_projects ADD COLUMN IF NOT EXISTS is_private_accounting BOOLEAN DEFAULT FALSE;
+  ALTER TABLE commercial_projects ADD COLUMN IF NOT EXISTS assigned_project_manager_id TEXT;
+  ALTER TABLE commercial_projects ADD COLUMN IF NOT EXISTS assigned_project_manager_name TEXT;
+  ALTER TABLE commercial_projects ADD COLUMN IF NOT EXISTS latitude NUMERIC;
+  ALTER TABLE commercial_projects ADD COLUMN IF NOT EXISTS longitude NUMERIC;
+  ALTER TABLE commercial_projects ADD COLUMN IF NOT EXISTS weather_suspended BOOLEAN DEFAULT FALSE;
+  ALTER TABLE contractors ADD COLUMN IF NOT EXISTS "workforceCategory" TEXT DEFAULT 'SKILLED';
+  ALTER TABLE contractors ADD COLUMN IF NOT EXISTS "allocationStatus" TEXT DEFAULT 'ASSIGNED';
+  CREATE TABLE IF NOT EXISTS weather_cache (
+    site_key TEXT PRIMARY KEY,
+    weather_data JSONB NOT NULL,
+    cached_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   );
 `).catch((err: any) => console.error('Error initializing commercial_projects table:', err));
 
@@ -157,7 +175,7 @@ pool.query(`
   );
 `).catch((err: any) => console.error('Error initializing extended_payroll table:', err));
 
-// Ensure labor_allocations and ai_manpower_recommendations tables exist in PostgreSQL
+// Ensure labor_allocations, ai_manpower_recommendations, and project_rfis tables exist in PostgreSQL
 pool.query(`
   CREATE TABLE IF NOT EXISTS labor_allocations (
     id TEXT PRIMARY KEY,
@@ -185,7 +203,84 @@ pool.query(`
     applied BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
   );
-`).catch((err: any) => console.error('Error initializing labor_allocations / ai_manpower_recommendations tables:', err));
+  CREATE TABLE IF NOT EXISTS project_rfis (
+    id TEXT PRIMARY KEY,
+    rfi_number TEXT UNIQUE NOT NULL,
+    project_id TEXT,
+    project_name TEXT NOT NULL,
+    subject TEXT NOT NULL,
+    question TEXT NOT NULL,
+    suggested_solution TEXT,
+    answer TEXT,
+    status TEXT DEFAULT 'OPEN',
+    priority TEXT DEFAULT 'MEDIUM',
+    assigned_to TEXT,
+    submitted_by TEXT NOT NULL,
+    drawing_ref TEXT,
+    due_date DATE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+  );
+`).then(() => {
+  ensureFlagshipData().catch(e => console.error('Flagship seed check failed:', e));
+}).catch((err: any) => console.error('Error initializing manpower/RFI tables:', err));
+
+async function ensureFlagshipData() {
+  // No sample data is seeded — system starts clean for live data entry.
+  // Tables are created by the pool.query blocks above.
+}
+
+// DELETE /api/admin/clear-all-data — Wipe all operational data (projects, contractors, audits, etc.)
+// User accounts (Admin, PM, Clients) are NEVER touched by this endpoint.
+app.delete('/api/admin/clear-all-data', async (req, res) => {
+  try {
+    // Raw SQL tables — delete in safe FK order
+    await pool.query('DELETE FROM ai_manpower_recommendations');
+    await pool.query('DELETE FROM labor_allocations');
+    await pool.query('DELETE FROM fitout_quotations');
+    await pool.query('DELETE FROM project_rfis');
+    await pool.query('DELETE FROM schedule_events');
+    await pool.query('DELETE FROM government_permits');
+    await pool.query('DELETE FROM extended_payroll');
+    await pool.query('DELETE FROM daily_manpower_audits');
+    await pool.query('DELETE FROM commercial_projects');
+    await pool.query('DELETE FROM weather_cache');
+
+    // Prisma-managed tables (order matters for FK constraints)
+    await prisma.changeOrder.deleteMany();
+    await prisma.processAuditLog.deleteMany();
+    await prisma.weeklyProgressLog.deleteMany();
+    await prisma.punchListDefect.deleteMany();
+    await prisma.projectTask.deleteMany();
+    await prisma.dailySiteLog.deleteMany();
+    await prisma.projectDocument.deleteMany();
+    await prisma.projectRisk.deleteMany();
+    await prisma.civilWorksMilestone.deleteMany();
+    await prisma.payrollRecord.deleteMany();
+    await prisma.contractor.deleteMany();
+
+    // Client data (buyer records only — does NOT delete user accounts)
+    await prisma.installmentLedger.deleteMany();
+    await prisma.titlePermitTracker.deleteMany();
+    await prisma.buyerKyc.deleteMany();
+    await prisma.clientPackage.deleteMany();
+
+    // Slots and parcels last
+    await prisma.slot.deleteMany();
+    await prisma.landParcel.deleteMany();
+
+    // NOTE: User accounts (ADMIN, PROJECT_MANAGER, CLIENT) are deliberately NOT deleted here.
+    // To reset user accounts, use the prisma seed: npx prisma db seed
+
+    invalidateAllDataCache();
+    broadcastChange('clients');
+    broadcastChange('contractors');
+    res.json({ success: true, message: 'All operational data cleared. User accounts preserved. System is ready for live data entry.' });
+  } catch (error: any) {
+    console.error('Error clearing all data:', error);
+    res.status(500).json({ error: 'Failed to clear data', detail: error.message });
+  }
+});
 
 
 export async function getSystemSetting(key: string): Promise<any> {
@@ -391,7 +486,8 @@ app.get('/api/all-data', async (req, res) => {
       dbProjectsRes,
       dbExtPayrollRes,
       dbAllocRes,
-      dbRecRes
+      dbRecRes,
+      dbContractorPresencesRes
     ] = await Promise.all([
       // A. Parcels
       prisma.landParcel.findMany({
@@ -464,7 +560,9 @@ app.get('/api/all-data', async (req, res) => {
       // Labor Allocations
       pool.query('SELECT * FROM labor_allocations ORDER BY sector_name ASC').catch(() => ({ rows: [] })),
       // AI Recommendations
-      pool.query('SELECT * FROM ai_manpower_recommendations ORDER BY created_at DESC').catch(() => ({ rows: [] }))
+      pool.query('SELECT * FROM ai_manpower_recommendations ORDER BY created_at DESC').catch(() => ({ rows: [] })),
+      // Contractor Presences
+      pool.query('SELECT id, active_presence, status FROM contractors').catch(() => ({ rows: [] }))
     ]);
 
     // Map Parcels
@@ -476,6 +574,17 @@ app.get('/api/all-data', async (req, res) => {
       acquisitionCost: Number(p.purchaseCost),
       subdividedSlotsCount: p.totalSlots,
       acquisitionDate: p.acquisitionDate.toISOString().split('T')[0],
+      civilWorksMilestones: (p.civilWorksMilestones || []).map(m => ({
+        id: m.id,
+        parcelId: m.parcelId,
+        phaseName: m.phaseName,
+        targetPercentage: m.targetPercentage,
+        currentPercentage: m.currentPercentage,
+        status: m.status,
+        inspectorSignOff: m.inspectorSignOff,
+        signOffDate: m.signOffDate ? m.signOffDate.toISOString().split('T')[0] : null,
+        remarks: m.remarks || '',
+      })),
     }));
 
     // Map Slots
@@ -497,23 +606,36 @@ app.get('/api/all-data', async (req, res) => {
     const clients = await Promise.all(dbClients.map(c => mapUserToClient(c)));
 
     // Map Contractors & Workforce
-    const contractors = dbContractors.map(c => ({
-      id: c.id,
-      name: c.name,
-      company: c.company || '',
-      specialty: c.specialty || 'General Contractor',
-      contractAmount: Number(c.contractAmount || 0),
-      paidAmount: Number(c.paidAmount || 0),
-      activeManpower: c.activeManpower,
-      milestoneProgress: c.milestoneProgress,
-      rating: c.rating || 0,
-      employmentType: (c as any).employmentType || 'INTERNAL',
-      department: (c as any).department || null,
-      roleTitle: (c as any).roleTitle || null,
-      dailyRate: (c as any).dailyRate !== null && (c as any).dailyRate !== undefined ? Number((c as any).dailyRate) : null,
-      monthlySalary: (c as any).monthlySalary !== null && (c as any).monthlySalary !== undefined ? Number((c as any).monthlySalary) : null,
-      status: (c as any).status || 'ACTIVE',
-    }));
+    const presenceMapAll = new Map(((dbContractorPresencesRes as any)?.rows || []).map((r: any) => [r.id, r.active_presence || r.status]));
+    const contractors = dbContractors.map(c => {
+      const rawP = presenceMapAll.get(c.id) || (c as any).status || 'ACTIVE';
+      const activePresence = (rawP === 'BREAK' || rawP === 'ON_BREAK') ? 'BREAK'
+        : (rawP === 'OFFLINE' || rawP === 'INACTIVE' || rawP === 'ON_LEAVE') ? 'OFFLINE'
+        : 'ONLINE';
+
+      return {
+        id: c.id,
+        name: c.name,
+        company: c.company || '',
+        specialty: c.specialty || 'General Contractor',
+        contact: c.contact || null,
+        activeProjectSite: c.activeProjectSite || null,
+        assignedZone: c.assignedZone || null,
+        avatar: (c as any).avatar || null,
+        contractAmount: Number(c.contractAmount || 0),
+        paidAmount: Number(c.paidAmount || 0),
+        activeManpower: c.activeManpower,
+        milestoneProgress: c.milestoneProgress,
+        rating: c.rating || 0,
+        employmentType: (c as any).employmentType || 'INTERNAL',
+        department: (c as any).department || null,
+        roleTitle: (c as any).roleTitle || null,
+        dailyRate: (c as any).dailyRate !== null && (c as any).dailyRate !== undefined ? Number((c as any).dailyRate) : null,
+        monthlySalary: (c as any).monthlySalary !== null && (c as any).monthlySalary !== undefined ? Number((c as any).monthlySalary) : null,
+        status: (c as any).status || 'ACTIVE',
+        activePresence,
+      };
+    });
 
     // Map QA Logs
     const qaLogs = dbQaLogs.map(l => ({
@@ -626,21 +748,21 @@ app.get('/api/all-data', async (req, res) => {
     // Map Project Tasks
     const tasks = (dbTasks || []).map((t: any) => ({
       id: t.id,
-      title: t.title,
-      description: t.description || '',
-      assigneeName: t.assigneeName || '',
-      assigneeRole: t.assigneeRole || '',
-      priority: t.priority,
-      status: t.status,
-      dueDate: t.dueDate ? t.dueDate.toISOString().split('T')[0] : '',
+      title: t.title || t.text || 'Construction Task',
+      description: t.description || t.text || '',
+      assigneeName: t.assigneeName || t.assignedContractor?.name || '',
+      assigneeRole: t.assigneeRole || t.assignedContractor?.roleTitle || '',
+      priority: t.priority || 'MEDIUM',
+      status: t.status || ((t.progress || 0) >= 1 ? 'COMPLETED' : (t.progress || 0) > 0 ? 'IN_PROGRESS' : 'TODO'),
+      dueDate: t.dueDate ? t.dueDate.toISOString().split('T')[0] : (t.endDate ? t.endDate.toISOString().split('T')[0] : ''),
       startDate: t.startDate ? t.startDate.toISOString().split('T')[0] : '',
-      estimatedHours: t.estimatedHours || 0,
-      actualHours: t.actualHours || 0,
-      category: t.category || '',
-      milestonePhase: t.milestonePhase || '',
+      estimatedHours: (t.duration || 1) * 8,
+      actualHours: Math.round((t.progress || 0) * 100),
+      category: t.category || (t.type === 'milestone' ? 'QA' : 'CIVIL_WORKS'),
+      milestonePhase: t.milestonePhase || t.wbsCode || '',
       subtasks: t.subtasksJson ? JSON.parse(t.subtasksJson) : [],
-      tags: t.tags ? t.tags.split(',') : [],
-      createdAt: t.createdAt.toISOString(),
+      tags: t.tags ? (typeof t.tags === 'string' ? t.tags.split(',') : t.tags) : [t.wbsCode || '', t.type || 'task'],
+      createdAt: t.createdAt ? t.createdAt.toISOString() : new Date().toISOString(),
     }));
 
     // Map Site Logs
@@ -804,6 +926,45 @@ app.get('/api/all-data', async (req, res) => {
       applied: Boolean(r.applied)
     }));
 
+    // Map RFIs
+    const dbRfisRes = await pool.query('SELECT * FROM project_rfis ORDER BY created_at DESC').catch(() => ({ rows: [] }));
+    const rfis = (dbRfisRes.rows || []).map((r: any) => ({
+      id: r.id,
+      rfiNumber: r.rfi_number,
+      projectId: r.project_id,
+      projectName: r.project_name,
+      subject: r.subject,
+      question: r.question,
+      suggestedSolution: r.suggested_solution,
+      answer: r.answer,
+      status: r.status,
+      priority: r.priority,
+      assignedTo: r.assigned_to,
+      submittedBy: r.submitted_by,
+      drawingRef: r.drawing_ref,
+      dueDate: r.due_date ? r.due_date.toISOString().split('T')[0] : undefined,
+      createdAt: r.created_at ? r.created_at.toISOString() : undefined,
+      updatedAt: r.updated_at ? r.updated_at.toISOString() : undefined,
+    }));
+
+    // Map Fitout Quotations
+    const dbQuotationsRes = await pool.query('SELECT * FROM fitout_quotations ORDER BY created_at DESC').catch(() => ({ rows: [] }));
+    const quotations = (dbQuotationsRes.rows || []).map((q: any) => ({
+      id: q.id,
+      clientName: q.client_name,
+      clientEmail: q.client_email,
+      clientPhone: q.client_phone,
+      projectScope: q.project_scope,
+      estimatedCost: Number(q.estimated_cost || 0),
+      estimatedWeeks: Number(q.estimated_weeks || 0),
+      estimatorArea: Number(q.estimator_area || 0),
+      spaceType: q.space_type,
+      finishTier: q.finish_tier,
+      projectNotes: q.project_notes,
+      status: q.status || 'NEW_INQUIRY',
+      createdAt: q.created_at ? q.created_at.toISOString() : undefined,
+    }));
+
     const responsePayload = {
       parcels,
       slots,
@@ -823,6 +984,8 @@ app.get('/api/all-data', async (req, res) => {
       documents,
       risks,
       changeOrders,
+      rfis,
+      quotations,
       permits,
       scheduleEvents,
       projects,
@@ -1042,23 +1205,26 @@ app.get('/api/payroll-records', async (req, res) => {
 // GET /api/tasks-list — Project tasks only
 app.get('/api/tasks-list', async (req, res) => {
   try {
-    const dbTasks = await prisma.projectTask.findMany({ orderBy: { createdAt: 'desc' } });
+    const dbTasks = await prisma.projectTask.findMany({ 
+      include: { assignedContractor: true },
+      orderBy: { createdAt: 'desc' } 
+    });
     const tasks = dbTasks.map(t => ({
       id: t.id,
-      title: t.title,
-      description: t.description || '',
-      assigneeName: t.assigneeName || '',
-      assigneeRole: t.assigneeRole || '',
-      priority: t.priority,
-      status: t.status,
-      dueDate: t.dueDate ? t.dueDate.toISOString().split('T')[0] : '',
+      title: t.title || t.text,
+      description: t.description || t.text,
+      assigneeName: t.assigneeName || t.assignedContractor?.name || '',
+      assigneeRole: t.assigneeRole || t.assignedContractor?.roleTitle || '',
+      priority: t.priority || 'MEDIUM',
+      status: t.status || ((t.progress || 0) >= 1 ? 'COMPLETED' : (t.progress || 0) > 0 ? 'IN_PROGRESS' : 'TODO'),
+      dueDate: t.dueDate ? t.dueDate.toISOString().split('T')[0] : (t.endDate ? t.endDate.toISOString().split('T')[0] : ''),
       startDate: t.startDate ? t.startDate.toISOString().split('T')[0] : '',
-      estimatedHours: t.estimatedHours || 0,
-      actualHours: t.actualHours || 0,
-      category: t.category || '',
-      milestonePhase: t.milestonePhase || '',
+      estimatedHours: (t.duration || 1) * 8,
+      actualHours: Math.round((t.progress || 0) * 100),
+      category: t.category || (t.type === 'milestone' ? 'QA' : 'CIVIL_WORKS'),
+      milestonePhase: t.milestonePhase || t.wbsCode || '',
       subtasks: t.subtasksJson ? JSON.parse(t.subtasksJson) : [],
-      tags: t.tags ? t.tags.split(',') : [],
+      tags: t.tags ? (typeof t.tags === 'string' ? t.tags.split(',') : t.tags) : [t.wbsCode || '', t.type || 'task'],
       createdAt: t.createdAt.toISOString(),
     }));
     res.json(tasks);
@@ -1074,23 +1240,40 @@ app.get('/api/contractors-list', async (req, res) => {
     const dbContractors = await prisma.contractor.findMany({
       orderBy: { name: 'asc' }
     });
-    const contractors = dbContractors.map(c => ({
-      id: c.id,
-      name: c.name,
-      company: c.company || '',
-      specialty: c.specialty || 'General Contractor',
-      contractAmount: Number(c.contractAmount || 0),
-      paidAmount: Number(c.paidAmount || 0),
-      activeManpower: c.activeManpower,
-      milestoneProgress: c.milestoneProgress,
-      rating: c.rating || 0,
-      employmentType: (c as any).employmentType || 'INTERNAL',
-      department: (c as any).department || null,
-      roleTitle: (c as any).roleTitle || null,
-      dailyRate: (c as any).dailyRate !== null && (c as any).dailyRate !== undefined ? Number((c as any).dailyRate) : null,
-      monthlySalary: (c as any).monthlySalary !== null && (c as any).monthlySalary !== undefined ? Number((c as any).monthlySalary) : null,
-      status: (c as any).status || 'ACTIVE',
-    }));
+    
+    // Fetch active_presence from database
+    const presencesRes = await pool.query('SELECT id, active_presence, status FROM contractors');
+    const presenceMap = new Map((presencesRes.rows || []).map(r => [r.id, r.active_presence || r.status]));
+
+    const contractors = dbContractors.map(c => {
+      const rawP = presenceMap.get(c.id) || (c as any).status || 'ACTIVE';
+      const activePresence = (rawP === 'BREAK' || rawP === 'ON_BREAK') ? 'BREAK'
+        : (rawP === 'OFFLINE' || rawP === 'INACTIVE' || rawP === 'ON_LEAVE') ? 'OFFLINE'
+        : 'ONLINE';
+
+      return {
+        id: c.id,
+        name: c.name,
+        company: c.company || '',
+        specialty: c.specialty || 'General Contractor',
+        contact: c.contact || null,
+        activeProjectSite: c.activeProjectSite || null,
+        assignedZone: c.assignedZone || null,
+        avatar: (c as any).avatar || null,
+        contractAmount: Number(c.contractAmount || 0),
+        paidAmount: Number(c.paidAmount || 0),
+        activeManpower: c.activeManpower,
+        milestoneProgress: c.milestoneProgress,
+        rating: c.rating || 0,
+        employmentType: (c as any).employmentType || 'INTERNAL',
+        department: (c as any).department || null,
+        roleTitle: (c as any).roleTitle || null,
+        dailyRate: (c as any).dailyRate !== null && (c as any).dailyRate !== undefined ? Number((c as any).dailyRate) : null,
+        monthlySalary: (c as any).monthlySalary !== null && (c as any).monthlySalary !== undefined ? Number((c as any).monthlySalary) : null,
+        status: (c as any).status || 'ACTIVE',
+        activePresence,
+      };
+    });
     res.json(contractors);
   } catch (error) {
     console.error('Error fetching contractors:', error);
@@ -1117,6 +1300,11 @@ app.post('/api/contractors', async (req, res) => {
       dailyRate,
       monthlySalary,
       status,
+      activePresence,
+      avatar,
+      contact,
+      activeProjectSite,
+      assignedZone,
     } = req.body;
 
     if (!name || !name.trim()) {
@@ -1141,8 +1329,16 @@ app.post('/api/contractors', async (req, res) => {
         dailyRate: dailyRate !== undefined && dailyRate !== null && dailyRate !== '' ? Number(dailyRate) : null,
         monthlySalary: monthlySalary !== undefined && monthlySalary !== null && monthlySalary !== '' ? Number(monthlySalary) : null,
         status: status || 'ACTIVE',
+        avatar: avatar || null,
+        contact: contact ? contact.trim() : null,
+        activeProjectSite: activeProjectSite || null,
+        assignedZone: assignedZone || null,
       },
     });
+
+    if (activePresence) {
+      await pool.query('UPDATE contractors SET active_presence = $1 WHERE id = $2', [activePresence, contractorId]);
+    }
 
     broadcastChange('contractors');
     res.status(201).json({
@@ -1151,6 +1347,8 @@ app.post('/api/contractors', async (req, res) => {
       paidAmount: Number(newContractor.paidAmount || 0),
       dailyRate: newContractor.dailyRate ? Number(newContractor.dailyRate) : null,
       monthlySalary: newContractor.monthlySalary ? Number(newContractor.monthlySalary) : null,
+      activePresence: activePresence || 'ONLINE',
+      avatar: newContractor.avatar || null,
     });
   } catch (error) {
     console.error('Error creating contractor/worker:', error);
@@ -1165,6 +1363,7 @@ app.post('/api/contractors/update-progress', async (req, res) => {
     if (Array.isArray(contractors)) {
       for (const c of contractors) {
         if (c.id) {
+          const statusVal = c.status || (c.activePresence === 'BREAK' ? 'BREAK' : c.activePresence === 'OFFLINE' ? 'OFFLINE' : 'ACTIVE');
           await prisma.contractor.update({
             where: { id: c.id },
             data: {
@@ -1173,9 +1372,12 @@ app.post('/api/contractors/update-progress', async (req, res) => {
               rating: c.rating !== undefined ? Number(c.rating) : undefined,
               contractAmount: c.contractAmount !== undefined ? Number(c.contractAmount) : undefined,
               paidAmount: c.paidAmount !== undefined ? Number(c.paidAmount) : undefined,
-              status: c.status || undefined,
+              status: statusVal,
             }
           });
+          if (c.activePresence) {
+            await pool.query('UPDATE contractors SET active_presence = $1, status = $2 WHERE id = $3', [c.activePresence, statusVal, c.id]);
+          }
         }
       }
       broadcastChange('contractors');
@@ -1192,12 +1394,15 @@ app.put('/api/contractors/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const data = req.body;
+    const statusVal = data.status || (data.activePresence === 'BREAK' ? 'BREAK' : data.activePresence === 'OFFLINE' ? 'OFFLINE' : 'ACTIVE');
     const updated = await prisma.contractor.update({
       where: { id },
       data: {
         name: data.name !== undefined ? data.name.trim() : undefined,
         company: data.company !== undefined ? data.company.trim() : undefined,
         specialty: data.specialty || undefined,
+        activeProjectSite: data.activeProjectSite !== undefined ? data.activeProjectSite : undefined,
+        assignedZone: data.assignedZone !== undefined ? data.assignedZone : undefined,
         activeManpower: data.activeManpower !== undefined ? Number(data.activeManpower) : undefined,
         milestoneProgress: data.milestoneProgress !== undefined ? Number(data.milestoneProgress) : undefined,
         contractAmount: data.contractAmount !== undefined ? Number(data.contractAmount) : undefined,
@@ -1208,9 +1413,16 @@ app.put('/api/contractors/:id', async (req, res) => {
         roleTitle: data.roleTitle !== undefined ? data.roleTitle : undefined,
         dailyRate: data.dailyRate !== undefined && data.dailyRate !== null && data.dailyRate !== '' ? Number(data.dailyRate) : undefined,
         monthlySalary: data.monthlySalary !== undefined && data.monthlySalary !== null && data.monthlySalary !== '' ? Number(data.monthlySalary) : undefined,
-        status: data.status || undefined,
+        status: statusVal,
+        avatar: data.avatar !== undefined ? data.avatar : undefined,
+        contact: data.contact !== undefined ? data.contact : undefined,
       }
     });
+
+    if (data.activePresence) {
+      await pool.query('UPDATE contractors SET active_presence = $1, status = $2 WHERE id = $3', [data.activePresence, statusVal, id]);
+    }
+
     broadcastChange('contractors');
     res.json(updated);
   } catch (error) {
@@ -1223,6 +1435,18 @@ app.put('/api/contractors/:id', async (req, res) => {
 app.delete('/api/contractors/:id', async (req, res) => {
   try {
     const { id } = req.params;
+    // 1. Unlink foreign key references before deleting to prevent constraint violations
+    await prisma.punchListDefect.updateMany({
+      where: { contractorId: id },
+      data: { contractorId: null }
+    });
+    await prisma.projectTask.updateMany({
+      where: { assignedContractorId: id },
+      data: { assignedContractorId: null }
+    });
+    await pool.query('DELETE FROM labor_allocations WHERE contractor_id = $1', [id]);
+
+    // 2. Safely delete contractor
     await prisma.contractor.delete({ where: { id } });
     broadcastChange('contractors');
     res.json({ success: true });
@@ -1343,9 +1567,293 @@ app.post('/api/labor-allocations/apply-ai-rec', async (req, res) => {
   }
 });
 
+// POST /api/ai-recommendations/scan — Runs dynamic AI workforce reallocation scan across active projects
+app.post('/api/ai-recommendations/scan', async (req, res) => {
+  try {
+    const dbProjectsRes = await pool.query('SELECT * FROM commercial_projects ORDER BY created_at ASC');
+    const dbContractors = await prisma.contractor.findMany({ where: { status: 'ACTIVE' } });
+    const projects = dbProjectsRes.rows || [];
 
+    const donorProjects = projects.filter((p: any) => 
+      Number(p.progress_percentage || 0) >= 80 || 
+      p.status === 'TURNOVER_READY' || 
+      p.status === 'COMPLETED'
+    );
+
+    const recipientProjects = projects.filter((p: any) => 
+      p.status !== 'TURNOVER_READY' && 
+      p.status !== 'COMPLETED' && 
+      Number(p.progress_percentage || 0) < 80
+    ).sort((a: any, b: any) => {
+      const aBehind = a.status === 'BEHIND_SCHEDULE' || a.weather_suspended ? 1 : 0;
+      const bBehind = b.status === 'BEHIND_SCHEDULE' || b.weather_suspended ? 1 : 0;
+      if (aBehind !== bBehind) return bBehind - aBehind;
+      return Number(a.progress_percentage || 0) - Number(b.progress_percentage || 0);
+    });
+
+    const newRecommendations: any[] = [];
+
+    if (donorProjects.length > 0 && recipientProjects.length > 0) {
+      donorProjects.forEach((donor: any) => {
+        const assignedWorkers = dbContractors.filter((c: any) => 
+          (c.activeProjectSite && donor.name && c.activeProjectSite.toLowerCase().includes(donor.name.toLowerCase())) ||
+          c.allocationStatus === 'STANDBY'
+        );
+        const candidates = assignedWorkers.length > 0 ? assignedWorkers : dbContractors.slice(0, 3);
+
+        candidates.forEach((worker: any, idx: number) => {
+          const target = recipientProjects[idx % recipientProjects.length];
+          if (!target || target.id === donor.id) return;
+
+          const role = worker.roleTitle || worker.specialty || 'Skilled Artisan';
+          const recId = `REC-${donor.id}-${target.id}-${worker.id}`;
+          const currentCount = worker.activeManpower || 10;
+          const recommendedCount = Math.max(12, currentCount + 4);
+
+          newRecommendations.push({
+            id: recId,
+            title: `Transfer ${worker.name} (${role}) to "${target.name}"`,
+            targetLots: target.location ? target.location.split(',')[0] : target.name,
+            contractorId: worker.id,
+            contractorName: worker.company || worker.name,
+            currentHeadcount: currentCount,
+            recommendedHeadcount: recommendedCount,
+            rationale: `Donor project "${donor.name}" is at ${donor.progress_percentage}% completion. Deploy surplus ${role} crew to "${target.name}" (${target.progress_percentage}% complete) to recover milestone schedule.`,
+            priority: target.weather_suspended || target.status === 'BEHIND_SCHEDULE' ? 'HIGH' : 'MEDIUM'
+          });
+        });
+      });
+    } else {
+      // Fallback baseline scan if all projects in similar phase
+      if (dbContractors.length > 0 && projects.length > 0) {
+        const c1 = dbContractors[0];
+        const pTarget = projects[projects.length - 1];
+        newRecommendations.push({
+          id: `REC-AUTO-${Date.now()}`,
+          title: `Rebalance ${c1.name} workforce across ${pTarget.name}`,
+          targetLots: pTarget.location ? pTarget.location.split(',')[0] : pTarget.name,
+          contractorId: c1.id,
+          contractorName: c1.company || c1.name,
+          currentHeadcount: c1.activeManpower || 10,
+          recommendedHeadcount: (c1.activeManpower || 10) + 2,
+          rationale: `Cross-site cadence scan indicates adding 2 artisans will compress drywall and electrical framing timeline by 4 operational days.`,
+          priority: 'MEDIUM'
+        });
+      }
+    }
+
+    // Persist to database (clear unapplied, insert fresh)
+    await pool.query('DELETE FROM ai_manpower_recommendations WHERE applied = false');
+    for (const rec of newRecommendations) {
+      await pool.query(
+        `INSERT INTO ai_manpower_recommendations 
+         (id, title, target_lots, contractor_id, contractor_name, current_headcount, recommended_headcount, rationale, priority, applied)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false)
+         ON CONFLICT (id) DO UPDATE SET
+           title = EXCLUDED.title,
+           recommended_headcount = EXCLUDED.recommended_headcount,
+           rationale = EXCLUDED.rationale`,
+        [rec.id, rec.title, rec.targetLots, rec.contractorId, rec.contractorName, rec.currentHeadcount, rec.recommendedHeadcount, rec.rationale, rec.priority]
+      );
+    }
+
+    broadcastChange('aiRecommendations');
+
+    const updatedRecs = await pool.query('SELECT * FROM ai_manpower_recommendations ORDER BY created_at DESC');
+    res.json({
+      success: true,
+      count: updatedRecs.rows.length,
+      recommendations: updatedRecs.rows.map((r: any) => ({
+        id: r.id,
+        title: r.title,
+        targetLots: r.target_lots,
+        targetSector: r.target_lots,
+        contractorId: r.contractor_id,
+        contractorName: r.contractor_name,
+        currentHeadcount: Number(r.current_headcount),
+        recommendedHeadcount: Number(r.recommended_headcount),
+        rationale: r.rationale,
+        suggestedScope: r.rationale,
+        priority: r.priority,
+        impact: 'High Velocity Schedule Protection',
+        applied: Boolean(r.applied)
+      }))
+    });
+  } catch (error) {
+    console.error('Error running AI labor scan:', error);
+    res.status(500).json({ error: 'Failed to run AI labor scan' });
+  }
+});
+
+// POST /api/manpower-audits — Log daily field roll-call audit
+app.post('/api/manpower-audits', async (req, res) => {
+  try {
+    const {
+      contractorId,
+      contractorName,
+      specialty,
+      shift,
+      claimedHeadcount,
+      verifiedHeadcount,
+      assignedSectorOrLot,
+      supervisorName,
+      gpsCoordinates,
+      photoEvidenceVerified,
+      remarks,
+      productivityIndex
+    } = req.body;
+
+    const claimed = Number(claimedHeadcount) || 0;
+    const verified = Number(verifiedHeadcount) || 0;
+    const discrepancy = claimed - verified;
+    const status = discrepancy !== 0 ? 'DISCREPANCY_FLAGGED' : 'VERIFIED_MATCH';
+    const id = `AUD-${Date.now().toString().slice(-5)}`;
+
+    const audit = await prisma.dailyManpowerAudit.create({
+      data: {
+        id,
+        date: new Date(),
+        contractorId: contractorId || 'CONT-GEN',
+        contractorName: contractorName || 'General Trade Partner',
+        specialty: specialty || 'Civil Execution',
+        shift: shift || 'Morning',
+        claimedHeadcount: claimed,
+        verifiedHeadcount: verified,
+        discrepancy,
+        assignedSectorOrLot: assignedSectorOrLot || 'Project Main Sector',
+        supervisorName: supervisorName || 'Site Engineer',
+        gpsCoordinates: gpsCoordinates || '14.2789° N, 121.1245° E (Site Geofence)',
+        verificationStatus: status,
+        photoEvidenceVerified: photoEvidenceVerified !== undefined ? Boolean(photoEvidenceVerified) : true,
+        remarks: remarks || (discrepancy !== 0 ? `Headcount discrepancy of ${discrepancy} flagged during physical roll-call.` : 'Roll-call audit 100% verified with full PPE compliance.'),
+        productivityIndex: productivityIndex !== undefined ? Number(productivityIndex) : (discrepancy !== 0 ? 80.0 : 95.0)
+      }
+    });
+
+    broadcastChange('manpowerAudits');
+    res.status(201).json(audit);
+  } catch (error) {
+    console.error('Error logging manpower audit:', error);
+    res.status(500).json({ error: 'Failed to log manpower audit' });
+  }
+});
+// ============================================================================
+// STAFF ACCOUNT MANAGEMENT (Admin-only: create/delete Admin & PM accounts)
+// ============================================================================
+
+// GET /api/staff — List all Admin and Project Manager accounts
+app.get('/api/staff', async (req, res) => {
+  try {
+    const staff = await prisma.user.findMany({
+      where: { role: { in: [Role.ADMIN, Role.PROJECT_MANAGER] } },
+      select: { id: true, email: true, name: true, role: true, accountStatus: true, contact: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json(staff.map(u => ({
+      id: u.id,
+      email: u.email,
+      name: u.name,
+      role: u.role === Role.ADMIN ? 'Admin' : 'ProjectManager',
+      accountStatus: u.accountStatus,
+      contact: u.contact || '',
+      createdAt: u.createdAt.toISOString(),
+    })));
+  } catch (error) {
+    console.error('Error fetching staff:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /api/staff — Create a new Admin or Project Manager account
+app.post('/api/staff', async (req, res) => {
+  try {
+    const { email, name, password, role: rawRole, contact } = req.body;
+    if (!email || !name || !password) {
+      return res.status(400).json({ error: 'Email, name, and password are required.' });
+    }
+    const normalizedEmail = email.trim().toLowerCase();
+    const existing = await prisma.user.findFirst({ where: { email: { equals: normalizedEmail, mode: 'insensitive' } } });
+    if (existing) {
+      return res.status(409).json({ error: 'An account with this email already exists.' });
+    }
+    const role = rawRole === 'Admin' ? Role.ADMIN : Role.PROJECT_MANAGER;
+    const salt = require('crypto').randomBytes(16).toString('hex');
+    const hash = require('crypto').scryptSync(password, salt, 64).toString('hex');
+    const passwordHash = `${salt}:${hash}`;
+    const newUser = await prisma.user.create({
+      data: {
+        email: normalizedEmail,
+        name: name.trim(),
+        role,
+        accountStatus: AccountStatus.ACTIVE,
+        passwordHash,
+        contact: contact || '',
+      }
+    });
+    await prisma.processAuditLog.create({
+      data: {
+        entityType: 'USER',
+        entityId: newUser.id,
+        action: 'STAFF_ACCOUNT_CREATED',
+        actorName: 'System Admin',
+        actorRole: 'ADMIN',
+        details: `Created ${role === Role.ADMIN ? 'Admin' : 'Project Manager'} account for ${name.trim()} (${normalizedEmail}).`,
+      }
+    }).catch(() => {});
+    res.status(201).json({
+      id: newUser.id,
+      email: newUser.email,
+      name: newUser.name,
+      role: role === Role.ADMIN ? 'Admin' : 'ProjectManager',
+      accountStatus: newUser.accountStatus,
+      createdAt: newUser.createdAt.toISOString(),
+    });
+  } catch (error) {
+    console.error('Error creating staff account:', error);
+    res.status(500).json({ error: 'Failed to create staff account' });
+  }
+});
+
+// DELETE /api/staff/:id — Remove a staff account (cannot delete own account)
+app.delete('/api/staff/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const target = await prisma.user.findUnique({ where: { id } });
+    if (!target) return res.status(404).json({ error: 'Staff account not found.' });
+    if (target.role === Role.CLIENT) return res.status(403).json({ error: 'Use the client management module to remove client accounts.' });
+    // Prevent deleting the last admin account
+    if (target.role === Role.ADMIN) {
+      const adminCount = await prisma.user.count({ where: { role: Role.ADMIN } });
+      if (adminCount <= 1) return res.status(403).json({ error: 'Cannot delete the last admin account.' });
+    }
+    await prisma.user.delete({ where: { id } });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error deleting staff account:', error);
+    res.status(500).json({ error: 'Failed to delete staff account' });
+  }
+});
+
+// PATCH /api/staff/:id/reset-password — Reset a staff member's password
+app.patch('/api/staff/:id/reset-password', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    }
+    const salt = require('crypto').randomBytes(16).toString('hex');
+    const hash = require('crypto').scryptSync(newPassword, salt, 64).toString('hex');
+    await prisma.user.update({ where: { id }, data: { passwordHash: `${salt}:${hash}` } });
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error resetting password:', error);
+    res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
 
 // 1. POST /api/auth/login: Real credential verification with PostgreSQL
+
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   try {
@@ -1377,7 +1885,7 @@ app.post('/api/auth/login', async (req, res) => {
       isPasswordValid = verifyPassword(password || '', user.passwordHash);
     } else {
       // Demo fallback passkeys for newly created or legacy unhashed demo accounts
-      if (password === 'admin123' || password === 'inspector123' || password === 'client123' || password === 'demo-session-key') {
+      if (password === 'admin123' || password === 'pm123' || password === 'client123' || password === 'demo-session-key') {
         isPasswordValid = true;
       }
     }
@@ -1400,11 +1908,11 @@ app.post('/api/auth/login', async (req, res) => {
       id: user.id,
       email: customSettings.profileEmail || user.email,
       name: customSettings.profileName || user.name,
-      role: user.role === Role.ADMIN ? 'Admin' : user.role === Role.INSPECTOR ? 'Inspector' : 'Client',
+      role: user.role === Role.ADMIN ? 'Admin' : user.role === Role.PROJECT_MANAGER ? 'ProjectManager' : 'Client',
       clientId: user.role === Role.CLIENT ? user.id : undefined,
       accountStatus: user.accountStatus,
       avatarUrl: customSettings.avatarUrl || null,
-      title: customSettings.profileTitle || 'Operations Director & Project Lead',
+      title: customSettings.profileTitle || (user.role === Role.PROJECT_MANAGER ? 'Senior Project Manager & Field Lead' : 'Operations Director & Project Lead'),
       phone: customSettings.profilePhone || user.contact || '(049) 544 7724 / 0933-827-8885',
       division: customSettings.profileDivision || 'Commercial & Corporate Interiors',
     };
@@ -1576,8 +2084,9 @@ app.post('/api/auth/change-password', async (req, res) => {
     if (!isCurrentValid) {
       if (
         (currentPassword === 'admin123' && user.role === Role.ADMIN) ||
+        (currentPassword === 'pm123' && user.role === Role.PROJECT_MANAGER) ||
         currentPassword === 'admin123' ||
-        currentPassword === 'inspector123' ||
+        currentPassword === 'pm123' ||
         currentPassword === 'demo-session-key' ||
         currentPassword === 'ctvill2026'
       ) {
@@ -2679,27 +3188,59 @@ app.post('/api/slots/apply-ai-pricing', async (req, res) => {
 // PROJECT MANAGEMENT SYSTEM (PMS) API ENDPOINTS
 // ============================================================================
 
+async function ensureCommercialProject(id: string, name?: string) {
+  try {
+    const existing = await prisma.commercialProject.findUnique({ where: { id } });
+    if (!existing) {
+      await prisma.commercialProject.create({
+        data: {
+          id,
+          name: name || `Commercial Site ${id}`,
+          clientName: 'CTVill Builders Corporation',
+          status: 'PLANNING',
+          progressPercentage: 0,
+          assignedWorkersCount: 0,
+          tasksCount: 0,
+          milestonesCount: 0
+        }
+      });
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
 // A. Tasks CRUD
 app.post('/api/tasks', async (req, res) => {
-  const { title, description, assigneeName, assigneeRole, priority, status, dueDate, startDate, estimatedHours, actualHours, category, milestonePhase, subtasks, tags } = req.body;
+  const { title, text, projectId, assigneeName, duration, progress, startDate, endDate, category, wbsCode, priority, status, description, subtasks, tags, dueDate } = req.body;
   try {
-    const mappedStatus = status === 'NOT_STARTED' ? 'TODO' : (status || 'TODO');
+    const defaultProjId = projectId || 'PRJ-2281';
+    await ensureCommercialProject(defaultProjId);
+    const sDate = startDate ? new Date(startDate) : new Date();
+    const dur = Number(duration) || 1;
+    const eDate = endDate ? new Date(endDate) : new Date(sDate.getTime() + dur * 86400000);
+    const dDate = dueDate ? new Date(dueDate) : eDate;
+    const taskName = title || text || 'New Construction Task';
+
     const task = await prisma.projectTask.create({
       data: {
-        title: title || 'Untitled Task',
-        description: description || null,
-        assigneeName: assigneeName || null,
-        assigneeRole: assigneeRole || null,
+        projectId: defaultProjId,
+        text: taskName,
+        title: taskName,
+        description: description || '',
+        assigneeName: assigneeName || '',
         priority: priority || 'MEDIUM',
-        status: mappedStatus,
-        dueDate: dueDate ? new Date(dueDate) : null,
-        startDate: startDate ? new Date(startDate) : null,
-        estimatedHours: Number(estimatedHours) || 0,
-        actualHours: actualHours !== undefined ? Number(actualHours) : (mappedStatus === 'COMPLETED' ? 100 : 0),
-        category: category || null,
-        milestonePhase: milestonePhase || null,
-        subtasksJson: subtasks ? JSON.stringify(subtasks) : null,
-        tags: Array.isArray(tags) ? tags.join(',') : (tags || ''),
+        status: status || 'TODO',
+        category: category || 'CIVIL_WORKS',
+        subtasksJson: subtasks ? JSON.stringify(subtasks) : '[]',
+        tags: tags ? (Array.isArray(tags) ? tags.join(',') : String(tags)) : '',
+        startDate: sDate,
+        endDate: eDate,
+        dueDate: dDate,
+        duration: dur,
+        progress: progress !== undefined ? Number(progress) : (status === 'COMPLETED' ? 1.0 : status === 'IN_PROGRESS' ? 0.5 : 0),
+        type: category === 'QA' ? 'milestone' : 'task',
+        wbsCode: wbsCode || null
       }
     });
 
@@ -2710,7 +3251,7 @@ app.post('/api/tasks', async (req, res) => {
         action: 'TASK_CREATED',
         actorName: 'Mauro R. Principe Jr.',
         actorRole: 'ADMIN',
-        details: `Created task "${task.title}" assigned to ${task.assigneeName || 'team'}.`,
+        details: `Created task "${task.text}" assigned to ${assigneeName || 'crew'}.`,
       }
     }).catch(() => {});
 
@@ -2725,27 +3266,29 @@ app.post('/api/tasks', async (req, res) => {
 
 app.patch('/api/tasks/:id', async (req, res) => {
   const { id } = req.params;
-  const { 
-    title, description, assigneeName, assigneeRole, priority, 
-    status, dueDate, startDate, estimatedHours, actualHours, 
-    category, milestonePhase, subtasks, tags 
-  } = req.body;
+  const { title, text, duration, progress, startDate, endDate, wbsCode, status, priority, description, assigneeName } = req.body;
   try {
     const data: any = {};
-    if (title !== undefined) data.title = title;
+    if (text !== undefined || title !== undefined) {
+      data.text = text || title;
+      data.title = title || text;
+    }
     if (description !== undefined) data.description = description;
     if (assigneeName !== undefined) data.assigneeName = assigneeName;
-    if (assigneeRole !== undefined) data.assigneeRole = assigneeRole;
     if (priority !== undefined) data.priority = priority;
-    if (status !== undefined) data.status = status === 'NOT_STARTED' ? 'TODO' : status;
-    if (dueDate !== undefined) data.dueDate = dueDate ? new Date(dueDate) : null;
-    if (startDate !== undefined) data.startDate = startDate ? new Date(startDate) : null;
-    if (estimatedHours !== undefined) data.estimatedHours = Number(estimatedHours);
-    if (actualHours !== undefined) data.actualHours = Number(actualHours);
-    if (category !== undefined) data.category = category;
-    if (milestonePhase !== undefined) data.milestonePhase = milestonePhase;
-    if (subtasks !== undefined) data.subtasksJson = JSON.stringify(subtasks);
-    if (tags !== undefined) data.tags = Array.isArray(tags) ? tags.join(',') : tags;
+    if (startDate !== undefined) data.startDate = new Date(startDate);
+    if (endDate !== undefined) data.endDate = new Date(endDate);
+    if (duration !== undefined) data.duration = Number(duration);
+    if (progress !== undefined) data.progress = Number(progress);
+    if (wbsCode !== undefined) data.wbsCode = wbsCode;
+    if (status !== undefined) {
+      data.status = status;
+      if (progress === undefined) {
+        if (status === 'COMPLETED') data.progress = 1.0;
+        else if (status === 'IN_PROGRESS') data.progress = 0.5;
+        else if (status === 'TODO' || status === 'BACKLOG') data.progress = 0.0;
+      }
+    }
 
     const task = await prisma.projectTask.update({
       where: { id },
@@ -2759,9 +3302,24 @@ app.patch('/api/tasks/:id', async (req, res) => {
   }
 });
 
+app.delete('/api/tasks-clear-all', async (req, res) => {
+  try {
+    await prisma.taskLink.deleteMany({}).catch(() => {});
+    await prisma.projectTask.deleteMany({});
+    broadcastChange('tasks');
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error clearing tasks:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 app.delete('/api/tasks/:id', async (req, res) => {
   const { id } = req.params;
   try {
+    await prisma.taskLink.deleteMany({
+      where: { OR: [{ sourceId: id }, { targetId: id }] }
+    }).catch(() => {});
     await prisma.projectTask.delete({ where: { id } });
     broadcastChange('tasks');
     res.json({ success: true });
@@ -2795,7 +3353,7 @@ app.post('/api/site-logs', async (req, res) => {
         entityId: siteLog.id,
         action: 'DAILY_SITE_LOG_POSTED',
         actorName: supervisorName || 'Engr. Ricardo Gomez',
-        actorRole: 'INSPECTOR',
+        actorRole: 'PROJECT_MANAGER',
         details: `Recorded daily site diary (${weather}, ${activeHeadcount} workers).`,
       }
     });
@@ -3535,14 +4093,14 @@ app.post('/api/clients/sign-acceptance', async (req, res) => {
 app.post('/api/punch-lists', async (req, res) => {
   const { slotId, inspectorId, contractorId, title, description, severity, category, targetDate } = req.body;
   try {
-    const inspector = await prisma.user.findFirst({
-      where: { role: Role.INSPECTOR }
+    const projectManager = await prisma.user.findFirst({
+      where: { role: Role.PROJECT_MANAGER }
     });
 
     const defect = await prisma.punchListDefect.create({
       data: {
         slotId,
-        inspectorId: inspectorId || inspector?.id || 'ricardo-gomez',
+        inspectorId: inspectorId || projectManager?.id || 'ricardo-gomez',
         contractorId: contractorId || null,
         title,
         description,
@@ -3559,8 +4117,8 @@ app.post('/api/punch-lists', async (req, res) => {
         entityType: 'DEFECT',
         entityId: defect.id,
         action: 'DEFECT_TICKET_LOGGED',
-        actorName: defect.inspector?.name || 'Site Monitor',
-        actorRole: 'INSPECTOR',
+        actorName: defect.inspector?.name || 'Project Manager',
+        actorRole: 'PROJECT_MANAGER',
         details: `Logged [${severity}] defect on Lot ${slotId}: "${title}". Assigned to: ${defect.contractor?.name || 'Unassigned'}.`,
       }
     });
@@ -3612,7 +4170,7 @@ app.patch('/api/punch-lists/:id', async (req, res) => {
         entityId: id,
         action: `DEFECT_${status || 'UPDATED'}`,
         actorName: actorName || 'Field Team',
-        actorRole: actorRole || 'INSPECTOR',
+        actorRole: actorRole || 'PROJECT_MANAGER',
         details: `Defect "${updated.title}" updated to status ${status}. Notes: ${resolutionNotes || 'None'}.`,
       }
     });
@@ -3666,7 +4224,7 @@ app.post('/api/civil-works/update-milestone', async (req, res) => {
         entityId: milestoneId,
         action: 'CIVIL_MILESTONE_UPDATED',
         actorName: actorName || 'Engr. Ricardo Gomez',
-        actorRole: 'INSPECTOR',
+        actorRole: 'PROJECT_MANAGER',
         details: `${updated.phaseName} updated to ${updated.currentPercentage}%. Status: ${updated.status}. Sign-off: ${updated.inspectorSignOff ? 'APPROVED' : 'PENDING'}.`,
       }
     });
@@ -3793,18 +4351,18 @@ app.post('/api/civil-works/sync-schedule', async (req, res) => {
 app.post('/api/qa-logs', async (req, res) => {
   const { slotId, complianceStatus, progressPercentage, structuralCheck, safetyCheck, remarks, siteActivity } = req.body;
   try {
-    const inspector = await prisma.user.findFirst({
-      where: { role: Role.INSPECTOR }
+    const projectManager = await prisma.user.findFirst({
+      where: { role: Role.PROJECT_MANAGER }
     });
 
-    if (!inspector) {
-      return res.status(400).json({ error: 'No Inspector user found in database' });
+    if (!projectManager) {
+      return res.status(400).json({ error: 'No Project Manager user found in database' });
     }
 
     const log = await prisma.weeklyProgressLog.create({
       data: {
         slotId,
-        inspectorId: inspector.id,
+        inspectorId: projectManager.id,
         complianceStatus,
         percentageComplete: progressPercentage,
         structuralCheck,
@@ -3821,8 +4379,8 @@ app.post('/api/qa-logs', async (req, res) => {
         entityType: 'SLOT',
         entityId: slotId,
         action: 'QA_INSPECTION_RECORDED',
-        actorName: inspector.name,
-        actorRole: 'INSPECTOR',
+        actorName: projectManager.name,
+        actorRole: 'PROJECT_MANAGER',
         details: `QA Log submitted for Lot ${slotId}: ${progressPercentage}% complete. Compliance: ${complianceStatus}.`,
       }
     });
@@ -3958,7 +4516,7 @@ app.post('/api/manpower-audits', async (req, res) => {
         entityId: contractorId || auditId,
         action: 'MANPOWER_ROLLCALL_AUDITED',
         actorName: supervisorName,
-        actorRole: 'INSPECTOR',
+        actorRole: 'PROJECT_MANAGER',
         details: `Field spot-check for ${contractorName}: Claimed ${claimedHeadcount} vs Verified ${verifiedHeadcount} workers. Status: ${verificationStatus}.`,
       }
     });
@@ -4573,7 +5131,7 @@ app.get('/api/projects', async (req, res) => {
     const projects = (dbProjects.rows || []).map(p => ({
       id: p.id,
       name: p.name,
-      clientName: p.client_name,
+      clientName: p.client_name || '',
       description: p.description || '',
       location: p.location || '',
       budget: Number(p.budget || 0),
@@ -4582,9 +5140,16 @@ app.get('/api/projects', async (req, res) => {
       status: p.status || 'IN_PROGRESS',
       targetHandoverDate: p.target_handover_date ? p.target_handover_date.toISOString().split('T')[0] : '2026-12-31',
       startDate: p.start_date ? p.start_date.toISOString().split('T')[0] : '2026-01-01',
-      assignedWorkersCount: Number(p.assigned_workers_count || 10),
-      tasksCount: Number(p.tasks_count || 15),
-      milestonesCount: Number(p.milestones_count || 5),
+      assignedWorkersCount: Number(p.assigned_workers_count || 0),
+      assignedContractorIds: Array.isArray(p.assigned_contractor_ids) ? p.assigned_contractor_ids : [],
+      tasksCount: Number(p.tasks_count || 0),
+      milestonesCount: Number(p.milestones_count || 0),
+      isPrivateAccounting: Boolean(p.is_private_accounting),
+      assignedProjectManagerId: p.assigned_project_manager_id || '',
+      assignedProjectManagerName: p.assigned_project_manager_name || '',
+      latitude: p.latitude !== null && p.latitude !== undefined ? Number(p.latitude) : undefined,
+      longitude: p.longitude !== null && p.longitude !== undefined ? Number(p.longitude) : undefined,
+      weatherSuspended: Boolean(p.weather_suspended),
       createdAt: p.created_at ? p.created_at.toISOString() : new Date().toISOString()
     }));
     res.json(projects);
@@ -4610,33 +5175,53 @@ app.post('/api/projects', async (req, res) => {
       startDate,
       assignedWorkersCount,
       tasksCount,
-      milestonesCount
+      milestonesCount,
+      isPrivateAccounting,
+      assignedProjectManagerId,
+      assignedProjectManagerName,
+      latitude,
+      longitude,
+      weatherSuspended
     } = req.body;
 
-    if (!name) {
+    if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Project name is required' });
+    }
+
+    // Strict timeline calendar validation: targetHandoverDate cannot be earlier than startDate
+    if (startDate && targetHandoverDate && new Date(targetHandoverDate) < new Date(startDate)) {
+      return res.status(400).json({ 
+        error: 'Validation Error: Target handover date cannot be earlier than project start date.' 
+      });
     }
 
     const id = `PRJ-${Date.now().toString().slice(-4)}`;
     await pool.query(
       `INSERT INTO commercial_projects 
-       (id, name, client_name, description, location, budget, funds_collected, progress_percentage, status, target_handover_date, start_date, assigned_workers_count, tasks_count, milestones_count)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+       (id, name, client_name, description, location, budget, funds_collected, progress_percentage, status, target_handover_date, start_date, assigned_workers_count, assigned_contractor_ids, tasks_count, milestones_count, is_private_accounting, assigned_project_manager_id, assigned_project_manager_name, latitude, longitude, weather_suspended)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)`,
       [
         id,
-        name,
-        clientName || 'Commercial Client',
-        description || '',
-        location || 'Laguna, Philippines',
-        budget || 0,
-        fundsCollected || 0,
-        progressPercentage || 0,
+        name.trim(),
+        (clientName || '').trim(),
+        (description || '').trim(),
+        (location || '').trim(),
+        Number(budget) || 0,
+        Number(fundsCollected) || 0,
+        Number(progressPercentage) || 0,
         status || 'PLANNING',
         targetHandoverDate || '2026-12-31',
         startDate || new Date().toISOString().split('T')[0],
-        assignedWorkersCount || 10,
-        tasksCount || 15,
-        milestonesCount || 5
+        Number(assignedWorkersCount) || 0,
+        [],
+        Number(tasksCount) || 0,
+        Number(milestonesCount) || 0,
+        Boolean(isPrivateAccounting),
+        assignedProjectManagerId || null,
+        assignedProjectManagerName || null,
+        latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : null,
+        longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : null,
+        Boolean(weatherSuspended)
       ]
     );
 
@@ -4647,7 +5232,7 @@ app.post('/api/projects', async (req, res) => {
         action: 'PROJECT_CREATED',
         actorName: 'Operations Director',
         actorRole: 'ADMIN',
-        details: `Created commercial fit-out project "${name}" with budget ₱${Number(budget || 0).toLocaleString()}.`,
+        details: `Created commercial project "${name.trim()}" (Budget: ₱${Number(budget || 0).toLocaleString()}, PM: ${assignedProjectManagerName || 'Unassigned'}, Private Accounting: ${Boolean(isPrivateAccounting)}).`,
       }
     }).catch(() => {});
 
@@ -4677,26 +5262,46 @@ app.patch('/api/projects/:id', async (req, res) => {
       startDate,
       assignedWorkersCount,
       tasksCount,
-      milestonesCount
+      milestonesCount,
+      isPrivateAccounting,
+      assignedProjectManagerId,
+      assignedProjectManagerName,
+      latitude,
+      longitude,
+      weatherSuspended
     } = req.body;
+
+    // Validate timeline dates if both are provided
+    if (startDate && targetHandoverDate && new Date(targetHandoverDate) < new Date(startDate)) {
+      return res.status(400).json({ 
+        error: 'Validation Error: Target handover date cannot be earlier than project start date.' 
+      });
+    }
 
     const updates: string[] = [];
     const values: any[] = [];
     let idx = 1;
 
-    if (name !== undefined) { updates.push(`name = $${idx++}`); values.push(name); }
-    if (clientName !== undefined) { updates.push(`client_name = $${idx++}`); values.push(clientName); }
-    if (description !== undefined) { updates.push(`description = $${idx++}`); values.push(description); }
-    if (location !== undefined) { updates.push(`location = $${idx++}`); values.push(location); }
-    if (budget !== undefined) { updates.push(`budget = $${idx++}`); values.push(budget); }
-    if (fundsCollected !== undefined) { updates.push(`funds_collected = $${idx++}`); values.push(fundsCollected); }
-    if (progressPercentage !== undefined) { updates.push(`progress_percentage = $${idx++}`); values.push(progressPercentage); }
+    if (name !== undefined) { updates.push(`name = $${idx++}`); values.push(name.trim()); }
+    if (clientName !== undefined) { updates.push(`client_name = $${idx++}`); values.push(clientName.trim()); }
+    if (description !== undefined) { updates.push(`description = $${idx++}`); values.push(description.trim()); }
+    if (location !== undefined) { updates.push(`location = $${idx++}`); values.push(location.trim()); }
+    if (budget !== undefined) { updates.push(`budget = $${idx++}`); values.push(Number(budget) || 0); }
+    if (fundsCollected !== undefined) { updates.push(`funds_collected = $${idx++}`); values.push(Number(fundsCollected) || 0); }
+    if (progressPercentage !== undefined) { updates.push(`progress_percentage = $${idx++}`); values.push(Number(progressPercentage) || 0); }
     if (status !== undefined) { updates.push(`status = $${idx++}`); values.push(status); }
     if (targetHandoverDate !== undefined) { updates.push(`target_handover_date = $${idx++}`); values.push(targetHandoverDate || null); }
     if (startDate !== undefined) { updates.push(`start_date = $${idx++}`); values.push(startDate || null); }
-    if (assignedWorkersCount !== undefined) { updates.push(`assigned_workers_count = $${idx++}`); values.push(assignedWorkersCount); }
-    if (tasksCount !== undefined) { updates.push(`tasks_count = $${idx++}`); values.push(tasksCount); }
-    if (milestonesCount !== undefined) { updates.push(`milestones_count = $${idx++}`); values.push(milestonesCount); }
+    if (assignedWorkersCount !== undefined) { updates.push(`assigned_workers_count = $${idx++}`); values.push(Number(assignedWorkersCount) || 0); }
+    if (req.body.assignedContractorIds !== undefined) { updates.push(`assigned_contractor_ids = $${idx++}`); values.push(Array.isArray(req.body.assignedContractorIds) ? req.body.assignedContractorIds : []); }
+    if (tasksCount !== undefined) { updates.push(`tasks_count = $${idx++}`); values.push(Number(tasksCount) || 0); }
+    if (milestonesCount !== undefined) { updates.push(`milestones_count = $${idx++}`); values.push(Number(milestonesCount) || 0); }
+    if (isPrivateAccounting !== undefined) { updates.push(`is_private_accounting = $${idx++}`); values.push(Boolean(isPrivateAccounting)); }
+    if (assignedProjectManagerId !== undefined) { updates.push(`assigned_project_manager_id = $${idx++}`); values.push(assignedProjectManagerId || null); }
+    if (assignedProjectManagerName !== undefined) { updates.push(`assigned_project_manager_name = $${idx++}`); values.push(assignedProjectManagerName || null); }
+    if (latitude !== undefined) { updates.push(`latitude = $${idx++}`); values.push(latitude !== null && latitude !== '' ? Number(latitude) : null); }
+    if (longitude !== undefined) { updates.push(`longitude = $${idx++}`); values.push(longitude !== null && longitude !== '' ? Number(longitude) : null); }
+    if (weatherSuspended !== undefined) { updates.push(`weather_suspended = $${idx++}`); values.push(Boolean(weatherSuspended)); }
 
     if (updates.length > 0) {
       values.push(id);
@@ -4707,6 +5312,98 @@ app.patch('/api/projects/:id', async (req, res) => {
     res.json({ success: true, id });
   } catch (error) {
     console.error('Error updating project:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PUT /api/projects/:id/workers — Add or remove a worker from a project (atomic)
+app.put('/api/projects/:id/workers', async (req, res) => {
+  try {
+    const { id: projectId } = req.params;
+    const { workerId, action } = req.body; // action: 'add' | 'remove'
+
+    if (!workerId || !['add', 'remove'].includes(action)) {
+      return res.status(400).json({ error: 'workerId and action (add|remove) are required' });
+    }
+
+    // Fetch current assignedContractorIds and project name
+    const projResult = await pool.query(
+      'SELECT assigned_contractor_ids, assigned_workers_count, name FROM commercial_projects WHERE id = $1',
+      [projectId]
+    );
+    if (projResult.rows.length === 0) return res.status(404).json({ error: 'Project not found' });
+
+    const current: string[] = Array.isArray(projResult.rows[0].assigned_contractor_ids)
+      ? projResult.rows[0].assigned_contractor_ids
+      : [];
+    const projectName: string = projResult.rows[0].name;
+
+    let updated: string[];
+    if (action === 'add') {
+      updated = current.includes(workerId) ? current : [...current, workerId];
+    } else {
+      updated = current.filter(id => id !== workerId);
+    }
+
+    // Update project's assignedContractorIds and assignedWorkersCount
+    await pool.query(
+      'UPDATE commercial_projects SET assigned_contractor_ids = $1, assigned_workers_count = $2 WHERE id = $3',
+      [updated, updated.length, projectId]
+    );
+
+    // Sync the worker's activeProjectSite field
+    if (action === 'add') {
+      await pool.query(
+        'UPDATE contractors SET active_project_site = $1 WHERE id = $2',
+        [projectName, workerId]
+      );
+    } else {
+      // Only clear if they were on this project
+      await pool.query(
+        "UPDATE contractors SET active_project_site = NULL WHERE id = $1 AND active_project_site = $2",
+        [workerId, projectName]
+      );
+    }
+
+    broadcastChange('projects');
+    broadcastChange('contractors');
+    res.json({ success: true, assignedContractorIds: updated, assignedWorkersCount: updated.length });
+  } catch (error) {
+    console.error('Error updating project workers:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PATCH /api/projects/:id/weather-suspension (Force Majeure delay handling)
+app.patch('/api/projects/:id/weather-suspension', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { suspended, reason, actorName } = req.body;
+    const isSuspended = Boolean(suspended);
+
+    await pool.query(
+      'UPDATE commercial_projects SET weather_suspended = $1 WHERE id = $2',
+      [isSuspended, id]
+    );
+
+    await prisma.processAuditLog.create({
+      data: {
+        entityType: 'CIVIL_WORKS',
+        entityId: id,
+        action: isSuspended ? 'WEATHER_SUSPENSION_ACTIVATED' : 'WEATHER_SUSPENSION_LIFTED',
+        actorName: actorName || 'Engr. Ricardo Ramos',
+        actorRole: 'PROJECT_MANAGER',
+        details: isSuspended
+          ? `Work Suspended due to Weather (Force Majeure): ${reason || 'Adverse weather on site'}. Timeline flagged for schedule delays.`
+          : 'Weather suspension lifted. Regular site operations resumed.',
+      }
+    }).catch(() => {});
+
+    broadcastChange('projects');
+    broadcastChange('auditLogs');
+    res.json({ success: true, id, weatherSuspended: isSuspended });
+  } catch (error) {
+    console.error('Error toggling weather suspension:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
@@ -4723,6 +5420,230 @@ app.delete('/api/projects/:id', async (req, res) => {
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
+
+// ============================================================================
+// WORKFORCE DYNAMIC REALLOCATION API
+// ============================================================================
+
+// GET /api/workforce/reallocation-suggestions
+app.get('/api/workforce/reallocation-suggestions', async (req, res) => {
+  try {
+    const dbProjects = await pool.query('SELECT * FROM commercial_projects ORDER BY progress_percentage DESC');
+    const projects = (dbProjects.rows || []).map(p => ({
+      id: p.id,
+      name: p.name,
+      clientName: p.client_name || '',
+      description: p.description || '',
+      location: p.location || '',
+      budget: Number(p.budget || 0),
+      fundsCollected: Number(p.funds_collected || 0),
+      progressPercentage: Number(p.progress_percentage || 0),
+      status: p.status || 'IN_PROGRESS',
+      targetHandoverDate: p.target_handover_date ? p.target_handover_date.toISOString().split('T')[0] : '2026-12-31',
+      startDate: p.start_date ? p.start_date.toISOString().split('T')[0] : '2026-01-01',
+      assignedWorkersCount: Number(p.assigned_workers_count || 0),
+      tasksCount: Number(p.tasks_count || 0),
+      milestonesCount: Number(p.milestones_count || 0),
+      isPrivateAccounting: Boolean(p.is_private_accounting),
+    }));
+
+    const contractors = await prisma.contractor.findMany();
+
+    // Reallocation logic: detect surplus workers from projects >= 90% progress or HANDED_OVER
+    const donorProjects = projects.filter(p => p.progressPercentage >= 90 || p.status === 'HANDED_OVER');
+    const recipientProjects = projects.filter(p => p.status !== 'HANDED_OVER' && p.progressPercentage < 80);
+
+    const suggestions: any[] = [];
+    if (donorProjects.length > 0 && recipientProjects.length > 0) {
+      donorProjects.forEach(donor => {
+        const assignedWorkers = contractors.filter(c => 
+          (c.activeProjectSite && donor.name && c.activeProjectSite.toLowerCase().includes(donor.name.toLowerCase())) ||
+          (c as any).allocationStatus === 'STANDBY'
+        );
+
+        const candidates = assignedWorkers.length > 0 ? assignedWorkers : contractors.slice(0, 3);
+        candidates.forEach((worker, idx) => {
+          const target = recipientProjects[idx % recipientProjects.length];
+          if (!target || target.id === donor.id) return;
+
+          const role = worker.roleTitle || worker.specialty || 'Worker';
+          const cat = (worker as any).workforceCategory || 'SKILLED';
+
+          suggestions.push({
+            id: `REC-${donor.id}-${target.id}-${worker.id}`,
+            workerId: worker.id,
+            workerName: worker.name,
+            roleTitle: role,
+            workforceCategory: cat,
+            originProjectId: donor.id,
+            originProjectName: donor.name,
+            originProgress: donor.progressPercentage,
+            targetProjectId: target.id,
+            targetProjectName: target.name,
+            targetStatus: target.status,
+            targetProgress: target.progressPercentage,
+            rationale: `Project "${donor.name}" has reached ${donor.progressPercentage}% completion. Surplus resource ${worker.name} (${role}) recommended for transfer to accelerate "${target.name}" (${target.progressPercentage}% complete).`,
+            priority: donor.progressPercentage >= 95 ? 'HIGH' : 'MEDIUM',
+            applied: (worker as any).allocationStatus === 'REALLOCATED'
+          });
+        });
+      });
+    }
+
+    res.json(suggestions);
+  } catch (error) {
+    console.error('Error generating reallocation suggestions:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /api/workforce/reallocate
+app.post('/api/workforce/reallocate', async (req, res) => {
+  try {
+    const { workerId, targetProjectId, targetProjectName } = req.body;
+    if (!workerId || !targetProjectName) {
+      return res.status(400).json({ error: 'workerId and targetProjectName are required' });
+    }
+
+    const worker = await prisma.contractor.findUnique({ where: { id: workerId } });
+    if (!worker) {
+      return res.status(404).json({ error: 'Worker/Contractor not found' });
+    }
+
+    const originSite = worker.activeProjectSite || 'Previous Project';
+
+    // Update contractor active project site and allocation status
+    await prisma.contractor.update({
+      where: { id: workerId },
+      data: {
+        activeProjectSite: targetProjectName,
+        allocationStatus: 'REALLOCATED'
+      } as any
+    });
+
+    // Update project worker counts
+    if (targetProjectId) {
+      await pool.query(
+        'UPDATE commercial_projects SET assigned_workers_count = assigned_workers_count + 1 WHERE id = $1',
+        [targetProjectId]
+      ).catch(() => {});
+    }
+
+    // Log process audit
+    await prisma.processAuditLog.create({
+      data: {
+        entityType: 'CONTRACTOR',
+        entityId: workerId,
+        action: 'WORKFORCE_REALLOCATED',
+        actorName: 'Operations Director',
+        actorRole: 'ADMIN',
+        details: `Reallocated ${worker.name} (${worker.roleTitle || worker.specialty}) from "${originSite}" to "${targetProjectName}".`,
+      }
+    }).catch(() => {});
+
+    broadcastChange('contractors');
+    broadcastChange('projects');
+    broadcastChange('auditLogs');
+
+    res.json({ 
+      success: true, 
+      message: `Successfully reallocated ${worker.name} to ${targetProjectName}.` 
+    });
+  } catch (error) {
+    console.error('Error executing workforce reallocation:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// WEATHER CACHE & RESILIENCE REST API
+// ============================================================================
+
+// GET /api/weather/live?lat=...&lon=...&siteKey=...
+app.get('/api/weather/live', async (req, res) => {
+  try {
+    const lat = req.query.lat || '14.2547';
+    const lon = req.query.lon || '121.5056';
+    const siteKey = (req.query.siteKey as string) || `site_${lat}_${lon}`;
+
+    // 1. Check local PostgreSQL cache (valid for 30 minutes)
+    const cached = await pool.query(
+      "SELECT * FROM weather_cache WHERE site_key = $1 AND cached_at > NOW() - INTERVAL '30 minutes'",
+      [siteKey]
+    );
+
+    if (cached.rows && cached.rows.length > 0) {
+      return res.json({
+        ...cached.rows[0].weather_data,
+        source: 'POSTGRES_CACHE',
+        cachedAt: cached.rows[0].cached_at
+      });
+    }
+
+    // 2. Fetch from Open-Meteo external service
+    try {
+      const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max&timezone=Asia%2FManila`;
+      
+      const response = await fetch(weatherUrl);
+      if (response.ok) {
+        const data = await response.json();
+        
+        // Cache to PostgreSQL
+        await pool.query(
+          `INSERT INTO weather_cache (site_key, weather_data, cached_at) 
+           VALUES ($1, $2, NOW()) 
+           ON CONFLICT (site_key) DO UPDATE SET weather_data = $2, cached_at = NOW()`,
+          [siteKey, JSON.stringify(data)]
+        ).catch(err => console.warn('Weather cache write failed:', err));
+
+        return res.json({
+          ...data,
+          source: 'LIVE_OPEN_METEO'
+        });
+      }
+    } catch (fetchErr) {
+      console.warn('Open-Meteo fetch error, falling back to older cache or defaults:', fetchErr);
+    }
+
+    // 3. Fallback to older cache if exists
+    const staleCache = await pool.query('SELECT * FROM weather_cache WHERE site_key = $1', [siteKey]);
+    if (staleCache.rows && staleCache.rows.length > 0) {
+      return res.json({
+        ...staleCache.rows[0].weather_data,
+        source: 'STALE_CACHE',
+        cachedAt: staleCache.rows[0].cached_at
+      });
+    }
+
+    // 4. Default manual fallback data (Tropical Philippine site conditions)
+    res.json({
+      source: 'MANUAL_FALLBACK',
+      current: {
+        temperature_2m: 30.5,
+        apparent_temperature: 34.0,
+        relative_humidity_2m: 78,
+        precipitation: 0.0,
+        weather_code: 1, // Mainly clear
+        wind_speed_10m: 12.5,
+        wind_direction_10m: 75,
+        surface_pressure: 1012,
+        time: new Date().toISOString()
+      },
+      daily: {
+        time: [new Date().toISOString().split('T')[0]],
+        weather_code: [1],
+        temperature_2m_max: [33.0],
+        temperature_2m_min: [25.0],
+        precipitation_probability_max: [20],
+        wind_speed_10m_max: [18.0]
+      }
+    });
+  } catch (error) {
+    console.error('Error handling weather telemetry:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 
 // ============================================================================
 // EXTENDED PAYROLL REST API
@@ -4864,6 +5785,520 @@ app.delete('/api/extended-payroll/:id', async (req, res) => {
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting extended payroll record:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// CHANGE ORDERS REST API
+// ============================================================================
+
+// GET /api/change-orders
+app.get('/api/change-orders', async (req, res) => {
+  try {
+    const dbCOs = await prisma.changeOrder.findMany({ orderBy: { createdAt: 'desc' } });
+    const changeOrders = dbCOs.map((c: any) => ({
+      id: c.id,
+      orderNumber: c.orderNumber,
+      title: c.title,
+      contractorName: c.contractorName,
+      requestedAmount: Number(c.requestedAmount || 0),
+      approvedAmount: c.approvedAmount ? Number(c.approvedAmount) : null,
+      status: c.status,
+      justification: c.justification,
+      approvedBy: c.approvedBy || '',
+      createdAt: c.createdAt.toISOString()
+    }));
+    res.json(changeOrders);
+  } catch (error) {
+    console.error('Error fetching change orders:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /api/change-orders
+app.post('/api/change-orders', async (req, res) => {
+  try {
+    const { title, contractorName, requestedAmount, justification, orderNumber } = req.body;
+    if (!title || !requestedAmount) {
+      return res.status(400).json({ error: 'Title and requested amount are required' });
+    }
+    const count = await prisma.changeOrder.count();
+    const num = orderNumber || `CO-${new Date().getFullYear()}-${String(count + 1).padStart(3, '0')}`;
+    const created = await prisma.changeOrder.create({
+      data: {
+        orderNumber: num,
+        title: title.trim(),
+        contractorName: contractorName || 'SolidFoundations Engineering',
+        requestedAmount: Number(requestedAmount) || 0,
+        justification: justification || '',
+        status: 'PENDING'
+      }
+    });
+
+    broadcastChange('changeOrders');
+    invalidateAllDataCache();
+    res.json(created);
+  } catch (error) {
+    console.error('Error creating change order:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PATCH /api/change-orders/:id
+app.patch('/api/change-orders/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, approvedAmount, approvedBy } = req.body;
+
+    const data: any = {};
+    if (status !== undefined) data.status = status;
+    if (approvedAmount !== undefined) data.approvedAmount = approvedAmount === null ? null : Number(approvedAmount);
+    if (approvedBy !== undefined) data.approvedBy = approvedBy;
+
+    const updated = await prisma.changeOrder.update({
+      where: { id },
+      data
+    });
+
+    broadcastChange('changeOrders');
+    invalidateAllDataCache();
+    res.json(updated);
+  } catch (error) {
+    console.error('Error updating change order:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// RFI (REQUEST FOR INFORMATION) REST API
+// ============================================================================
+
+// GET /api/rfis
+app.get('/api/rfis', async (req, res) => {
+  try {
+    const dbRfisRes = await pool.query('SELECT * FROM project_rfis ORDER BY created_at DESC');
+    const rfis = (dbRfisRes.rows || []).map((r: any) => ({
+      id: r.id,
+      rfiNumber: r.rfi_number,
+      projectId: r.project_id,
+      projectName: r.project_name,
+      subject: r.subject,
+      question: r.question,
+      suggestedSolution: r.suggested_solution,
+      answer: r.answer,
+      status: r.status,
+      priority: r.priority,
+      assignedTo: r.assigned_to,
+      submittedBy: r.submitted_by,
+      drawingRef: r.drawing_ref,
+      dueDate: r.due_date ? r.due_date.toISOString().split('T')[0] : undefined,
+      createdAt: r.created_at ? r.created_at.toISOString() : undefined,
+      updatedAt: r.updated_at ? r.updated_at.toISOString() : undefined,
+    }));
+    res.json(rfis);
+  } catch (error) {
+    console.error('Error fetching RFIs:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /api/rfis
+app.post('/api/rfis', async (req, res) => {
+  try {
+    const { rfiNumber, projectId, projectName, subject, question, suggestedSolution, priority, assignedTo, submittedBy, drawingRef, dueDate } = req.body;
+    if (!subject || !question) {
+      return res.status(400).json({ error: 'Subject and question are required' });
+    }
+
+    const id = `RFI-${Date.now().toString().slice(-6)}`;
+    const countRes = await pool.query('SELECT count(*) FROM project_rfis');
+    const num = rfiNumber || `RFI-${new Date().getFullYear()}-${String(parseInt(countRes.rows[0].count, 10) + 1).padStart(3, '0')}`;
+
+    await pool.query(
+      `INSERT INTO project_rfis 
+       (id, rfi_number, project_id, project_name, subject, question, suggested_solution, status, priority, assigned_to, submitted_by, drawing_ref, due_date, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'OPEN', $8, $9, $10, $11, $12, NOW(), NOW())`,
+      [
+        id, 
+        num, 
+        projectId || null, 
+        projectName || 'Commercial Fit-Out Site', 
+        subject, 
+        question, 
+        suggestedSolution || null, 
+        priority || 'MEDIUM', 
+        assignedTo || 'Site Architect', 
+        submittedBy || 'Project Manager', 
+        drawingRef || null, 
+        dueDate ? new Date(dueDate) : null
+      ]
+    );
+
+    broadcastChange('rfis');
+    invalidateAllDataCache();
+    res.json({ success: true, id, rfiNumber: num });
+  } catch (error) {
+    console.error('Error submitting RFI:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PATCH /api/rfis/:id
+app.patch('/api/rfis/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { answer, status, priority, assignedTo, suggestedSolution } = req.body;
+
+    const updates: string[] = ['updated_at = NOW()'];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (answer !== undefined) { updates.push(`answer = $${idx++}`); values.push(answer); }
+    if (status !== undefined) { updates.push(`status = $${idx++}`); values.push(status); }
+    if (priority !== undefined) { updates.push(`priority = $${idx++}`); values.push(priority); }
+    if (assignedTo !== undefined) { updates.push(`assigned_to = $${idx++}`); values.push(assignedTo); }
+    if (suggestedSolution !== undefined) { updates.push(`suggested_solution = $${idx++}`); values.push(suggestedSolution); }
+
+    if (updates.length > 1) {
+      values.push(id);
+      await pool.query(`UPDATE project_rfis SET ${updates.join(', ')} WHERE id = $${idx}`, values);
+    }
+
+    broadcastChange('rfis');
+    invalidateAllDataCache();
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error('Error updating RFI:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// COMMERCIAL FIT-OUT QUOTATION CRM REST API
+// ============================================================================
+
+// GET /api/quotations
+app.get('/api/quotations', async (req, res) => {
+  try {
+    const dbQuotationsRes = await pool.query('SELECT * FROM fitout_quotations ORDER BY created_at DESC');
+    const quotations = (dbQuotationsRes.rows || []).map((q: any) => ({
+      id: q.id,
+      clientName: q.client_name,
+      clientEmail: q.client_email,
+      clientPhone: q.client_phone,
+      projectScope: q.project_scope,
+      estimatedCost: Number(q.estimated_cost || 0),
+      estimatedWeeks: Number(q.estimated_weeks || 0),
+      estimatorArea: Number(q.estimator_area || 0),
+      spaceType: q.space_type,
+      finishTier: q.finish_tier,
+      projectNotes: q.project_notes,
+      status: q.status || 'NEW_INQUIRY',
+      createdAt: q.created_at ? q.created_at.toISOString() : undefined,
+    }));
+    res.json(quotations);
+  } catch (error) {
+    console.error('Error fetching quotations:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /api/quotations
+app.post('/api/quotations', async (req, res) => {
+  try {
+    const {
+      clientName, clientEmail, clientPhone, projectScope,
+      estimatedCost, estimatedWeeks, estimatorArea, spaceType,
+      finishTier, projectNotes
+    } = req.body;
+
+    if (!clientName || !clientEmail || !projectScope) {
+      return res.status(400).json({ error: 'Client name, email, and scope are required' });
+    }
+
+    const id = `QUOTE-${Date.now().toString().slice(-4)}`;
+    await pool.query(
+      `INSERT INTO fitout_quotations 
+       (id, client_name, client_email, client_phone, project_scope, estimated_cost, estimated_weeks, estimator_area, space_type, finish_tier, project_notes, status, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'NEW_INQUIRY', NOW())`,
+      [
+        id,
+        clientName,
+        clientEmail,
+        clientPhone || null,
+        projectScope,
+        Number(estimatedCost) || 0,
+        Number(estimatedWeeks) || 0,
+        Number(estimatorArea) || 0,
+        spaceType || 'Corporate Office',
+        finishTier || 'Executive Turnkey',
+        projectNotes || null
+      ]
+    );
+
+    broadcastChange('quotations');
+    invalidateAllDataCache();
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error('Error creating quotation:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// PATCH /api/quotations/:id
+app.patch('/api/quotations/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, projectNotes } = req.body;
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (status !== undefined) { updates.push(`status = $${idx++}`); values.push(status); }
+    if (projectNotes !== undefined) { updates.push(`project_notes = $${idx++}`); values.push(projectNotes); }
+
+    if (updates.length > 0) {
+      values.push(id);
+      await pool.query(`UPDATE fitout_quotations SET ${updates.join(', ')} WHERE id = $${idx}`, values);
+    }
+
+    broadcastChange('quotations');
+    invalidateAllDataCache();
+    res.json({ success: true, id });
+  } catch (error) {
+    console.error('Error updating quotation:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /api/quotations/:id/convert-to-project
+app.post('/api/quotations/:id/convert-to-project', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const qRes = await pool.query('SELECT * FROM fitout_quotations WHERE id = $1', [id]);
+    if (!qRes.rows || qRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Quotation not found' });
+    }
+    const q = qRes.rows[0];
+    const newProjId = `PRJ-${Date.now().toString().slice(-4)}`;
+    const handoverDate = new Date();
+    handoverDate.setDate(handoverDate.getDate() + (Number(q.estimated_weeks || 10) * 7));
+
+    await pool.query(`
+      INSERT INTO commercial_projects 
+      (id, name, client_name, description, location, budget, funds_collected, progress_percentage, status, target_handover_date, start_date, assigned_workers_count, tasks_count, milestones_count)
+      VALUES 
+      ($1, $2, $3, $4, $5, $6, $7, 0, 'IN_PROGRESS', $8, CURRENT_DATE, 12, 10, 4)
+    `, [
+      newProjId,
+      `${q.client_name} Fit-Out`,
+      q.client_name,
+      q.project_scope || 'Commercial Turnkey Fit-Out',
+      'Laguna / Metro Manila Prime Commercial Zone',
+      Number(q.estimated_cost) || 3500000,
+      0,
+      handoverDate
+    ]);
+
+    await pool.query('UPDATE fitout_quotations SET status = $1 WHERE id = $2', ['CONVERTED', id]);
+    broadcastChange('quotations');
+    broadcastChange('projects');
+    invalidateAllDataCache();
+
+    res.json({ 
+      success: true, 
+      projectId: newProjId, 
+      message: `Quotation converted to Commercial Project ${newProjId}!` 
+    });
+  } catch (error) {
+    console.error('Error converting quotation to project:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// USER DIRECTORY REST API (ADMIN & PM LOOKUP)
+// ============================================================================
+
+// GET /api/users
+app.get('/api/users', async (req, res) => {
+  try {
+    const { role } = req.query;
+    const whereClause: any = {};
+    if (role && typeof role === 'string') {
+      whereClause.role = role as Role;
+    }
+    const users = await prisma.user.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        accountStatus: true,
+        contact: true,
+        createdAt: true
+      },
+      orderBy: { name: 'asc' }
+    });
+    res.json(users);
+  } catch (error) {
+    console.error('Error fetching users:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// CORE MANPOWER ALLOCATION & DAILY AUDIT REST API
+// ============================================================================
+
+// POST /api/ai-recommendations/scan — live AI labor optimization scan
+app.post('/api/ai-recommendations/scan', async (req, res) => {
+  try {
+    // 1. Fetch live commercial projects
+    const pRes = await pool.query('SELECT * FROM commercial_projects ORDER BY progress_percentage DESC');
+    const projects = pRes.rows;
+
+    // 2. Fetch contractors
+    const contractors = await prisma.contractor.findMany();
+
+    const donors = projects.filter(p => Number(p.progress_percentage || 0) >= 80 || p.status === 'TURNOVER_READY' || p.status === 'HANDED_OVER');
+    const recipients = projects.filter(p => Number(p.progress_percentage || 0) < 75 && p.status !== 'HANDED_OVER');
+
+    const newRecommendations: any[] = [];
+
+    if (donors.length > 0 && recipients.length > 0) {
+      donors.forEach((donor, dIdx) => {
+        const target = recipients[dIdx % recipients.length];
+        const donorWorkers = contractors.filter(c => 
+          (c.activeProjectSite && c.activeProjectSite.toLowerCase().includes(donor.name.toLowerCase())) ||
+          (c as any).allocationStatus === 'STANDBY'
+        );
+        const candidate = donorWorkers[0] || contractors[dIdx % contractors.length];
+        if (candidate && target) {
+          newRecommendations.push({
+            id: `REC-AI-${Date.now()}-${dIdx}`,
+            title: `Transfer ${candidate.name} (${candidate.specialty}) from ${donor.name} to ${target.name}`,
+            target_lots: target.name,
+            contractor_id: candidate.id,
+            contractor_name: candidate.name,
+            current_headcount: Number(candidate.activeManpower || 10),
+            recommended_headcount: Math.min(20, Number(candidate.activeManpower || 10) + 4),
+            rationale: `Donor site "${donor.name}" has reached ${donor.progress_percentage}% completion. Reallocating trade crew to ${target.name} (${target.progress_percentage}% complete) prevents bottleneck in critical MEP/civil milestones.`,
+            priority: Number(donor.progress_percentage || 0) >= 90 ? 'HIGH' : 'MEDIUM',
+            applied: false
+          });
+        }
+      });
+    }
+
+    // Insert into ai_manpower_recommendations
+    for (const rec of newRecommendations) {
+      await pool.query(
+        `INSERT INTO ai_manpower_recommendations 
+         (id, title, target_lots, contractor_id, contractor_name, current_headcount, recommended_headcount, rationale, priority, applied, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, NOW())
+         ON CONFLICT (id) DO NOTHING`,
+        [rec.id, rec.title, rec.target_lots, rec.contractor_id, rec.contractor_name, rec.current_headcount, rec.recommended_headcount, rec.rationale, rec.priority]
+      );
+    }
+
+    broadcastChange('aiRecommendations');
+    invalidateAllDataCache();
+
+    res.json({ 
+      success: true, 
+      scannedProjects: projects.length,
+      donorsCount: donors.length,
+      recipientsCount: recipients.length,
+      recommendationsGenerated: newRecommendations.length,
+      recommendations: newRecommendations
+    });
+  } catch (error) {
+    console.error('Error running AI manpower scan:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /api/manpower-audits — log daily physical roll-call headcount
+app.post('/api/manpower-audits', async (req, res) => {
+  try {
+    const {
+      contractorId,
+      contractorName,
+      specialty,
+      shift,
+      claimedHeadcount,
+      verifiedHeadcount,
+      assignedSectorOrLot,
+      supervisorName,
+      gpsCoordinates,
+      remarks,
+      photoEvidenceVerified
+    } = req.body;
+
+    if (!contractorName || claimedHeadcount === undefined || verifiedHeadcount === undefined) {
+      return res.status(400).json({ error: 'Contractor name, claimed headcount, and verified headcount are required' });
+    }
+
+    const claimed = Number(claimedHeadcount) || 0;
+    const verified = Number(verifiedHeadcount) || 0;
+    const discrepancy = claimed - verified;
+    const status = discrepancy > 0 ? 'DISCREPANCY_FLAGGED' : 'VERIFIED_MATCH';
+
+    const auditId = `AUD-${Date.now().toString().slice(-5)}`;
+    await pool.query(
+      `INSERT INTO daily_manpower_audits 
+       (id, date, "contractorId", "contractorName", specialty, shift, "claimedHeadcount", "verifiedHeadcount", discrepancy, "assignedSectorOrLot", "supervisorName", "gpsCoordinates", "verificationStatus", "photoEvidenceVerified", remarks, "productivityIndex", "createdAt", "updatedAt")
+       VALUES ($1, NOW(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW(), NOW())`,
+      [
+        auditId,
+        contractorId || 'CONT-001',
+        contractorName,
+        specialty || 'General Trade',
+        shift || 'Day Shift',
+        claimed,
+        verified,
+        discrepancy,
+        assignedSectorOrLot || 'Active Commercial Site',
+        supervisorName || 'Site Quality Engineer',
+        gpsCoordinates || '14.2789° N, 121.1245° E',
+        status,
+        Boolean(photoEvidenceVerified),
+        remarks || (discrepancy > 0 ? `Ghost-worker alert: ${discrepancy} worker(s) unverified on site roll-call.` : '100% attendance verified.'),
+        Math.max(50, Math.min(100, Math.round((verified / Math.max(1, claimed)) * 100)))
+      ]
+    );
+
+    // If discrepancy, log an alert in audit log
+    if (discrepancy > 0) {
+      await prisma.processAuditLog.create({
+        data: {
+          entityType: 'CONTRACTOR',
+          entityId: contractorId || auditId,
+          action: 'DISCREPANCY_FLAGGED',
+          actorName: supervisorName || 'Site Engineer',
+          actorRole: 'ENGINEER',
+          details: `Roll-call discrepancy on ${contractorName}: Claimed ${claimed} workers, verified only ${verified} (discrepancy: ${discrepancy} ghost/absent workers).`,
+        }
+      }).catch(() => {});
+    }
+
+    broadcastChange('manpowerAudits');
+    broadcastChange('auditLogs');
+    invalidateAllDataCache();
+
+    res.json({
+      success: true,
+      id: auditId,
+      discrepancy,
+      status,
+      message: discrepancy > 0 ? `Flagged discrepancy of ${discrepancy} worker(s)!` : 'Headcount verified with zero discrepancy.'
+    });
+  } catch (error) {
+    console.error('Error logging daily manpower audit:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });

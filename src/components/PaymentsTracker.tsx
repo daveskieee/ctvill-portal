@@ -28,6 +28,8 @@ export interface InstallmentRowItem {
 interface PaymentsTrackerProps {
   clients: Client[];
   projects?: ProjectProfile[];
+  userRole?: string;
+  isPrivateAccounting?: boolean;
   onRecordPayment?: (paymentData: {
     clientId: string;
     amount: number;
@@ -37,7 +39,14 @@ interface PaymentsTrackerProps {
   }) => Promise<void>;
 }
 
-export default function PaymentsTracker({ clients = [], projects = [], onRecordPayment }: PaymentsTrackerProps) {
+export default function PaymentsTracker({ 
+  clients = [], 
+  projects = [], 
+  userRole = 'ADMIN',
+  isPrivateAccounting = false,
+  onRecordPayment 
+}: PaymentsTrackerProps) {
+  const isAdmin = (userRole || '').toUpperCase() === 'ADMIN' || (userRole || '').toUpperCase() === 'OPERATIONS_DIRECTOR';
   // Local list of installment records initialized from clients
   const [installments, setInstallments] = useState<InstallmentRowItem[]>(() => {
     return clients.flatMap(client => {
@@ -255,6 +264,68 @@ export default function PaymentsTracker({ clients = [], projects = [], onRecordP
     }
   };
 
+  // Check confidentiality policy:
+  // If prop isPrivateAccounting is set OR if the selected project filter matches a project with isPrivateAccounting
+  const matchingProject = projects.find(p => p.name.toLowerCase().includes(selectedProjectFilter.toLowerCase()));
+  const isConfidential = isPrivateAccounting || (selectedProjectFilter !== 'ALL' && matchingProject?.isPrivateAccounting) || false;
+  const isAccessRestricted = isConfidential && !isAdmin;
+
+  if (isAccessRestricted) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 border border-slate-800 p-6 rounded-2xl backdrop-blur-xl shadow-2xl">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase">
+                Restricted Access Policy
+              </span>
+              <span className="text-xs text-slate-400">Financial Ledger Protection</span>
+            </div>
+            <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight flex items-center gap-3">
+              <ShieldAlert className="w-7 h-7 text-amber-400" />
+              Confidential Accounting — Restricted Access
+            </h1>
+            <p className="text-slate-400 text-sm mt-1">
+              Granular financial ledger entries, profit margins, and contractor payment records are protected.
+            </p>
+          </div>
+          {projects.length > 0 && (
+            <select
+              value={selectedProjectFilter}
+              onChange={(e) => setSelectedProjectFilter(e.target.value)}
+              aria-label="Filter by Project Profile"
+              className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white"
+            >
+              <option value="ALL">All Projects</option>
+              {projects.map(p => (
+                <option key={p.id} value={p.name}>
+                  {p.name} {p.isPrivateAccounting ? '(Confidential)' : ''}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+
+        <div className="bg-slate-900/60 border border-amber-500/30 rounded-2xl p-10 text-center flex flex-col items-center justify-center max-w-2xl mx-auto shadow-2xl">
+          <div className="w-16 h-16 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mb-4 text-amber-400">
+            <ShieldAlert className="w-8 h-8" />
+          </div>
+          <h3 className="text-xl font-bold text-white mb-2">Confidential Financial Ledger</h3>
+          <p className="text-sm text-slate-400 max-w-md mb-6 leading-relaxed">
+            Granular ledger entries, payment schedules, and contractor disbursement records for this project have been designated as private accounting. Access is strictly restricted to Executive Admin authority.
+          </p>
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-xs text-slate-300">
+            <span>Required Authority:</span>
+            <span className="font-mono font-bold text-amber-400">ADMIN</span>
+            <span className="text-slate-500">•</span>
+            <span>Your Session:</span>
+            <span className="font-mono text-slate-400">{userRole}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -264,6 +335,12 @@ export default function PaymentsTracker({ clients = [], projects = [], onRecordP
             <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold tracking-wider uppercase">
               Financial Transparency
             </span>
+            {isConfidential && (
+              <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase flex items-center gap-1">
+                <ShieldAlert className="w-3 h-3 text-amber-400" />
+                Confidential Accounting (Admin View)
+              </span>
+            )}
             <span className="text-xs text-slate-400">Installment Ledger & Corporate Receivables</span>
           </div>
           <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight flex items-center gap-3">

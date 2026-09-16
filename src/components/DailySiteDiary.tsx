@@ -3,35 +3,40 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Sun, CloudRain, Cloud, CloudLightning, CloudSun, Wind, Droplets, 
   Thermometer, Compass, Gauge, AlertTriangle, CheckCircle2, 
   RefreshCw, MapPin, Calendar, Clock, Plus, X, ChevronRight,
   ShieldAlert, Sparkles, Umbrella, Eye, ArrowUpRight, Download,
-  SlidersHorizontal, Check, ShieldCheck, Activity
+  SlidersHorizontal, Check, ShieldCheck, Activity, Search,
+  LocateFixed, Building2
 } from 'lucide-react';
-import { DailySiteLog } from '../types';
+import { DailySiteLog, ProjectProfile } from '../types';
 
 interface DailySiteDiaryProps {
   logs: DailySiteLog[];
+  projects?: ProjectProfile[];
   onAddLog: (log: Omit<DailySiteLog, 'id' | 'createdAt'>) => void;
+  onToggleWeatherSuspension?: (projectId: string, suspended: boolean) => Promise<void> | void;
 }
 
-interface LocationPreset {
+export interface SiteLocation {
   id: string;
   name: string;
   region: string;
   lat: number;
   lon: number;
+  projectId?: string;
 }
 
-const LOCATION_PRESETS: LocationPreset[] = [
-  { id: 'bgc', name: 'BGC Taguig Hub', region: 'Metro Manila', lat: 14.5547, lon: 121.0509 },
-  { id: 'makati', name: 'Makati CBD Office', region: 'Metro Manila', lat: 14.5547, lon: 121.0244 },
-  { id: 'cabuyao', name: 'Cabuyao Commercial Site', region: 'Laguna', lat: 14.2778, lon: 121.1247 },
-  { id: 'alabang', name: 'Alabang Command Center', region: 'Muntinlupa', lat: 14.4217, lon: 121.0427 },
-];
+export const DEFAULT_SITE_LOCATION: SiteLocation = {
+  id: 'nexbridge-default',
+  name: 'NexBridge Software Hub — Level 4 Fit-Out',
+  region: 'Cabuyao Technopark, Laguna',
+  lat: 14.2789,
+  lon: 121.1245,
+};
 
 interface LiveWeatherData {
   temperature: number;
@@ -129,21 +134,64 @@ const TRADE_RULES: TradeRule[] = [
   }
 ];
 
-export default function DailySiteDiary({ logs, onAddLog }: DailySiteDiaryProps) {
-  // Active selected location preset
-  const [selectedLocation, setSelectedLocation] = useState<LocationPreset>(LOCATION_PRESETS[0]);
+export default function DailySiteDiary({ logs, projects = [], onAddLog, onToggleWeatherSuspension }: DailySiteDiaryProps) {
+  // Initial site location based on active project coordinates or default
+  const initialLocation = useMemo<SiteLocation>(() => {
+    if (projects && projects.length > 0) {
+      const p = projects[0];
+      return {
+        id: p.id,
+        name: p.name,
+        region: p.location || 'Laguna, Philippines',
+        lat: p.latitude || (p.name.toLowerCase().includes('bgc') ? 14.5547 : 14.2547),
+        lon: p.longitude || (p.name.toLowerCase().includes('bgc') ? 121.0509 : 121.5056),
+        projectId: p.id,
+      };
+    }
+    return DEFAULT_SITE_LOCATION;
+  }, [projects]);
+
+  // Active dynamic location state
+  const [selectedLocation, setSelectedLocation] = useState<SiteLocation>(initialLocation);
   
+  // Custom Geocoding Search & Device GPS States
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
+  const [isGpsLocating, setIsGpsLocating] = useState(false);
+
+  // Force Majeure Weather Suspension State
+  const activeProject = projects.find(p => p.id === selectedLocation.projectId);
+  const [isForceMajeureSuspended, setIsForceMajeureSuspended] = useState<boolean>(
+    Boolean(activeProject?.weatherSuspended)
+  );
+  const [suspensionReason, setSuspensionReason] = useState<string>('Extreme weather conditions (heavy rains / gale winds)');
+
+  useEffect(() => {
+    if (activeProject) {
+      setIsForceMajeureSuspended(Boolean(activeProject.weatherSuspended));
+    }
+  }, [activeProject]);
+
   // Live Weather Telemetry State
   const [liveWeather, setLiveWeather] = useState<LiveWeatherData | null>(null);
   const [forecast, setForecast] = useState<DailyForecastItem[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [lastFetched, setLastFetched] = useState<Date | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
+  const [isCachedTelemetry, setIsCachedTelemetry] = useState<boolean>(false);
+
+  // Manual Weather Fallback State (Offline Resilience: condition, temperature, wind)
+  const [isManualOverride, setIsManualOverride] = useState<boolean>(false);
+  const [manualCondition, setManualCondition] = useState<'SUNNY' | 'OVERCAST' | 'RAINY' | 'STORM'>('SUNNY');
+  const [manualTemp, setManualTemp] = useState<number>(29);
+  const [manualWind, setManualWind] = useState<number>(16);
 
   // Modal State for Logging a Weather Observation
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [logNotes, setLogNotes] = useState<string>('');
-  const [observerName, setObserverName] = useState<string>('Site Operations PM');
+  const [observerName, setObserverName] = useState<string>('Engr. Ricardo Ramos (PM)');
   const [notification, setNotification] = useState<string | null>(null);
 
   // Trade Safety Calculator & What-If Simulator State
@@ -153,6 +201,111 @@ export default function DailySiteDiary({ logs, onAddLog }: DailySiteDiaryProps) 
   const [simPrecip, setSimPrecip] = useState<number>(0);
   const [simTemp, setSimTemp] = useState<number>(31);
   const [simHumidity, setSimHumidity] = useState<number>(65);
+
+  // Device GPS Location Handler
+  const handleUseDeviceGPS = () => {
+    if (!navigator.geolocation) {
+      setNotification('⚠️ Geolocation is not supported in this browser.');
+      setTimeout(() => setNotification(null), 3500);
+      return;
+    }
+    setIsGpsLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const { latitude, longitude } = pos.coords;
+        setSelectedLocation({
+          id: `gps-${Date.now()}`,
+          name: 'Device GPS Site',
+          region: `Coordinates: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+          lat: latitude,
+          lon: longitude,
+          projectId: selectedLocation.projectId
+        });
+        setIsGpsLocating(false);
+        setNotification(`📍 Detected site GPS coordinates (${latitude.toFixed(4)}, ${longitude.toFixed(4)}). Fetching weather...`);
+        setTimeout(() => setNotification(null), 3500);
+      },
+      (err) => {
+        setIsGpsLocating(false);
+        setNotification(`⚠️ GPS detection failed: ${err.message}. Using default location.`);
+        setTimeout(() => setNotification(null), 3500);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
+  };
+
+  // Custom Geocoding Search via Open-Meteo API
+  const handleSearchLocation = async (query: string) => {
+    setSearchQuery(query);
+    if (!query || query.trim().length < 2) {
+      setSearchResults([]);
+      setShowSearchDropdown(false);
+      return;
+    }
+    setIsSearching(true);
+    try {
+      const res = await fetch(
+        `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=en&format=json`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setSearchResults(data.results || []);
+        setShowSearchDropdown(true);
+      }
+    } catch (err) {
+      console.warn('Geocoding search failed:', err);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const handleSelectSearchResult = (item: any) => {
+    setSelectedLocation({
+      id: `custom-${item.id}`,
+      name: item.name,
+      region: [item.admin1, item.country].filter(Boolean).join(', '),
+      lat: item.latitude,
+      lon: item.longitude,
+      projectId: selectedLocation.projectId
+    });
+    setSearchQuery('');
+    setShowSearchDropdown(false);
+    setNotification(`📍 Site location set to ${item.name}, ${item.admin1 || ''}`);
+    setTimeout(() => setNotification(null), 3500);
+  };
+
+  // Force Majeure Weather Suspension Toggle
+  const handleToggleForceMajeure = async () => {
+    const nextState = !isForceMajeureSuspended;
+    setIsForceMajeureSuspended(nextState);
+
+    const activeProjectId = selectedLocation.projectId || (projects && projects[0]?.id);
+    if (activeProjectId) {
+      try {
+        await fetch(`/api/projects/${activeProjectId}/weather-suspension`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            suspended: nextState,
+            reason: suspensionReason,
+            actorName: observerName
+          })
+        });
+        if (onToggleWeatherSuspension) {
+          await onToggleWeatherSuspension(activeProjectId, nextState);
+        }
+      } catch (err) {
+        console.warn('Error syncing weather suspension to server:', err);
+      }
+    }
+
+    setNotification(
+      nextState
+        ? '⚠️ WORK SUSPENDED DUE TO WEATHER (FORCE MAJEURE) ACTIVATED. Project timeline flagged for weather extension.'
+        : '✅ Weather suspension lifted. Regular site execution resumed.'
+    );
+    setTimeout(() => setNotification(null), 4000);
+  };
 
   // Interpret WMO Weather Code
   const getWeatherInfo = (code: number) => {
@@ -195,11 +348,49 @@ export default function DailySiteDiary({ logs, onAddLog }: DailySiteDiaryProps) 
     return directions[index];
   };
 
-  // Fetch Live Weather from Open-Meteo API
+  // Fetch Live Weather with PostgreSQL local cache & offline resilience
   const fetchWeather = useCallback(async () => {
     setIsLoading(true);
     setFetchError(null);
     try {
+      // 1. First Priority: Call backend endpoint backed by PostgreSQL weather cache
+      try {
+        const query = `?lat=${selectedLocation.lat}&lon=${selectedLocation.lon}&location=${encodeURIComponent(selectedLocation.name)}`;
+        const backendRes = await fetch(`/api/weather/live${query}`);
+        if (backendRes.ok) {
+          const bData = await backendRes.json();
+          if (bData?.success && bData?.weather) {
+            const w = bData.weather;
+            setLiveWeather({
+              temperature: w.temperature,
+              apparentTemperature: w.apparentTemperature,
+              humidity: w.humidity,
+              precipitation: w.precipitation,
+              weatherCode: w.weatherCode,
+              windSpeed: w.windSpeed,
+              windDirection: w.windDirection,
+              pressure: w.pressure,
+              time: w.time || new Date().toISOString(),
+            });
+            setIsCachedTelemetry(Boolean(bData.cached));
+            setIsManualOverride(false);
+
+            if (!isSimulationMode) {
+              setSimWind(Math.round(w.windSpeed));
+              setSimPrecip(w.precipitation);
+              setSimTemp(Math.round(w.temperature));
+              setSimHumidity(w.humidity);
+            }
+            setLastFetched(new Date());
+            setIsLoading(false);
+            return;
+          }
+        }
+      } catch (backendErr) {
+        console.warn('Backend weather endpoint unavailable, attempting direct provider:', backendErr);
+      }
+
+      // 2. Direct Open-Meteo fallback
       const url = `https://api.open-meteo.com/v1/forecast?latitude=${selectedLocation.lat}&longitude=${selectedLocation.lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,wind_speed_10m,wind_direction_10m,surface_pressure&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,wind_speed_10m_max&timezone=Asia%2FManila`;
       const res = await fetch(url);
       if (!res.ok) throw new Error(`Weather telemetry server returned code ${res.status}`);
@@ -217,6 +408,8 @@ export default function DailySiteDiary({ logs, onAddLog }: DailySiteDiaryProps) 
           pressure: data.current.surface_pressure,
           time: data.current.time,
         });
+        setIsCachedTelemetry(false);
+        setIsManualOverride(false);
 
         // Initialize simulation default from live readings
         if (!isSimulationMode) {
@@ -246,12 +439,26 @@ export default function DailySiteDiary({ logs, onAddLog }: DailySiteDiaryProps) 
 
       setLastFetched(new Date());
     } catch (err: any) {
-      console.error('Failed to fetch live weather:', err);
-      setFetchError(err.message || 'Unable to retrieve live meteorological data');
+      console.warn('Weather sensors offline, switching to graceful manual input:', err);
+      setFetchError('Offline or location services unreachable. Manual site override enabled.');
+      setIsManualOverride(true);
+      // Graceful manual weather state
+      const code = manualCondition === 'SUNNY' ? 0 : manualCondition === 'OVERCAST' ? 3 : manualCondition === 'RAINY' ? 61 : 95;
+      setLiveWeather({
+        temperature: manualTemp,
+        apparentTemperature: manualTemp + 1,
+        humidity: 75,
+        precipitation: manualCondition === 'RAINY' ? 4.5 : manualCondition === 'STORM' ? 22 : 0,
+        weatherCode: code,
+        windSpeed: manualCondition === 'STORM' ? 48 : 14,
+        windDirection: 90,
+        pressure: 1012,
+        time: new Date().toISOString()
+      });
     } finally {
       setIsLoading(false);
     }
-  }, [selectedLocation, isSimulationMode]);
+  }, [selectedLocation, isSimulationMode, manualCondition, manualTemp]);
 
   useEffect(() => {
     fetchWeather();
@@ -374,15 +581,21 @@ export default function DailySiteDiary({ logs, onAddLog }: DailySiteDiaryProps) 
     e.preventDefault();
     if (!liveWeather) return;
 
+    const finalWeatherType = isManualOverride ? manualCondition : currentWeatherInfo.conditionType;
+    const finalTemp = `${isManualOverride ? manualTemp : liveWeather.temperature.toFixed(1)}°C`;
+    const finalLabel = isManualOverride 
+      ? (manualCondition === 'SUNNY' ? 'Clear Sky' : manualCondition === 'OVERCAST' ? 'Overcast' : manualCondition === 'RAINY' ? 'Light Rain' : 'Heavy Rain / Suspended')
+      : currentWeatherInfo.label;
+
     onAddLog({
       date: new Date().toISOString(),
-      weather: currentWeatherInfo.conditionType,
-      temperature: `${liveWeather.temperature.toFixed(1)}°C`,
+      weather: finalWeatherType,
+      temperature: finalTemp,
       activeHeadcount: 0,
-      equipmentOnSite: `Wind: ${liveWeather.windSpeed.toFixed(1)} km/h (${getWindDirection(liveWeather.windDirection)}) | Humidity: ${liveWeather.humidity}% | Pressure: ${liveWeather.pressure.toFixed(0)} hPa`,
-      toolboxTopic: `Weather Condition: ${currentWeatherInfo.label}`,
-      workCompleted: `Meteorological Snapshot for ${selectedLocation.name} (${selectedLocation.region}): ${currentWeatherInfo.label}. Ambient: ${liveWeather.temperature.toFixed(1)}°C (Feels like: ${liveWeather.apparentTemperature.toFixed(1)}°C), Humidity: ${liveWeather.humidity}%, Wind: ${liveWeather.windSpeed.toFixed(1)} km/h. ${logNotes.trim() ? `Field Note: ${logNotes.trim()}` : ''}`,
-      delaysOrIssues: liveWeather.precipitation > 0 ? `Precipitation recorded: ${liveWeather.precipitation} mm` : undefined,
+      equipmentOnSite: `Wind: ${liveWeather.windSpeed.toFixed(1)} km/h (${getWindDirection(liveWeather.windDirection)}) | Humidity: ${liveWeather.humidity}% | Mode: ${isManualOverride ? 'Manual Field Entry' : isCachedTelemetry ? 'PostgreSQL Cache' : 'Live Sensor'}`,
+      toolboxTopic: `Weather Condition: ${finalLabel}`,
+      workCompleted: `Meteorological Snapshot for ${selectedLocation.name} (${selectedLocation.region}): ${finalLabel}. Ambient: ${finalTemp}, Humidity: ${liveWeather.humidity}%, Wind: ${liveWeather.windSpeed.toFixed(1)} km/h. ${logNotes.trim() ? `Field Note: ${logNotes.trim()}` : ''}`,
+      delaysOrIssues: (liveWeather.precipitation > 0 || finalWeatherType === 'STORM') ? `Precipitation recorded: ${liveWeather.precipitation} mm` : undefined,
       supervisorName: observerName.trim() || 'Site Weather Officer',
     });
 
@@ -455,24 +668,115 @@ export default function DailySiteDiary({ logs, onAddLog }: DailySiteDiaryProps) 
         </div>
 
         <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Location Selector Dropdown */}
-          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white">
-            <MapPin className="w-3.5 h-3.5 text-amber-400" />
-            <select
-              value={selectedLocation.id}
-              onChange={(e) => {
-                const found = LOCATION_PRESETS.find(p => p.id === e.target.value);
-                if (found) setSelectedLocation(found);
-              }}
-              className="bg-transparent text-xs text-white focus:outline-none cursor-pointer pr-1"
-            >
-              {LOCATION_PRESETS.map((loc) => (
-                <option key={loc.id} value={loc.id} className="bg-slate-950 text-white">
-                  {loc.name} ({loc.region})
-                </option>
-              ))}
-            </select>
+          {/* Dynamic Active Project Selector */}
+          {projects && projects.length > 0 && (
+            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white">
+              <Building2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+              <select
+                value={selectedLocation.projectId || ''}
+                onChange={(e) => {
+                  const proj = projects.find(p => p.id === e.target.value);
+                  if (proj) {
+                    setSelectedLocation({
+                      id: proj.id,
+                      name: proj.name,
+                      region: proj.location || 'Laguna, Philippines',
+                      lat: proj.latitude || (proj.name.toLowerCase().includes('bgc') ? 14.5547 : 14.2547),
+                      lon: proj.longitude || (proj.name.toLowerCase().includes('bgc') ? 121.0509 : 121.5056),
+                      projectId: proj.id
+                    });
+                  }
+                }}
+                className="bg-transparent text-xs text-white focus:outline-none cursor-pointer pr-1 max-w-[150px] truncate"
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id} className="bg-slate-950 text-white">
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Device GPS Auto-Detect Button */}
+          <button
+            type="button"
+            onClick={handleUseDeviceGPS}
+            disabled={isGpsLocating}
+            className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+            title="Auto-detect current coordinates using Device GPS"
+          >
+            <LocateFixed className={`w-3.5 h-3.5 ${isGpsLocating ? 'animate-spin text-amber-400' : 'text-emerald-400'}`} />
+            <span className="hidden sm:inline">{isGpsLocating ? 'Locating...' : 'Device GPS'}</span>
+          </button>
+
+          {/* Custom City / Municipality Geocoding Search */}
+          <div className="relative">
+            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white w-40 sm:w-48">
+              <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <input
+                type="text"
+                placeholder="Search municipality..."
+                value={searchQuery}
+                onChange={(e) => handleSearchLocation(e.target.value)}
+                onFocus={() => { if (searchResults.length > 0) setShowSearchDropdown(true); }}
+                className="bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none w-full"
+              />
+              {isSearching && <RefreshCw className="w-3 h-3 animate-spin text-amber-400 shrink-0" />}
+            </div>
+
+            {/* Autocomplete Dropdown */}
+            {showSearchDropdown && searchResults.length > 0 && (
+              <div className="absolute top-full left-0 mt-1 w-60 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+                {searchResults.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleSelectSearchResult(item)}
+                    className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-amber-500 hover:text-slate-950 transition flex flex-col cursor-pointer border-b border-slate-800 last:border-0"
+                  >
+                    <span className="font-bold">{item.name}</span>
+                    <span className="text-[10px] opacity-75">{[item.admin1, item.country].filter(Boolean).join(', ')} ({item.latitude?.toFixed(2)}°, {item.longitude?.toFixed(2)}°)</span>
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
+
+          {/* Work Suspended (Force Majeure) Toggle Button */}
+          <button
+            type="button"
+            onClick={handleToggleForceMajeure}
+            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+              isForceMajeureSuspended
+                ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400 shadow-lg shadow-rose-600/30'
+                : 'bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border-rose-800'
+            }`}
+            title="Toggle Work Stoppage due to Severe Weather (Force Majeure)"
+          >
+            <ShieldAlert className={`w-3.5 h-3.5 ${isForceMajeureSuspended ? 'animate-bounce text-amber-300' : 'text-rose-400'}`} />
+            <span className="truncate">{isForceMajeureSuspended ? 'Force Majeure: SUSPENDED' : 'Force Majeure Stop'}</span>
+          </button>
+
+          {/* PostgreSQL Local Cache Telemetry Badge */}
+          <div className="hidden lg:flex items-center gap-1.5 px-3 py-1.5 bg-slate-900 border border-slate-800 rounded-xl text-[11px] font-mono text-slate-300">
+            <span className={`w-2 h-2 rounded-full ${isCachedTelemetry ? 'bg-indigo-400' : 'bg-emerald-400 animate-pulse'}`} />
+            <span>{isCachedTelemetry ? 'PostgreSQL Cache Active' : 'Live Sensors Active'}</span>
+          </div>
+
+          {/* Manual Fallback Mode Toggle */}
+          <button
+            onClick={() => setIsManualOverride(prev => !prev)}
+            className={`p-2 rounded-xl text-xs transition-colors border flex items-center gap-1.5 cursor-pointer ${
+              isManualOverride
+                ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+            }`}
+            title="Toggle Manual Site Weather Fallback"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">{isManualOverride ? 'Manual Override ON' : 'Manual Fallback'}</span>
+          </button>
 
           {/* Refresh Button */}
           <button
@@ -505,6 +809,127 @@ export default function DailySiteDiary({ logs, onAddLog }: DailySiteDiaryProps) 
           </button>
         </div>
       </div>
+
+      {/* Force Majeure Active Warning Banner */}
+      {isForceMajeureSuspended && (
+        <div className="bg-rose-950/95 border-2 border-rose-500 rounded-2xl p-4 shadow-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <div className="p-3 bg-rose-900 border border-rose-500 rounded-xl text-rose-200 shrink-0">
+              <ShieldAlert className="w-6 h-6 text-rose-400 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded bg-rose-500 text-slate-950 text-[10px] font-black uppercase tracking-wider font-mono">
+                  FORCE MAJEURE ACTIVE
+                </span>
+                <h3 className="text-sm font-bold text-white">Work Suspended Due to Extreme Weather Conditions</h3>
+              </div>
+              <p className="text-xs text-rose-200/80 mt-1 leading-relaxed">
+                Site execution at <strong className="text-white">{selectedLocation.name}</strong> is currently suspended under Force Majeure protocols. Timeline variance and handover schedules have been flagged for contractual delay extension.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={handleToggleForceMajeure}
+            className="px-3.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-rose-500 text-rose-200 text-xs font-bold transition cursor-pointer shrink-0"
+          >
+            Lift Weather Suspension
+          </button>
+        </div>
+      )}
+
+      {/* Manual Weather Fallback Bar (For Offline / Location Resilience) */}
+      {(isManualOverride || fetchError) && (
+        <div className="bg-slate-900/90 border border-amber-500/40 rounded-2xl p-4 shadow-xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-amber-500/20 border border-amber-500/40 rounded-xl text-amber-400">
+              <AlertTriangle className="w-5 h-5" />
+            </div>
+            <div>
+              <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-2">
+                <span>Manual Weather Selection Active</span>
+                <span className="text-[10px] text-amber-400 font-normal">(Offline & Site Resilience Mode)</span>
+              </h4>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Select condition, temperature, and wind speed manually for {selectedLocation.name}.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+            {/* Condition Quick Selectors */}
+            <div className="flex items-center gap-1 bg-slate-950 border border-slate-800 rounded-xl p-1">
+              {[
+                { label: 'Clear Sky', condition: 'SUNNY' as const, icon: Sun },
+                { label: 'Overcast', condition: 'OVERCAST' as const, icon: Cloud },
+                { label: 'Light Rain', condition: 'RAINY' as const, icon: CloudRain },
+                { label: 'Heavy Rain / Suspended', condition: 'STORM' as const, icon: CloudLightning },
+              ].map(({ label, condition, icon: Icon }) => (
+                <button
+                  key={condition}
+                  type="button"
+                  onClick={() => {
+                    setManualCondition(condition);
+                    const code = condition === 'SUNNY' ? 0 : condition === 'OVERCAST' ? 3 : condition === 'RAINY' ? 61 : 95;
+                    setLiveWeather(prev => prev ? {
+                      ...prev,
+                      weatherCode: code,
+                      precipitation: condition === 'RAINY' ? 4.5 : condition === 'STORM' ? 25 : 0
+                    } : null);
+                  }}
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
+                    manualCondition === condition
+                      ? 'bg-amber-500 text-slate-950 font-bold'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span className="hidden xl:inline">{label}</span>
+                </button>
+              ))}
+            </div>
+
+            {/* Editable Temperature Input */}
+            <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
+              <Thermometer className="w-3.5 h-3.5 text-amber-400" />
+              <span className="text-[11px] text-slate-400 font-mono">Temp:</span>
+              <input
+                type="number"
+                min={10}
+                max={45}
+                value={manualTemp}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setManualTemp(val);
+                  setLiveWeather(prev => prev ? { ...prev, temperature: val, apparentTemperature: val + 1 } : null);
+                }}
+                className="w-12 bg-transparent text-xs text-white font-mono font-bold focus:outline-none"
+              />
+              <span className="text-xs text-white">°C</span>
+            </div>
+
+            {/* Editable Wind Speed Input */}
+            <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5">
+              <Wind className="w-3.5 h-3.5 text-blue-400" />
+              <span className="text-[11px] text-slate-400 font-mono">Wind:</span>
+              <input
+                type="number"
+                min={0}
+                max={150}
+                value={manualWind}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setManualWind(val);
+                  setLiveWeather(prev => prev ? { ...prev, windSpeed: val } : null);
+                }}
+                className="w-12 bg-transparent text-xs text-white font-mono font-bold focus:outline-none"
+              />
+              <span className="text-xs text-slate-400 font-mono">km/h</span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {notification && (
         <div className="p-4 rounded-xl bg-emerald-950/80 text-emerald-300 border border-emerald-800 text-xs font-mono flex items-center gap-2 animate-fadeIn">
@@ -968,9 +1393,45 @@ export default function DailySiteDiary({ logs, onAddLog }: DailySiteDiaryProps) 
 
             <form onSubmit={handleSaveObservation} className="space-y-4">
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs space-y-1 font-mono">
-                <div className="text-slate-400">Active Site: <strong className="text-white">{selectedLocation.name}</strong></div>
-                <div className="text-slate-400">Atmospheric State: <strong className="text-amber-400">{currentWeatherInfo.label}</strong></div>
-                <div className="text-slate-400">Ambient Temp: <strong className="text-white">{liveWeather?.temperature.toFixed(1)}°C</strong> | Wind: <strong className="text-white">{liveWeather?.windSpeed.toFixed(1)} km/h</strong></div>
+                <div className="text-slate-400">Active Site: <strong className="text-white">{selectedLocation.name}</strong> ({selectedLocation.region})</div>
+                <div className="text-slate-400">Current Reading: <strong className="text-amber-400">{currentWeatherInfo.label}</strong> • {liveWeather?.temperature.toFixed(1)}°C</div>
+              </div>
+
+              {/* Editable Condition & Temperature for Field Override */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Condition</label>
+                  <select
+                    value={manualCondition}
+                    onChange={(e) => {
+                      const cond = e.target.value as any;
+                      setManualCondition(cond);
+                      const code = cond === 'SUNNY' ? 0 : cond === 'OVERCAST' ? 3 : cond === 'RAINY' ? 61 : 95;
+                      setLiveWeather(prev => prev ? { ...prev, weatherCode: code } : null);
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
+                  >
+                    <option value="SUNNY">Clear Sky</option>
+                    <option value="OVERCAST">Overcast</option>
+                    <option value="RAINY">Light Rain</option>
+                    <option value="STORM">Heavy Rain / Suspended</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Ambient Temp (°C)</label>
+                  <input
+                    type="number"
+                    min={10}
+                    max={45}
+                    value={manualTemp}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      setManualTemp(val);
+                      setLiveWeather(prev => prev ? { ...prev, temperature: val, apparentTemperature: val + 1 } : null);
+                    }}
+                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none font-mono"
+                  />
+                </div>
               </div>
 
               <div>
