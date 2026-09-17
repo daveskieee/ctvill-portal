@@ -977,8 +977,31 @@ export default function App() {
     // Mark AI recommendation as applied
     setAiRecommendations(prev => prev.map(r => r.id === recId ? { ...r, applied: true } : r));
 
-    // Update contractor headcount
-    setContractors(prev => prev.map(c => c.id === rec.contractorId ? { ...c, activeManpower: rec.recommendedHeadcount } : c));
+    // Update contractor activeProjectSite and headcount in real-time
+    const targetWorkerId = rec.workerId || rec.contractorId;
+    if (rec.targetProjectName && targetWorkerId) {
+      setContractors(prev => prev.map(c => c.id === targetWorkerId ? {
+        ...c,
+        activeProjectSite: rec.targetProjectName,
+        status: 'ACTIVE',
+        activeManpower: rec.recommendedHeadcount || c.activeManpower
+      } : c));
+
+      if (rec.targetProjectId) {
+        setProjects(prev => prev.map(p => {
+          if (p.id === rec.targetProjectId) {
+            const curIds = p.assignedContractorIds || [];
+            const nextIds = curIds.includes(targetWorkerId) ? curIds : [...curIds, targetWorkerId];
+            return { ...p, assignedContractorIds: nextIds, assignedWorkersCount: nextIds.length };
+          }
+          if (rec.donorProjectId && p.id === rec.donorProjectId) {
+            const nextIds = (p.assignedContractorIds || []).filter(id => id !== targetWorkerId);
+            return { ...p, assignedContractorIds: nextIds, assignedWorkersCount: nextIds.length };
+          }
+          return p;
+        }));
+      }
+    }
 
     try {
       await fetch('/api/labor-allocations/apply-ai-rec', {
@@ -988,6 +1011,19 @@ export default function App() {
       });
     } catch (err) {
       console.error('Failed to sync AI recommendation to database:', err);
+    }
+  };
+
+  const handleDismissAIRecommendation = async (recId: string) => {
+    setAiRecommendations(prev => prev.filter(r => r.id !== recId));
+    try {
+      await fetch('/api/ai-recommendations/dismiss', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recId })
+      });
+    } catch (err) {
+      console.error('Failed to dismiss AI recommendation:', err);
     }
   };
 
@@ -1295,7 +1331,10 @@ export default function App() {
       });
       if (res.ok) {
         const created = await res.json();
-        setProjects(prev => [created, ...prev]);
+        if (created && created.name) {
+          setProjects(prev => [created, ...prev.filter(p => p.id !== created.id)]);
+        }
+        await reloadAllData();
       }
     } catch (err) {
       console.error('Failed to create project:', err);
@@ -1303,6 +1342,8 @@ export default function App() {
   };
 
   const handleUpdateProject = async (id: string, updates: Partial<ProjectProfile>) => {
+    // Optimistic state update across all project views
+    setProjects(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
     try {
       const res = await fetch(`/api/projects/${id}`, {
         method: 'PATCH',
@@ -1311,7 +1352,9 @@ export default function App() {
       });
       if (res.ok) {
         const updated = await res.json();
-        setProjects(prev => prev.map(p => p.id === id ? { ...p, ...updated } : p));
+        if (updated && updated.name) {
+          setProjects(prev => prev.map(p => p.id === id ? { ...p, ...updated } : p));
+        }
       }
     } catch (err) {
       console.error('Failed to update project:', err);
@@ -1555,6 +1598,7 @@ export default function App() {
           onCreateManpowerAudit={handleCreateManpowerAudit}
           onSaveAllocation={handleSaveAllocation}
           onApplyAIRecommendation={handleApplyAIRecommendation}
+          onDismissAIRecommendation={handleDismissAIRecommendation}
           onAddTask={handleAddTask}
           onUpdateTaskStatus={handleUpdateTaskStatus}
           onDeleteTask={handleDeleteTask}

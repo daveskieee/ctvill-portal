@@ -10,7 +10,321 @@ body {
   background-color: #0f172a;
   font-family: var(--font-sans);
   overflow-x: hidden;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
+
+/* Light Theme Variables and Overrides */
+html.light {
+  color-scheme: light;
+}
+
+html.light body {
+  background-color: #f8fafc;
+  color: #0f172a;
+}
+
+/* Main Page Wrappers */
+html.light .min-h-screen,
+html.light #landing-page-root {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+html.light #corporate-footer,
+html.light footer {
+  background-color: #f1f5f9 !important;
+  border-color: #e2e8f0 !important;
+  color: #475569 !important;
+}
+
+/* Universal Slate-950 Containers (Cards, Modals, Sections) */
+html.light [class~="bg-slate-950"]:not([class*="fixed inset-0"]),
+html.light [class*=" bg-slate-950/"]:not([class*="fixed inset-0"]),
+html.light [class^="bg-slate-950/"]:not([class*="fixed inset-0"]) {
+  background-color: #ffffff !important;
+}
+
+/* Universal Slate-900 Containers (Cards, Secondary Sections) */
+html.light [class~="bg-slate-900"]:not([class*="fixed inset-0"]),
+html.light [class*=" bg-slate-900/"]:not([class*="fixed inset-0"]),
+html.light [class^="bg-slate-900/"]:not([class*="fixed inset-0"]) {
+  background-color: #ffffff !important;
+}
+
+/* Section backgrounds in Landing Page with slate-900 or slate-950 */
+html.light section[class*="bg-slate-900"],
+html.light section[class*="bg-slate-950"] {
+  background-color: #f8fafc !important;
+}
+
+html.light section:nth-of-type(even) {
+  background-color: #ffffff !important;
+}
+
+/* Universal Slate-800 Containers (Sub-cards, Pills, Badges, Inner Bars) */
+html.light [class~="bg-slate-800"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
+html.light [class*=" bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
+html.light [class^="bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]) {
+  background-color: #f1f5f9 !important;
+}
+
+/* Slate-700 & Slate-600 */
+html.light [class~="bg-slate-700"],
+html.light [class*=" bg-slate-700/"],
+html.light [class^="bg-slate-700/"] {
+  background-color: #e2e8f0 !important;
+}
+
+/* Pure Black backgrounds (e.g. logo container, icon boxes) */
+html.light [class~="bg-black"]:not([class*="fixed inset-0"]),
+html.light [class*=" bg-black/"]:not([class*="fixed inset-0"]),
+html.light [class^="bg-black/"]:not([class*="fixed inset-0"]) {
+  background-color: #ffffff !important;
+}
+
+/* Gradients in Light Mode */
+html.light [class*="from-slate-950"],
+html.light [class*="from-slate-900"] {
+  background-image: linear-gradient(180deg, #f8fafc 0%, #ffffff 50%, #f1f5f9 100%) !important;
+}
+
+html.light [class*="from-amber-950"] {
+  background-image: linear-gradient(to right, #fffbeb 0%, #ffffff 60%, #fef3c7 100%) !important;
+}
+
+html.light [class*="linear-gradient(to_right,#1e293b"] {
+  background-image: linear-gradient(to right, #e2e8f0 1px, transparent 1px), linear-gradient(to bottom, #e2e8f0 1px, transparent 1px) !important;
+}
+
+html.light .opacity-25.pointer-events-none {
+  opacity: 0.12 !important;
+}
+
+/* Universal Borders in Light Mode */
+html.light [class~="border-slate-800"],
+html.light [class*=" border-slate-800/"],
+html.light [class^="border-slate-800/"],
+html.light [class~="border-slate-700"],
+html.light [class*=" border-slate-700/"],
+html.light [class^="border-slate-700/"],
+html.light [class~="border-slate-600"],
+html.light [class*=" border-slate-600/"],
+html.light [class^="border-slate-600/"] {
+  border-color: #e2e8f0 !important;
+}
+
+/* Typography & Text Contrast */
+html.light [class~="text-white"],
+html.light [class*=" text-white"] {
+  color: #0f172a !important;
+}
+
+html.light [class~="text-slate-100"],
+html.light [class*=" text-slate-100"],
+html.light [class~="text-slate-200"],
+html.light [class*=" text-slate-200"] {
+  color: #1e293b !important;
+}
+
+html.light [class~="text-slate-300"],
+html.light [class*=" text-slate-300"] {
+  color: #334155 !important;
+}
+
+html.light [class~="text-slate-400"],
+html.light [class*=" text-slate-400"],
+html.light [class~="text-slate-500"],
+html.light [class*=" text-slate-500"] {
+  color: #64748b !important;
+}
+
+/* Ensure amber/gold buttons and badges always have readable dark text */
+html.light [class~="bg-amber-500"],
+html.light [class~="bg-amber-400"],
+html.light [class*="from-amber-500"] {
+  color: #0f172a !important;
+}
+
+/* Colored Status Badges & Accents in Light Mode */
+html.light [class*="text-amber-400"],
+html.light [class*="text-amber-300"] {
+  color: #d97706 !important;
+}
+
+html.light [class*="text-emerald-400"] {
+  color: #059669 !important;
+}
+
+html.light [class*="text-teal-400"] {
+  color: #0d9488 !important;
+}
+
+html.light [class*="text-blue-400"] {
+  color: #2563eb !important;
+}
+
+html.light [class*="text-rose-400"] {
+  color: #e11d48 !important;
+}
+
+html.light [class*="text-purple-400"] {
+  color: #7c3aed !important;
+}
+
+html.light [class*="text-cyan-400"] {
+  color: #0891b2 !important;
+}
+
+html.light [class*="text-indigo-400"] {
+  color: #4f46e5 !important;
+}
+
+/* Status Pill Containers */
+html.light [class*="bg-emerald-950"] {
+  background-color: #ecfdf5 !important;
+  border-color: #a7f3d0 !important;
+  color: #047857 !important;
+}
+
+html.light [class*="bg-amber-950"] {
+  background-color: #fffbeb !important;
+  border-color: #fde68a !important;
+  color: #b45309 !important;
+}
+
+html.light [class*="bg-purple-950"] {
+  background-color: #faf5ff !important;
+  border-color: #e9d5ff !important;
+  color: #7e22ce !important;
+}
+
+html.light [class*="bg-rose-950"],
+html.light [class*="bg-red-950"] {
+  background-color: #fff1f2 !important;
+  border-color: #fecdd3 !important;
+  color: #be123c !important;
+}
+
+html.light [class*="bg-blue-950"] {
+  background-color: #eff6ff !important;
+  border-color: #bfdbfe !important;
+  color: #1d4ed8 !important;
+}
+
+/* Subtle inner sub-bars and tracks */
+html.light [class*="bg-slate-950/40"],
+html.light [class*="bg-slate-950/30"],
+html.light [class*="bg-slate-950/20"],
+html.light [class*="bg-slate-950/10"] {
+  background-color: #f1f5f9 !important;
+}
+
+html.light .h-2.bg-slate-800,
+html.light .h-1\.5.bg-slate-800,
+html.light .h-1.bg-slate-800 {
+  background-color: #e2e8f0 !important;
+}
+
+/* Active Amber Badges in Light Mode */
+html.light [class*="bg-amber-500/20"] {
+  background-color: #fef3c7 !important;
+  color: #92400e !important;
+}
+
+html.light [class*="bg-amber-500/10"] {
+  background-color: #fffbeb !important;
+}
+
+html.light [class*="border-amber-500/50"] {
+  border-color: #f59e0b !important;
+}
+
+html.light [class*="border-amber-500/30"],
+html.light [class*="border-amber-500/20"] {
+  border-color: #fcd34d !important;
+}
+
+/* Interactive Hovers */
+html.light [class*="hover:bg-slate-900"]:hover,
+html.light [class*="hover:bg-slate-800"]:hover {
+  background-color: #f1f5f9 !important;
+}
+
+html.light [class*="hover:bg-slate-700"]:hover {
+  background-color: #e2e8f0 !important;
+}
+
+html.light [class*="hover:text-white"]:hover {
+  color: #0f172a !important;
+}
+
+html.light [class*="hover:border-slate-700"]:hover,
+html.light [class*="hover:border-slate-600"]:hover {
+  border-color: #cbd5e1 !important;
+}
+
+/* Inputs, Selects, Textareas */
+html.light input:not([type="checkbox"]):not([type="radio"]),
+html.light select,
+html.light textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+html.light select option {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+}
+
+html.light input::placeholder,
+html.light textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+/* Fullscreen Loading Transition Screen */
+html.light #loading-screen-overlay {
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+html.dark #loading-screen-overlay,
+html:not(.light) #loading-screen-overlay {
+  background-color: #020617 !important;
+  color: #ffffff !important;
+}
+
+/* Modal Backdrops & Overlays - preserve translucent dimming */
+html.light .fixed.inset-0[class*="bg-slate-950"]:not(#loading-screen-overlay),
+html.light .fixed.inset-0[class*="bg-black"]:not(#loading-screen-overlay) {
+  background-color: rgba(15, 23, 42, 0.65) !important;
+}
+
+/* Card & Modal Shadows for clean depth in Light Mode */
+html.light .rounded-3xl,
+html.light .rounded-2xl,
+html.light .rounded-xl {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+}
+
+html.light .fixed [class*="bg-slate-950"],
+html.light .fixed [class*="bg-slate-900"] {
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+}
+
+/* Scrollbars in Light Mode */
+html.light ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+html.light ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+
+html.light ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
 
 @keyframes fadeIn {
   from {
@@ -72,4 +386,13 @@ body {
 
 ::-webkit-scrollbar-thumb:hover {
   background: #334155;
+}
+
+@keyframes dykProgress {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
 }

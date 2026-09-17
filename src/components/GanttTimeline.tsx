@@ -49,6 +49,7 @@ interface GanttTimelineProps {
   siteLogs?: DailySiteLog[];
   milestones?: any[];
   tasks?: any[];
+  onUpdateProject?: (id: string, updates: Partial<ProjectProfile>) => void | Promise<void>;
 }
 
 type ZoomLevel = 'day' | 'week' | 'month';
@@ -215,11 +216,25 @@ export function cascadeDownstreamSchedule(
 export default function GanttTimeline({
   projects = [],
   contractors = [],
-  siteLogs = []
+  siteLogs = [],
+  onUpdateProject
 }: GanttTimelineProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
-    return projects.length > 0 ? projects[0].id : 'PRJ-2281';
+    return projects.length > 0 ? projects[0].id : '';
   });
+
+  // Keep selectedProjectId synchronized with available projects
+  useEffect(() => {
+    if (projects.length > 0) {
+      if (!selectedProjectId || !projects.some(p => p.id === selectedProjectId)) {
+        setSelectedProjectId(projects[0].id);
+      }
+    } else if (selectedProjectId) {
+      setSelectedProjectId('');
+      setTasks([]);
+      setLinks([]);
+    }
+  }, [projects, selectedProjectId]);
 
   const [tasks, setTasks] = useState<GanttTaskItem[]>([]);
   const [links, setLinks] = useState<GanttLinkItem[]>([]);
@@ -227,6 +242,22 @@ export default function GanttTimeline({
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncFeedback, setSyncFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Helper to compute duration-weighted physical progress from tasks
+  const computeProjectProgress = useCallback((taskList: GanttTaskItem[]) => {
+    if (!taskList || taskList.length === 0) return 0;
+    const totalDuration = taskList.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
+    const weightedProgress = taskList.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, curr.duration || 1), 0);
+    return totalDuration > 0 ? Math.round((weightedProgress / totalDuration) * 100) : 0;
+  }, []);
+
+  const currentProjectProgress = useMemo(() => {
+    return computeProjectProgress(tasks);
+  }, [tasks, computeProjectProgress]);
+
+  const activeProject = useMemo(() => {
+    return projects.find(p => p.id === selectedProjectId) || null;
+  }, [projects, selectedProjectId]);
 
   // Edit Modal State
   const [editingTask, setEditingTask] = useState<GanttTaskItem | null>(null);
@@ -305,7 +336,11 @@ export default function GanttTimeline({
   // ==========================================
 
   const loadGanttData = useCallback(async (projectId: string) => {
-    if (!projectId) return;
+    if (!projectId) {
+      setTasks([]);
+      setLinks([]);
+      return;
+    }
     setIsLoading(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/gantt`);
@@ -404,6 +439,13 @@ export default function GanttTimeline({
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const resData = await res.json().catch(() => null);
+      if (resData?.result?.projectProgress !== undefined) {
+        onUpdateProject?.(selectedProjectId, {
+          progressPercentage: resData.result.projectProgress,
+          tasksCount: resData.result.tasksCount
+        });
+      }
       setSyncFeedback({ type: 'success', message: 'Schedule synchronized with database.' });
       setTimeout(() => setSyncFeedback(null), 3000);
     } catch (err) {
@@ -412,7 +454,7 @@ export default function GanttTimeline({
     } finally {
       setIsSyncing(false);
     }
-  }, [selectedProjectId]);
+  }, [selectedProjectId, onUpdateProject]);
 
   const queueDebouncedSync = useCallback((
     action: 'create' | 'update' | 'delete',
@@ -480,7 +522,7 @@ export default function GanttTimeline({
     return { timelineStart: start, timelineEnd: end, totalDays: Math.max(diff, 60) };
   }, [tasks]);
 
-  const timelineWidth = totalDays * columnWidth;
+  const timelineWidth = Math.max(1200, totalDays * columnWidth);
 
   const dateToPixel = useCallback((date: Date | string): number => {
     const d = parseDate(date);
@@ -711,7 +753,13 @@ export default function GanttTimeline({
       const idx = prev.findIndex(t => t.id === updatedTask.id);
       const copy = [...prev];
       copy[idx] = updatedTask;
-      return cascadeDownstreamSchedule(copy, updatedLinks, updatedTask.id);
+      const scheduled = cascadeDownstreamSchedule(copy, updatedLinks, updatedTask.id);
+      const newProg = computeProjectProgress(scheduled);
+      onUpdateProject?.(selectedProjectId, {
+        progressPercentage: newProg,
+        tasksCount: scheduled.length
+      });
+      return scheduled;
     });
 
     syncBackend('update', updatedTask);
@@ -726,10 +774,18 @@ export default function GanttTimeline({
       return;
     }
 
-    setTasks(prev => prev.filter(t => t.id !== taskId).map(t => ({
-      ...t,
-      predecessorIds: t.predecessorIds.filter(id => id !== taskId)
-    })));
+    setTasks(prev => {
+      const remaining = prev.filter(t => t.id !== taskId).map(t => ({
+        ...t,
+        predecessorIds: t.predecessorIds.filter(id => id !== taskId)
+      }));
+      const newProg = computeProjectProgress(remaining);
+      onUpdateProject?.(selectedProjectId, {
+        progressPercentage: newProg,
+        tasksCount: remaining.length
+      });
+      return remaining;
+    });
 
     setLinks(prev => prev.filter(l => l.source !== taskId && l.target !== taskId));
 
@@ -771,11 +827,20 @@ export default function GanttTimeline({
     };
 
     setLinks(prev => [...prev, newLink]);
-    setTasks(prev => [...prev, newSubtask]);
+    setTasks(prev => {
+      const next = [...prev, newSubtask];
+      const newProg = computeProjectProgress(next);
+      onUpdateProject?.(selectedProjectId, {
+        progressPercentage: newProg,
+        tasksCount: next.length
+      });
+      return next;
+    });
     syncBackend('create', newSubtask);
   };
 
   const handleAddNewTask = () => {
+    if (!selectedProjectId) return;
     const now = new Date();
     if (isSunday(now)) now.setDate(now.getDate() + 1);
     const newId = `task-${Date.now()}`;
@@ -799,12 +864,21 @@ export default function GanttTimeline({
       predecessorIds: []
     };
 
-    setTasks(prev => [...prev, newTask]);
+    setTasks(prev => {
+      const next = [...prev, newTask];
+      const newProg = computeProjectProgress(next);
+      onUpdateProject?.(selectedProjectId, {
+        progressPercentage: newProg,
+        tasksCount: next.length
+      });
+      return next;
+    });
     syncBackend('create', newTask);
     handleOpenEditModal(newTask);
   };
 
   const handleAddNewMilestone = () => {
+    if (!selectedProjectId) return;
     const now = new Date();
     if (isSunday(now)) now.setDate(now.getDate() + 1);
     const newId = `milestone-${Date.now()}`;
@@ -827,7 +901,15 @@ export default function GanttTimeline({
       predecessorIds: []
     };
 
-    setTasks(prev => [...prev, newMilestone]);
+    setTasks(prev => {
+      const next = [...prev, newMilestone];
+      const newProg = computeProjectProgress(next);
+      onUpdateProject?.(selectedProjectId, {
+        progressPercentage: newProg,
+        tasksCount: next.length
+      });
+      return next;
+    });
     syncBackend('create', newMilestone);
     handleOpenEditModal(newMilestone);
   };
@@ -877,6 +959,11 @@ export default function GanttTimeline({
               <span className="text-slate-500 text-[10px] uppercase block">Milestones</span>
               <span className="font-bold text-amber-400 text-sm">{metrics.milestones}</span>
             </div>
+            <div className="h-6 w-px bg-slate-800" />
+            <div>
+              <span className="text-slate-500 text-[10px] uppercase block">Physical Progress</span>
+              <span className="font-bold text-amber-400 text-sm">{currentProjectProgress}%</span>
+            </div>
           </div>
         </div>
 
@@ -893,14 +980,32 @@ export default function GanttTimeline({
               >
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>
-                    {p.name} ({p.progressPercentage || 0}% Complete)
+                    {p.name} ({p.id === selectedProjectId ? currentProjectProgress : (p.progressPercentage || 0)}% Complete)
                   </option>
                 ))}
               </select>
             ) : (
-              <span className="text-xs font-mono text-amber-400 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
-                Active Project: {selectedProjectId}
+              <span className="text-xs font-mono text-slate-400 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+                No Commercial Sites Registered
               </span>
+            )}
+
+            {/* Active Project Physical Progress Bar Indicator */}
+            {activeProject && (
+              <div className="flex items-center gap-3 bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-1.5 shadow-inner">
+                <div className="flex flex-col">
+                  <div className="flex items-center justify-between gap-3 text-[10px] font-mono">
+                    <span className="text-slate-400 font-semibold">Overall Project Progress:</span>
+                    <span className="text-amber-400 font-bold">{currentProjectProgress}%</span>
+                  </div>
+                  <div className="w-28 h-1.5 bg-slate-800 rounded-full overflow-hidden mt-0.5 border border-slate-700/50">
+                    <div 
+                      className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 rounded-full transition-all duration-300"
+                      style={{ width: `${Math.min(100, Math.max(0, currentProjectProgress))}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
             )}
 
             {/* Timescale Zoom */}
@@ -923,16 +1028,26 @@ export default function GanttTimeline({
             {/* Add Task / Milestone Buttons */}
             <button
               type="button"
+              disabled={!selectedProjectId}
               onClick={handleAddNewTask}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs transition cursor-pointer shadow-md shadow-amber-500/20"
+              className={`flex items-center gap-1.5 px-3 py-1.5 font-bold rounded-xl text-xs transition shadow-md ${
+                !selectedProjectId
+                  ? 'bg-slate-800/60 text-slate-500 cursor-not-allowed border border-slate-800'
+                  : 'bg-amber-500 hover:bg-amber-400 text-slate-950 cursor-pointer shadow-amber-500/20'
+              }`}
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add Task</span>
             </button>
             <button
               type="button"
+              disabled={!selectedProjectId}
               onClick={handleAddNewMilestone}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-xl text-xs font-medium border border-slate-700 transition cursor-pointer"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium border transition ${
+                !selectedProjectId
+                  ? 'bg-slate-800/60 text-slate-500 cursor-not-allowed border-slate-800'
+                  : 'bg-slate-800 hover:bg-slate-700 text-amber-300 border-slate-700 cursor-pointer'
+              }`}
             >
               <span>◆</span>
               <span>Add Milestone</span>

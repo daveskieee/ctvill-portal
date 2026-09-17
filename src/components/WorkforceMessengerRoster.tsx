@@ -753,34 +753,54 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                     {/* QA Inspection Score */}
                     <div className="bg-slate-900/50 border border-slate-800 p-3.5 rounded-xl space-y-1.5">
                       <span className="text-[10px] font-mono text-slate-400 block">QA Inspection Score</span>
-                      <div className="flex items-center justify-between text-xs font-mono">
-                        <strong className="text-amber-400 font-bold text-sm">
-                          ⭐ {selectedContractor.rating || 5.0} / 5.0
-                        </strong>
-                      </div>
-                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-amber-400 rounded-full"
-                          style={{ width: `${((selectedContractor.rating || 5.0) / 5) * 100}%` }}
-                        ></div>
-                      </div>
+                      {typeof selectedContractor.rating === 'number' && selectedContractor.rating > 0 ? (
+                        <>
+                          <div className="flex items-center justify-between text-xs font-mono">
+                            <strong className="text-amber-400 font-bold text-sm">
+                              ⭐ {selectedContractor.rating.toFixed(1)} / 5.0
+                            </strong>
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-amber-400 rounded-full"
+                              style={{ width: `${(selectedContractor.rating / 5) * 100}%` }}
+                            ></div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="space-y-1">
+                          <strong className="text-slate-500 font-mono text-xs block">Pending QA Audit</strong>
+                          <span className="text-[10px] text-slate-600 block">No field QA audits logged yet</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Milestone Progress Pace */}
                     <div className="bg-slate-900/50 border border-slate-800 p-3.5 rounded-xl space-y-1.5">
                       <span className="text-[10px] font-mono text-slate-400 block">Milestone Pace</span>
-                      <div className="flex items-center justify-between text-xs font-mono">
-                        <strong className="text-blue-400 font-bold text-sm">
-                          {selectedContractor.milestoneProgress || 80}%
-                        </strong>
-                        <span className="text-[10px] text-slate-500">On Track</span>
-                      </div>
-                      <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-blue-500 rounded-full"
-                          style={{ width: `${selectedContractor.milestoneProgress || 80}%` }}
-                        ></div>
-                      </div>
+                      {typeof selectedContractor.milestoneProgress === 'number' && selectedContractor.milestoneProgress > 0 ? (
+                        <>
+                          <div className="flex items-center justify-between text-xs font-mono">
+                            <strong className="text-blue-400 font-bold text-sm">
+                              {selectedContractor.milestoneProgress}%
+                            </strong>
+                            <span className="text-[10px] text-slate-500">
+                              {selectedContractor.milestoneProgress >= 100 ? 'Completed' : 'On Track'}
+                            </span>
+                          </div>
+                          <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-blue-500 rounded-full"
+                              style={{ width: `${Math.min(100, selectedContractor.milestoneProgress)}%` }}
+                            ></div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="space-y-1">
+                          <strong className="text-slate-500 font-mono text-xs block">No Active Milestone</strong>
+                          <span className="text-[10px] text-slate-600 block">Pace tracked via project tasks</span>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -821,20 +841,22 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                     <span className="text-xs font-mono text-slate-400 block font-bold">
                       Professional Accreditations &amp; Safety Badges
                     </span>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      <span className="bg-blue-950/60 border border-blue-800 text-blue-300 text-[10px] font-mono px-2.5 py-1 rounded-lg">
-                        🛡️ DOLE-BOSH Safety Certified
-                      </span>
-                      <span className="bg-teal-950/60 border border-teal-800 text-teal-300 text-[10px] font-mono px-2.5 py-1 rounded-lg">
-                        ⚡ TESDA NC II Fit-Out Certified
-                      </span>
-                      <span className="bg-purple-950/60 border border-purple-800 text-purple-300 text-[10px] font-mono px-2.5 py-1 rounded-lg">
-                        🏢 PEZA Ecozone Registered
-                      </span>
-                      <span className="bg-slate-800 border border-slate-700 text-slate-300 text-[10px] font-mono px-2.5 py-1 rounded-lg">
-                        ✓ Anti-Ghost Attendance Verified
-                      </span>
-                    </div>
+                    {selectedContractor.certifications && selectedContractor.certifications.length > 0 ? (
+                      <div className="flex flex-wrap gap-2 pt-1">
+                        {selectedContractor.certifications.map((cert, cIdx) => (
+                          <span 
+                            key={cIdx} 
+                            className="bg-teal-950/60 border border-teal-800 text-teal-300 text-[10px] font-mono px-2.5 py-1 rounded-lg"
+                          >
+                            ✓ {cert}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="pt-1 text-slate-600 text-[11px] font-mono flex items-center gap-1.5">
+                        <span>No registered accreditations or trade certifications recorded yet.</span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Recent Roll-Call Audits for this Contractor */}
@@ -971,14 +993,20 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                   <div className="space-y-1 pt-1">
                     <div className="flex justify-between items-center text-xs font-mono">
                       <span className="text-slate-400 text-[11px]">QA Score</span>
-                      <span className="text-amber-400 font-bold text-xs">⭐ {c.rating || 5.0} / 5.0</span>
+                      {typeof c.rating === 'number' && c.rating > 0 ? (
+                        <span className="text-amber-400 font-bold text-xs">⭐ {c.rating.toFixed(1)} / 5.0</span>
+                      ) : (
+                        <span className="text-slate-500 text-[10px]">Pending QA</span>
+                      )}
                     </div>
-                    <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-amber-400 rounded-full" 
-                        style={{ width: `${((c.rating || 5.0) / 5) * 100}%` }}
-                      ></div>
-                    </div>
+                    {typeof c.rating === 'number' && c.rating > 0 && (
+                      <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
+                        <div 
+                          className="h-full bg-amber-400 rounded-full" 
+                          style={{ width: `${(c.rating / 5) * 100}%` }}
+                        ></div>
+                      </div>
+                    )}
                   </div>
                 </div>
 

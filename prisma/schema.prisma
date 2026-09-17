@@ -11,6 +11,7 @@ enum Role {
   INSPECTOR
   CLIENT
   PROJECT_MANAGER
+  FINANCE
 }
 
 enum SlotStatus {

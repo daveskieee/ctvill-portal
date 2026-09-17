@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   DollarSign, CheckCircle2, Clock, AlertTriangle, Filter, 
   Search, Plus, ArrowUpRight, ShieldAlert, CreditCard, Building2, 
@@ -46,7 +46,8 @@ export default function PaymentsTracker({
   isPrivateAccounting = false,
   onRecordPayment 
 }: PaymentsTrackerProps) {
-  const isAdmin = (userRole || '').toUpperCase() === 'ADMIN' || (userRole || '').toUpperCase() === 'OPERATIONS_DIRECTOR';
+  const isFinance = (userRole || '').toUpperCase() === 'FINANCE';
+  const isAdmin = isFinance || (userRole || '').toUpperCase() === 'ADMIN' || (userRole || '').toUpperCase() === 'OPERATIONS_DIRECTOR';
   // Local list of installment records initialized from clients
   const [installments, setInstallments] = useState<InstallmentRowItem[]>(() => {
     return clients.flatMap(client => {
@@ -99,12 +100,34 @@ export default function PaymentsTracker({
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
+  // Dynamically aggregate project names from database and active installments
+  const availableProjectNames = useMemo(() => {
+    const names = new Set<string>();
+    (projects || []).forEach(p => {
+      if (p.name?.trim()) names.add(p.name.trim());
+    });
+    installments.forEach(inst => {
+      if (inst.projectName?.trim()) names.add(inst.projectName.trim());
+    });
+    if (names.size === 0) {
+      names.add('Commercial Fit-Out Site 1');
+    }
+    return Array.from(names);
+  }, [projects, installments]);
+
   // New Invoice Form state
   const [invoiceClientName, setInvoiceClientName] = useState<string>('NexBridge Corp');
-  const [invoiceProjectName, setInvoiceProjectName] = useState<string>('NexBridge Software Hub');
+  const [invoiceProjectName, setInvoiceProjectName] = useState<string>(availableProjectNames[0] || 'Commercial Fit-Out Site 1');
   const [invoiceDueDate, setInvoiceDueDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [invoiceAmount, setInvoiceAmount] = useState<number>(350000);
   const [invoiceMethod, setInvoiceMethod] = useState<string>('Progress Billing Installment');
+
+  // Sync default project name when projects change
+  useEffect(() => {
+    if (availableProjectNames.length > 0 && (!invoiceProjectName || !availableProjectNames.includes(invoiceProjectName))) {
+      setInvoiceProjectName(availableProjectNames[0]);
+    }
+  }, [availableProjectNames]);
 
   // Compute live totals from active installments list
   const totalCollected = installments
@@ -119,7 +142,7 @@ export default function PaymentsTracker({
   const overdueCount = installments.filter(i => i.isOverdue).length;
 
   const filteredInstallments = installments.filter(item => {
-    if (selectedProjectFilter !== 'ALL' && !item.projectName.toLowerCase().includes(selectedProjectFilter.toLowerCase())) {
+    if (selectedProjectFilter !== 'ALL' && item.projectName.trim().toLowerCase() !== selectedProjectFilter.trim().toLowerCase()) {
       return false;
     }
     if (statusFilter === 'PAID' && item.status !== 'Paid') return false;
@@ -440,11 +463,10 @@ export default function PaymentsTracker({
               onChange={(e) => setSelectedProjectFilter(e.target.value)}
               className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500 font-mono"
             >
-              <option value="ALL">All Commercial Projects</option>
-              <option value="NexBridge">NexBridge Software Hub</option>
-              <option value="BGComm">BGComm Global BPO Floor</option>
-              <option value="RedBin">RedBin Commercial HQ</option>
-              <option value="Owl">Owl Creative Studio</option>
+              <option value="ALL">All Commercial Projects ({availableProjectNames.length})</option>
+              {availableProjectNames.map((projName) => (
+                <option key={projName} value={projName}>{projName}</option>
+              ))}
             </select>
           </div>
 
@@ -692,10 +714,9 @@ export default function PaymentsTracker({
                   onChange={(e) => setInvoiceProjectName(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
                 >
-                  <option value="NexBridge Software Hub">NexBridge Software Hub</option>
-                  <option value="BGComm Global BPO Floor">BGComm Global BPO Floor</option>
-                  <option value="RedBin Commercial HQ">RedBin Commercial HQ</option>
-                  <option value="Owl Creative Studio">Owl Creative Studio</option>
+                  {availableProjectNames.map((projName) => (
+                    <option key={projName} value={projName}>{projName}</option>
+                  ))}
                 </select>
               </div>
 

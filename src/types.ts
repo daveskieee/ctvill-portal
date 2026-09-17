@@ -289,13 +289,21 @@ export interface AIManpowerRecommendation {
   priority: 'HIGH' | 'MEDIUM' | 'OPTIMIZATION';
   impact: string;
   applied?: boolean;
+  dismissed?: boolean;
+  donorProjectId?: string;
+  donorProjectName?: string;
+  targetProjectId?: string;
+  targetProjectName?: string;
+  workerId?: string;
+  workerName?: string;
+  tradeType?: string;
 }
 
 export interface UserSession {
   id?: string;
   email: string;
   name: string;
-  role: 'Admin' | 'ProjectManager' | 'Client' | string;
+  role: 'Admin' | 'ProjectManager' | 'Finance' | 'Client' | string;
   clientId?: string; // If role is 'Client'
   accountStatus?: 'INVITED' | 'ACTIVE' | 'SUSPENDED';
   token?: string;
@@ -380,13 +388,16 @@ export interface ChangeOrder {
   id: string;
   orderNumber: string;
   projectId?: string;
+  projectName?: string;
   title: string;
   contractorName: string;
   requestedAmount: number;
+  amount?: number;
   approvedAmount?: number | null;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   justification?: string;
   approvedBy?: string;
+  scheduleImpactDays?: number;
   submittedDate?: string;
   approvedDate?: string | null;
   createdAt?: string;

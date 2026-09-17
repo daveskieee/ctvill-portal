@@ -7,9 +7,10 @@ import React, { useState } from 'react';
 import { 
   HelpCircle, Plus, CheckCircle2, Clock, AlertTriangle, 
   Search, Filter, ShieldCheck, User, Calendar, X, Check, 
-  ArrowRight, Building2, FileText, Send, MessageSquare
+  ArrowRight, Building2, FileText, Send, MessageSquare, Download, Printer
 } from 'lucide-react';
 import { ProjectRFI, ProjectProfile } from '../types';
+import { exportToCsv, printRegisterTable } from '../utils/exportUtils';
 
 interface RfiManagerProps {
   rfis: ProjectRFI[];
@@ -126,6 +127,46 @@ export default function RfiManager({
     }
   };
 
+  const handleExportCsv = () => {
+    const headers = [
+      'RFI Number', 'Subject', 'Project Site', 'Priority', 'Status',
+      'Submitted By', 'Assigned Architect/Engineer', 'Drawing Ref',
+      'Due Date', 'Technical Question', 'Suggested Solution', 'Official Answer'
+    ];
+    const rows = filteredRfis.map(r => [
+      r.rfiNumber,
+      r.subject,
+      r.projectName,
+      r.priority,
+      r.status,
+      r.submittedBy,
+      r.assignedTo || '',
+      r.drawingRef || '',
+      r.dueDate || '',
+      r.question,
+      r.suggestedSolution || '',
+      r.answer || ''
+    ]);
+    exportToCsv('CTVill_Engineering_RFIs_Register', headers, rows);
+  };
+
+  const handlePrint = () => {
+    const headers = [
+      'RFI #', 'Subject', 'Project', 'Priority', 'Status', 'Submitted By', 'Drawing Ref', 'Due Date'
+    ];
+    const rows = filteredRfis.map(r => [
+      r.rfiNumber,
+      r.subject,
+      r.projectName,
+      r.priority,
+      r.status,
+      r.submittedBy,
+      r.drawingRef || 'General',
+      r.dueDate || 'Standard'
+    ]);
+    printRegisterTable('Engineering Request For Information (RFI) Register', 'Architectural Clarifications, MEPFS Coordination & Site Queries', headers, rows);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -233,15 +274,35 @@ export default function RfiManager({
           </div>
         </div>
 
-        <div className="relative w-full sm:w-72">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search RFI #, subject, sheet..."
-            className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
-          />
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="relative w-full sm:w-64">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search RFI #, subject, sheet..."
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <button
+            onClick={handleExportCsv}
+            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            title="Export filtered RFIs to CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-blue-400" />
+            <span className="hidden md:inline">Export CSV</span>
+          </button>
+
+          <button
+            onClick={handlePrint}
+            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            title="Print or Save PDF report"
+          >
+            <Printer className="w-3.5 h-3.5 text-slate-300" />
+            <span className="hidden md:inline">Print / PDF</span>
+          </button>
         </div>
       </div>
 

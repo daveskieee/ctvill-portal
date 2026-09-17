@@ -7,10 +7,11 @@ import React, { useState, useEffect } from 'react';
 import { 
   Building2, Users, CheckCircle2, TrendingUp, DollarSign, Calendar, 
   Layers, Plus, ExternalLink, ShieldCheck, Clock, FileText, ArrowRight, 
-  X, AlertCircle, Edit3, Trash2, Check, Sliders, HardHat, Search
+  X, AlertCircle, Edit3, Trash2, Check, Sliders, HardHat, Search, Download, HelpCircle, FileSpreadsheet, Lock
 } from 'lucide-react';
-import { ProjectProfile, ProjectTask, Contractor, WorkforceReallocationRecommendation } from '../types';
+import { ProjectProfile, ProjectTask, Contractor, WorkforceReallocationRecommendation, ProjectRFI, ChangeOrder } from '../types';
 import { generateReallocationRecommendations } from '../services/WorkforceReallocationService';
+import { exportToCsv } from '../utils/exportUtils';
 
 export const AVAILABLE_PMS = [
   { id: 'usr-pm-ricardo', name: 'Engr. Ricardo Ramos (Senior Project Manager)' },
@@ -22,6 +23,8 @@ interface ProjectProfileHubProps {
   projects: ProjectProfile[];
   tasks: ProjectTask[];
   contractors: Contractor[];
+  rfis?: ProjectRFI[];
+  changeOrders?: ChangeOrder[];
   userRole?: string;
   isAdmin?: boolean;
   onSelectProject?: (project: ProjectProfile) => void;
@@ -35,6 +38,8 @@ export default function ProjectProfileHub({
   projects = [],
   tasks = [],
   contractors = [],
+  rfis = [],
+  changeOrders = [],
   userRole = 'Admin',
   isAdmin = true,
   onCreateProject,
@@ -49,7 +54,7 @@ export default function ProjectProfileHub({
     setLocalProjects(projects || []);
   }, [projects]);
 
-  const [selectedProject, setSelectedProject] = useState<ProjectProfile | null>(projects[0] || null);
+  const [selectedProject, setSelectedProject] = useState<ProjectProfile | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [showNewModal, setShowNewModal] = useState<boolean>(false);
   const [showEditModal, setShowEditModal] = useState<boolean>(false);
@@ -70,7 +75,7 @@ export default function ProjectProfileHub({
   const [formBudget, setFormBudget] = useState(0);
   const [formCollected, setFormCollected] = useState(0);
   const [formProgress, setFormProgress] = useState(0);
-  const [formStatus, setFormStatus] = useState<ProjectProfile['status']>('PLANNING');
+  const [formStatus, setFormStatus] = useState<ProjectProfile['status'] | ''>('');
   const [formStartDate, setFormStartDate] = useState(new Date().toISOString().split('T')[0]);
   const [formEndDate, setFormEndDate] = useState(new Date().toISOString().split('T')[0]);
   const [formWorkers, setFormWorkers] = useState(0);
@@ -126,6 +131,41 @@ export default function ProjectProfileHub({
   );
   const totalSiteManpower = localProjects.reduce((acc, p) => acc + (p.assignedWorkersCount || 0), 0);
 
+  // 3Cs Metrics: RFIs and Change Orders
+  const totalOpenRfis = rfis.filter(r => r.status === 'OPEN' || r.status === 'UNDER_REVIEW').length;
+  const pendingChangeOrders = changeOrders.filter(co => co.status === 'PENDING');
+  const totalPendingCOValue = pendingChangeOrders.reduce((sum, co) => sum + (Number(co.requestedAmount ?? co.amount ?? 0) || 0), 0);
+
+  const handleExportCsv = () => {
+    const headers = [
+      'Project ID', 'Project Name', 'Client', 'Location', 'Status',
+      'Contract Budget (PHP)', 'Funds Collected (PHP)', 'Progress %',
+      'Start Date', 'Target Handover', 'Assigned Workers', 'Open RFIs', 'Pending Change Orders'
+    ];
+    const rows = localProjects.map(p => {
+      const pRfis = rfis.filter(r => r.projectId === p.id || (r.projectName && r.projectName.toLowerCase() === p.name.toLowerCase()));
+      const openRfis = pRfis.filter(r => r.status === 'OPEN' || r.status === 'UNDER_REVIEW').length;
+      const pCOs = changeOrders.filter(co => co.projectId === p.id || (co.projectName && co.projectName.toLowerCase() === p.name.toLowerCase()));
+      const pendingCOs = pCOs.filter(co => co.status === 'PENDING').length;
+      return [
+        p.id,
+        p.name,
+        p.clientName,
+        p.location,
+        p.status,
+        p.budget,
+        p.fundsCollected,
+        `${p.progressPercentage}%`,
+        p.startDate,
+        p.targetHandoverDate,
+        p.assignedWorkersCount,
+        openRfis,
+        pendingCOs
+      ];
+    });
+    exportToCsv('CTVill_Commercial_Sites_Portfolio', headers, rows);
+  };
+
   const openNewModal = () => {
     // Reset all dummy/pre-filled defaults strictly to 0 or empty strings
     setFormName('');
@@ -135,7 +175,7 @@ export default function ProjectProfileHub({
     setFormBudget(0);
     setFormCollected(0);
     setFormProgress(0);
-    setFormStatus('PLANNING');
+    setFormStatus('');
     setFormStartDate(new Date().toISOString().split('T')[0]);
     setFormEndDate(new Date().toISOString().split('T')[0]);
     setFormWorkers(0);
@@ -231,9 +271,9 @@ export default function ProjectProfileHub({
       description: formDescription.trim(),
       location: formLocation.trim(),
       budget: Number(formBudget) || 0,
-      fundsCollected: Number(formCollected) || 0,
+      fundsCollected: 0,
       progressPercentage: Number(formProgress) || 0,
-      status: formStatus,
+      status: (formStatus || 'PLANNING') as ProjectProfile['status'],
       targetHandoverDate: formEndDate,
       startDate: formStartDate,
       assignedWorkersCount: formAssignedWorkerIds.length || Number(formWorkers) || 0,
@@ -283,9 +323,9 @@ export default function ProjectProfileHub({
       description: formDescription.trim(),
       location: formLocation.trim(),
       budget: Number(formBudget),
-      fundsCollected: Number(formCollected),
+      fundsCollected: selectedProject.fundsCollected ?? Number(formCollected) ?? 0,
       progressPercentage: Number(formProgress),
-      status: formStatus,
+      status: (formStatus || selectedProject.status || 'PLANNING') as ProjectProfile['status'],
       targetHandoverDate: formEndDate,
       startDate: formStartDate,
       assignedWorkersCount: formAssignedWorkerIds.length || Number(formWorkers),
@@ -373,49 +413,58 @@ export default function ProjectProfileHub({
           </select>
 
           <button
+            onClick={handleExportCsv}
+            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-semibold px-3.5 py-2.5 rounded-xl transition cursor-pointer text-xs"
+            title="Export Commercial Sites to CSV"
+          >
+            <Download className="w-4 h-4 text-amber-400" />
+            <span>Export CSV</span>
+          </button>
+
+          <button
             onClick={openNewModal}
-            className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-amber-500/20 cursor-pointer"
+            className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-amber-500/20 cursor-pointer text-xs"
           >
             <Plus className="w-4 h-4" />
-            New Project Profile
+            <span>New Project</span>
           </button>
         </div>
       </div>
 
-      {/* Portfolio Overview KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-xl">
+      {/* Portfolio Overview KPIs — Enhanced with 3Cs Metrics */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Total Contract Value</span>
-            <DollarSign className="w-5 h-5 text-amber-400" />
+            <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Total Budget</span>
+            <DollarSign className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-2xl font-bold text-white mt-2 font-mono">
+          <div className="text-xl font-bold text-white mt-1 font-mono">
             ₱{totalPortfolioBudget.toLocaleString()}
           </div>
-          <div className="text-xs text-slate-400 mt-1">
-            Across {localProjects.length} active fit-out sites
+          <div className="text-[11px] text-slate-400 mt-1">
+            {localProjects.length} Fit-Out Sites
           </div>
         </div>
 
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-xl">
+        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Funds Collected</span>
-            <TrendingUp className="w-5 h-5 text-emerald-400" />
+            <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Collected</span>
+            <TrendingUp className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-2xl font-bold text-emerald-400 mt-2 font-mono">
+          <div className="text-xl font-bold text-emerald-400 mt-1 font-mono">
             ₱{totalFundsCollected.toLocaleString()}
           </div>
-          <div className="text-xs text-slate-400 mt-1">
-            {totalPortfolioBudget > 0 ? Math.round((totalFundsCollected / totalPortfolioBudget) * 100) : 0}% portfolio collection rate
+          <div className="text-[11px] text-slate-400 mt-1">
+            {totalPortfolioBudget > 0 ? Math.round((totalFundsCollected / totalPortfolioBudget) * 100) : 0}% Collection Pace
           </div>
         </div>
 
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-xl">
+        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Average Progress</span>
-            <CheckCircle2 className="w-5 h-5 text-blue-400" />
+            <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Avg Progress</span>
+            <CheckCircle2 className="w-4 h-4 text-blue-400" />
           </div>
-          <div className="text-2xl font-bold text-blue-400 mt-2 font-mono">
+          <div className="text-xl font-bold text-blue-400 mt-1 font-mono">
             {avgPortfolioProgress}%
           </div>
           <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2 overflow-hidden">
@@ -423,16 +472,42 @@ export default function ProjectProfileHub({
           </div>
         </div>
 
-        <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-xl">
+        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Total Deployed Workers</span>
-            <Users className="w-5 h-5 text-purple-400" />
+            <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Field Labor</span>
+            <Users className="w-4 h-4 text-purple-400" />
           </div>
-          <div className="text-2xl font-bold text-white mt-2 font-mono">
+          <div className="text-xl font-bold text-white mt-1 font-mono">
             {totalSiteManpower} Artisans
           </div>
-          <div className="text-xs text-slate-400 mt-1">
-            Carpenters, Electricians, HVAC & QA
+          <div className="text-[11px] text-slate-400 mt-1">
+            On-Site Deployments
+          </div>
+        </div>
+
+        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Open RFIs</span>
+            <HelpCircle className="w-4 h-4 text-cyan-400" />
+          </div>
+          <div className="text-xl font-bold text-cyan-400 mt-1 font-mono">
+            {totalOpenRfis} Inquiries
+          </div>
+          <div className="text-[11px] text-slate-400 mt-1">
+            Engineering Clarifications
+          </div>
+        </div>
+
+        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Pending COs</span>
+            <FileSpreadsheet className="w-4 h-4 text-amber-400" />
+          </div>
+          <div className="text-xl font-bold text-amber-300 mt-1 font-mono">
+            {pendingChangeOrders.length} Orders
+          </div>
+          <div className="text-[11px] text-amber-400/80 mt-1 font-mono">
+            ₱{totalPendingCOValue.toLocaleString()} Under Review
           </div>
         </div>
       </div>
@@ -458,6 +533,11 @@ export default function ProjectProfileHub({
           {filteredProjects.map((project) => {
           const collectionRate = project.budget > 0 ? Math.round((project.fundsCollected / project.budget) * 100) : 0;
           const remainingFunds = Math.max(0, project.budget - project.fundsCollected);
+          
+          const pRfis = rfis.filter(r => r.projectId === project.id || (r.projectName && r.projectName.toLowerCase() === project.name.toLowerCase()));
+          const openRfis = pRfis.filter(r => r.status === 'OPEN' || r.status === 'UNDER_REVIEW');
+          const pCOs = changeOrders.filter(co => co.projectId === project.id || (co.projectName && co.projectName.toLowerCase() === project.name.toLowerCase()));
+          const pendingCOs = pCOs.filter(co => co.status === 'PENDING');
 
           return (
             <div
@@ -469,7 +549,7 @@ export default function ProjectProfileHub({
               <div>
                 {/* Status Badge & Code & Quick Actions */}
                 <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold">
                       {project.id}
                     </span>
@@ -481,6 +561,18 @@ export default function ProjectProfileHub({
                     }`}>
                       {project.status.replace('_', ' ')}
                     </span>
+                    {openRfis.length > 0 && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800 font-semibold flex items-center gap-1" title={`${openRfis.length} Open RFIs`}>
+                        <HelpCircle className="w-3 h-3 text-cyan-400" />
+                        <span>{openRfis.length} RFI</span>
+                      </span>
+                    )}
+                    {pendingCOs.length > 0 && (
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800 font-semibold flex items-center gap-1" title={`${pendingCOs.length} Pending Change Orders`}>
+                        <FileSpreadsheet className="w-3 h-3 text-amber-400" />
+                        <span>{pendingCOs.length} CO</span>
+                      </span>
+                    )}
                     {project.isPrivateAccounting && (
                       <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-800 font-semibold flex items-center gap-1">
                         <ShieldCheck className="w-3 h-3 text-rose-400" />
@@ -1026,29 +1118,19 @@ export default function ProjectProfileHub({
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Total Estimated Budget (₱)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    placeholder="e.g., 15,000,000"
-                    value={formBudget || ''}
-                    onChange={(e) => setFormBudget(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none font-mono"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Funds Collected (₱)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    placeholder="e.g., 0"
-                    value={formCollected || ''}
-                    onChange={(e) => setFormCollected(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none font-mono"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Total Estimated Budget (₱)</label>
+                <input
+                  type="number"
+                  min={0}
+                  placeholder="e.g., 15,000,000"
+                  value={formBudget || ''}
+                  onChange={(e) => setFormBudget(Number(e.target.value))}
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none font-mono"
+                />
+                <p className="text-[10px] text-slate-500 mt-1 font-mono">
+                  Initial collected funds start at ₱0.00 and are updated strictly via verified payments in the Finance & Installments Ledger.
+                </p>
               </div>
 
               <div className="grid grid-cols-3 gap-3">
@@ -1096,8 +1178,9 @@ export default function ProjectProfileHub({
                   <select
                     value={formStatus}
                     onChange={(e) => setFormStatus(e.target.value as ProjectProfile['status'])}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-2 py-2 text-xs focus:border-amber-500 focus:outline-none"
+                    className={`w-full bg-slate-950 border border-slate-700 rounded-xl px-2 py-2 text-xs focus:border-amber-500 focus:outline-none ${!formStatus ? 'text-slate-400' : 'text-white'}`}
                   >
+                    <option value="" disabled className="text-slate-500">e.g., Planning</option>
                     <option value="PLANNING">Planning</option>
                     <option value="IN_PROGRESS">In Progress</option>
                     <option value="PUNCHLIST_QA">Punchlist & QA</option>
@@ -1363,13 +1446,22 @@ export default function ProjectProfileHub({
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Funds Collected (₱)</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-mono text-slate-400 uppercase">Funds Collected (₱)</label>
+                    <span className="text-[10px] text-emerald-400 font-mono font-semibold flex items-center gap-1">
+                      <Lock className="w-2.5 h-2.5" /> Finance Ledger (Read-Only)
+                    </span>
+                  </div>
                   <input
-                    type="number"
-                    value={formCollected}
-                    onChange={(e) => setFormCollected(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none font-mono"
+                    type="text"
+                    readOnly
+                    disabled
+                    value={`₱${Number(formCollected || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+                    className="w-full bg-slate-900/60 border border-slate-800 text-emerald-400 rounded-xl px-3 py-2 text-sm font-mono cursor-not-allowed select-none"
                   />
+                  <p className="text-[10px] text-slate-500 mt-1 font-mono">
+                    Governed strictly via Finance & Installment Payment receipts.
+                  </p>
                 </div>
               </div>
 

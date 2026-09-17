@@ -10,10 +10,11 @@ import {
   Video, ShieldAlert, Tag, Filter, X, CalendarDays, Download,
   Edit3, Trash2, Check
 } from 'lucide-react';
-import { ScheduleEvent, ScheduleEventType } from '../types';
+import { ScheduleEvent, ScheduleEventType, ProjectProfile } from '../types';
 
 interface ProjectScheduleCalendarProps {
   events: ScheduleEvent[];
+  projects?: ProjectProfile[];
   onAddEvent?: (event: Partial<ScheduleEvent>) => Promise<void>;
   onUpdateEvent?: (eventId: string, updates: Partial<ScheduleEvent>) => Promise<void>;
   onDeleteEvent?: (eventId: string) => Promise<void>;
@@ -21,11 +22,12 @@ interface ProjectScheduleCalendarProps {
 
 export default function ProjectScheduleCalendar({
   events = [],
+  projects = [],
   onAddEvent,
   onUpdateEvent,
   onDeleteEvent
 }: ProjectScheduleCalendarProps) {
-  const [currentDate, setCurrentDate] = useState<Date>(new Date(2026, 8, 1)); // September 2026 default
+  const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [selectedDateStr, setSelectedDateStr] = useState<string>(new Date().toISOString().split('T')[0]);
   const [filterType, setFilterType] = useState<string>('ALL');
   const [projectFilter, setProjectFilter] = useState<string>('ALL');
@@ -34,15 +36,15 @@ export default function ProjectScheduleCalendar({
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [editingEvent, setEditingEvent] = useState<ScheduleEvent | null>(null);
 
-  // Add Event Form State
+  // Add Event Form State (Empty when opened, displaying e.g. placeholders)
   const [newTitle, setNewTitle] = useState('');
-  const [newProject, setNewProject] = useState('NexBridge Software Hub');
+  const [newProject, setNewProject] = useState('');
   const [newType, setNewType] = useState<ScheduleEventType>('MEETING');
   const [newEventDate, setNewEventDate] = useState(new Date().toISOString().split('T')[0]);
-  const [newStartTime, setNewStartTime] = useState('09:30');
-  const [newEndTime, setNewEndTime] = useState('11:00');
-  const [newLocation, setNewLocation] = useState('Site Meeting Room / Video Link');
-  const [newAttendees, setNewAttendees] = useState('Engr. Ricardo Gomez, Client Representative');
+  const [newStartTime, setNewStartTime] = useState('');
+  const [newEndTime, setNewEndTime] = useState('');
+  const [newLocation, setNewLocation] = useState('');
+  const [newAttendees, setNewAttendees] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -113,8 +115,7 @@ export default function ProjectScheduleCalendar({
       }
 
       setShowAddModal(false);
-      setNewTitle('');
-      setNewNotes('');
+      resetAddForm();
     } catch (err) {
       console.error('Failed to create schedule event:', err);
     } finally {
@@ -122,14 +123,31 @@ export default function ProjectScheduleCalendar({
     }
   };
 
+  const resetAddForm = (initialDate?: string) => {
+    setNewTitle('');
+    setNewProject(projects && projects.length > 0 ? projects[0].name : '');
+    setNewType('MEETING');
+    setNewEventDate(initialDate || new Date().toISOString().split('T')[0]);
+    setNewStartTime('');
+    setNewEndTime('');
+    setNewLocation('');
+    setNewAttendees('');
+    setNewNotes('');
+  };
+
+  const openAddModal = (dateStr?: string) => {
+    resetAddForm(dateStr);
+    setShowAddModal(true);
+  };
+
   const openEditModal = (evt: ScheduleEvent) => {
     setEditingEvent(evt);
     setEditTitle(evt.title);
-    setEditProject(evt.projectName || 'NexBridge Software Hub');
+    setEditProject(evt.projectName || (projects && projects.length > 0 ? projects[0].name : ''));
     setEditType(evt.eventType);
     setEditEventDate(evt.eventDate);
-    setEditStartTime(evt.startTime || '09:00');
-    setEditEndTime(evt.endTime || '10:30');
+    setEditStartTime(evt.startTime || '');
+    setEditEndTime(evt.endTime || '');
     setEditLocation(evt.location || '');
     setEditAttendees(evt.attendees || '');
     setEditNotes(evt.notes || '');
@@ -276,10 +294,14 @@ export default function ProjectScheduleCalendar({
             className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 font-mono"
           >
             <option value="ALL">All Commercial Projects</option>
-            <option value="NexBridge">NexBridge Software Hub</option>
-            <option value="BGComm">BGComm Global BPO Floor</option>
-            <option value="RedBin">RedBin Commercial HQ</option>
-            <option value="Owl">Owl Creative Studio</option>
+            {projects && projects.length > 0 ? (
+              projects.map(p => (
+                <option key={p.id} value={p.name}>{p.name}</option>
+              ))
+            ) : (
+              <option value="ALL" disabled>No Projects Registered</option>
+            )}
+            <option value="Master Operations">Master Operations (Cross-Site)</option>
           </select>
 
           <select
@@ -295,7 +317,7 @@ export default function ProjectScheduleCalendar({
           </select>
 
           <button
-            onClick={() => setShowAddModal(true)}
+            onClick={() => openAddModal(selectedDateStr)}
             className="flex items-center gap-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-blue-500/20 text-xs cursor-pointer"
           >
             <Plus className="w-4 h-4" />
@@ -540,10 +562,7 @@ export default function ProjectScheduleCalendar({
 
           <div className="mt-4 pt-4 border-t border-slate-800">
             <button
-              onClick={() => {
-                setNewEventDate(selectedDateStr);
-                setShowAddModal(true);
-              }}
+              onClick={() => openAddModal(selectedDateStr)}
               className="w-full flex items-center justify-center gap-2 py-2 rounded-xl text-xs font-bold text-blue-300 bg-blue-950/60 hover:bg-blue-900/60 border border-blue-800 transition cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
@@ -590,10 +609,15 @@ export default function ProjectScheduleCalendar({
                     onChange={(e) => setNewProject(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-blue-500 focus:outline-none"
                   >
-                    <option value="NexBridge Software Hub">NexBridge Software Hub</option>
-                    <option value="BGComm Global BPO Floor">BGComm Global BPO Floor</option>
-                    <option value="RedBin Commercial HQ">RedBin Commercial HQ</option>
-                    <option value="Owl Creative Studio">Owl Creative Studio</option>
+                    {projects && projects.length > 0 ? (
+                      projects.map((p) => (
+                        <option key={p.id} value={p.name}>
+                          {p.name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">-- No Projects Registered --</option>
+                    )}
                     <option value="Master Operations">Master Operations (Cross-Site)</option>
                   </select>
                 </div>
@@ -736,10 +760,15 @@ export default function ProjectScheduleCalendar({
                     onChange={(e) => setEditProject(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-blue-500 focus:outline-none"
                   >
-                    <option value="NexBridge Software Hub">NexBridge Software Hub</option>
-                    <option value="BGComm Global BPO Floor">BGComm Global BPO Floor</option>
-                    <option value="RedBin Commercial HQ">RedBin Commercial HQ</option>
-                    <option value="Owl Creative Studio">Owl Creative Studio</option>
+                    {projects && projects.length > 0 ? (
+                      projects.map((p) => (
+                        <option key={p.id} value={p.name}>
+                          {p.name}
+                        </option>
+                      ))
+                    ) : (
+                      <option value="">-- No Projects Registered --</option>
+                    )}
                     <option value="Master Operations">Master Operations (Cross-Site)</option>
                   </select>
                 </div>

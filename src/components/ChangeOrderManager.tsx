@@ -7,9 +7,10 @@ import React, { useState } from 'react';
 import { 
   FileSpreadsheet, Plus, CheckCircle2, XCircle, Clock, 
   DollarSign, AlertTriangle, Search, Filter, ShieldCheck, 
-  User, Calendar, X, Check, ArrowRight, Building2, FileText, CheckSquare
+  User, Calendar, X, Check, ArrowRight, Building2, FileText, CheckSquare, Download, Printer
 } from 'lucide-react';
 import { ChangeOrder, ProjectProfile } from '../types';
+import { exportToCsv, printRegisterTable } from '../utils/exportUtils';
 
 interface ChangeOrderManagerProps {
   changeOrders: ChangeOrder[];
@@ -119,6 +120,44 @@ export default function ChangeOrderManager({
     }
   };
 
+  const handleExportCsv = () => {
+    const headers = [
+      'Order Ref', 'Title', 'Project Site', 'Contractor / Trade',
+      'Amount Requested (PHP)', 'Approved Amount (PHP)', 'Timeline Impact (Days)',
+      'Status', 'Date Raised', 'Justification'
+    ];
+    const rows = filteredOrders.map(co => [
+      co.orderNumber,
+      co.title,
+      co.projectName || '',
+      co.contractorName,
+      co.requestedAmount ?? co.amount ?? 0,
+      co.approvedAmount || '',
+      co.scheduleImpactDays || 0,
+      co.status,
+      co.createdAt || '',
+      co.justification || ''
+    ]);
+    exportToCsv('CTVill_Change_Orders_Register', headers, rows);
+  };
+
+  const handlePrint = () => {
+    const headers = [
+      'Order Ref', 'Title / Description', 'Project Site', 'Contractor',
+      'Amount', 'Status', 'Days Impact'
+    ];
+    const rows = filteredOrders.map(co => [
+      co.orderNumber,
+      co.title,
+      co.projectName || '',
+      co.contractorName,
+      `₱${Number(co.approvedAmount ?? co.requestedAmount ?? co.amount ?? 0).toLocaleString()}`,
+      co.status,
+      `+${co.scheduleImpactDays || 0}d`
+    ]);
+    printRegisterTable('Commercial Change Orders & Variations Register', 'Scope Alterations, Cost Revisions & Timeline Impacts', headers, rows);
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -224,15 +263,35 @@ export default function ChangeOrderManager({
           </div>
         </div>
 
-        <div className="relative w-full sm:w-72">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search order #, title, trade..."
-            className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
-          />
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="relative w-full sm:w-64">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search order #, title, trade..."
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+            />
+          </div>
+
+          <button
+            onClick={handleExportCsv}
+            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            title="Export filtered change orders to CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-amber-400" />
+            <span className="hidden md:inline">Export CSV</span>
+          </button>
+
+          <button
+            onClick={handlePrint}
+            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            title="Print or Save PDF report"
+          >
+            <Printer className="w-3.5 h-3.5 text-slate-300" />
+            <span className="hidden md:inline">Print / PDF</span>
+          </button>
         </div>
       </div>
 

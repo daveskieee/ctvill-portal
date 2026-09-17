@@ -3,17 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   FileCheck, AlertTriangle, Clock, ShieldCheck, Plus, 
   Building2, Calendar, Search, Filter, ExternalLink, 
   CheckCircle2, XCircle, RefreshCw, X, FileText, Download,
   Edit3, Trash2
 } from 'lucide-react';
-import { GovernmentPermit, PermitType } from '../types';
+import { GovernmentPermit, PermitType, ProjectProfile } from '../types';
 
 interface GovernmentPermitsTrackerProps {
   permits: GovernmentPermit[];
+  projects?: ProjectProfile[];
   onAddPermit?: (permit: Partial<GovernmentPermit>) => Promise<void>;
   onUpdatePermitStatus?: (permitId: string, status: GovernmentPermit['status'], notes?: string) => Promise<void>;
   onUpdatePermit?: (permitId: string, updates: Partial<GovernmentPermit>) => Promise<void>;
@@ -22,6 +23,7 @@ interface GovernmentPermitsTrackerProps {
 
 export default function GovernmentPermitsTracker({
   permits = [],
+  projects = [],
   onAddPermit,
   onUpdatePermitStatus,
   onUpdatePermit,
@@ -33,8 +35,23 @@ export default function GovernmentPermitsTracker({
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [editingPermit, setEditingPermit] = useState<GovernmentPermit | null>(null);
 
+  // Dynamically aggregate project names from database and existing permits
+  const availableProjectNames = useMemo(() => {
+    const names = new Set<string>();
+    (projects || []).forEach(p => {
+      if (p.name?.trim()) names.add(p.name.trim());
+    });
+    (permits || []).forEach(p => {
+      if (p.projectName?.trim()) names.add(p.projectName.trim());
+    });
+    if (names.size === 0) {
+      names.add('Commercial Fit-Out Site 1');
+    }
+    return Array.from(names);
+  }, [projects, permits]);
+
   // Add Form State
-  const [newProject, setNewProject] = useState('NexBridge Software Hub');
+  const [newProject, setNewProject] = useState(availableProjectNames[0] || 'Commercial Fit-Out Site 1');
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<PermitType>('LGU_BUILDING_PERMIT');
   const [newAgency, setNewAgency] = useState('City Engineering Office - Cabuyao');
@@ -43,6 +60,13 @@ export default function GovernmentPermitsTracker({
   const [newExpDate, setNewExpDate] = useState('2027-02-28');
   const [newNotes, setNewNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Sync default new project when projects change
+  useEffect(() => {
+    if (availableProjectNames.length > 0 && (!newProject || !availableProjectNames.includes(newProject))) {
+      setNewProject(availableProjectNames[0]);
+    }
+  }, [availableProjectNames]);
 
   // Edit Form State
   const [editName, setEditName] = useState('');
@@ -62,7 +86,7 @@ export default function GovernmentPermitsTracker({
   const expiredOrRenewal = permits.filter(p => p.status === 'EXPIRED' || p.status === 'UNDER_RENEWAL').length;
 
   const filteredPermits = permits.filter(p => {
-    if (projectFilter !== 'ALL' && !p.projectName.toLowerCase().includes(projectFilter.toLowerCase())) {
+    if (projectFilter !== 'ALL' && p.projectName.trim().toLowerCase() !== projectFilter.trim().toLowerCase()) {
       return false;
     }
     if (statusFilter !== 'ALL' && p.status !== statusFilter) {
@@ -383,11 +407,10 @@ export default function GovernmentPermitsTracker({
               onChange={(e) => setProjectFilter(e.target.value)}
               className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-amber-500 font-mono"
             >
-              <option value="ALL">All Commercial Projects</option>
-              <option value="NexBridge">NexBridge Software Hub</option>
-              <option value="BGComm">BGComm Global BPO Floor</option>
-              <option value="RedBin">RedBin Commercial HQ</option>
-              <option value="Owl">Owl Creative Studio</option>
+              <option value="ALL">All Commercial Projects ({availableProjectNames.length})</option>
+              {availableProjectNames.map((projName) => (
+                <option key={projName} value={projName}>{projName}</option>
+              ))}
             </select>
           </div>
 
@@ -560,10 +583,9 @@ export default function GovernmentPermitsTracker({
                   onChange={(e) => setNewProject(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
                 >
-                  <option value="NexBridge Software Hub">NexBridge Software Hub</option>
-                  <option value="BGComm Global BPO Floor">BGComm Global BPO Floor</option>
-                  <option value="RedBin Commercial HQ">RedBin Commercial HQ</option>
-                  <option value="Owl Creative Studio">Owl Creative Studio</option>
+                  {availableProjectNames.map((projName) => (
+                    <option key={projName} value={projName}>{projName}</option>
+                  ))}
                 </select>
               </div>
 
@@ -698,10 +720,12 @@ export default function GovernmentPermitsTracker({
                   onChange={(e) => setEditProject(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
                 >
-                  <option value="NexBridge Software Hub">NexBridge Software Hub</option>
-                  <option value="BGComm Global BPO Floor">BGComm Global BPO Floor</option>
-                  <option value="RedBin Commercial HQ">RedBin Commercial HQ</option>
-                  <option value="Owl Creative Studio">Owl Creative Studio</option>
+                  {editProject && !availableProjectNames.includes(editProject) && (
+                    <option value={editProject}>{editProject}</option>
+                  )}
+                  {availableProjectNames.map((projName) => (
+                    <option key={projName} value={projName}>{projName}</option>
+                  ))}
                 </select>
               </div>
 

@@ -3,19 +3,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   DollarSign, CheckCircle2, Clock, Users, Building2, 
   ArrowUpRight, Download, Filter, Search, Plus, ShieldCheck, 
   AlertCircle, X, Check, Edit3, Trash2, Printer, FileText,
   BadgeDollarSign, UserCheck
 } from 'lucide-react';
-import { ExtendedPayrollItem, Contractor, PayrollRecord } from '../types';
+import { ExtendedPayrollItem, Contractor, PayrollRecord, ProjectProfile } from '../types';
 
 interface PayrollManagerProps {
   payrollRecords?: PayrollRecord[];
   initialPayroll?: ExtendedPayrollItem[];
   contractors?: Contractor[];
+  projects?: ProjectProfile[];
+  isFinance?: boolean;
   onDisburse?: (id?: string, all?: boolean) => Promise<void>;
   onAddWageEntry?: (entry: Partial<ExtendedPayrollItem>) => Promise<void>;
   onUpdateWageEntry?: (id: string, updates: Partial<ExtendedPayrollItem>) => Promise<void>;
@@ -26,6 +28,8 @@ export default function PayrollManager({
   payrollRecords = [],
   initialPayroll = [],
   contractors = [],
+  projects = [],
+  isFinance = true,
   onDisburse,
   onAddWageEntry,
   onUpdateWageEntry,
@@ -36,6 +40,21 @@ export default function PayrollManager({
   useEffect(() => {
     setItems(initialPayroll || []);
   }, [initialPayroll]);
+
+  // Dynamically aggregate project names from database and active payroll
+  const availableProjectNames = useMemo(() => {
+    const names = new Set<string>();
+    (projects || []).forEach(p => {
+      if (p.name?.trim()) names.add(p.name.trim());
+    });
+    (items || []).forEach(item => {
+      if (item.projectName?.trim()) names.add(item.projectName.trim());
+    });
+    if (names.size === 0) {
+      names.add('Commercial Fit-Out Site 1');
+    }
+    return Array.from(names);
+  }, [projects, items]);
 
   const [projectFilter, setProjectFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -50,7 +69,7 @@ export default function PayrollManager({
 
   // New Wage Item Form
   const [newName, setNewName] = useState('');
-  const [newProject, setNewProject] = useState('NexBridge Software Hub');
+  const [newProject, setNewProject] = useState(availableProjectNames[0] || 'Commercial Fit-Out Site 1');
   const [newCompany, setNewCompany] = useState('SolidFoundations Engineering');
   const [newRole, setNewRole] = useState('Lead Carpenter');
   const [newDailyRate, setNewDailyRate] = useState(900);
@@ -58,6 +77,13 @@ export default function PayrollManager({
   const [newOvertime, setNewOvertime] = useState(4);
   const [newDeductions, setNewDeductions] = useState(850);
   const [newMethod, setNewMethod] = useState('BDO Direct Payroll');
+
+  // Sync default new project when projects change
+  useEffect(() => {
+    if (availableProjectNames.length > 0 && (!newProject || !availableProjectNames.includes(newProject))) {
+      setNewProject(availableProjectNames[0]);
+    }
+  }, [availableProjectNames]);
 
   // Edit Wage Item Form
   const [editName, setEditName] = useState('');
@@ -72,7 +98,7 @@ export default function PayrollManager({
   const [editStatus, setEditStatus] = useState<'Pending' | 'Disbursed'>('Pending');
 
   const filteredItems = items.filter(i => {
-    if (projectFilter !== 'ALL' && !i.projectName.toLowerCase().includes(projectFilter.toLowerCase())) {
+    if (projectFilter !== 'ALL' && i.projectName.trim().toLowerCase() !== projectFilter.trim().toLowerCase()) {
       return false;
     }
     if (statusFilter !== 'ALL' && i.status !== statusFilter) {
@@ -336,24 +362,53 @@ export default function PayrollManager({
             Export Payroll (CSV)
           </button>
 
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-3.5 py-2.5 rounded-xl border border-slate-700 text-xs transition cursor-pointer"
-          >
-            <Plus className="w-4 h-4 text-emerald-400" />
-            Log Wage Entry
-          </button>
+          {isFinance ? (
+            <>
+              <button
+                onClick={() => setShowAddModal(true)}
+                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-3.5 py-2.5 rounded-xl border border-slate-700 text-xs transition cursor-pointer"
+              >
+                <Plus className="w-4 h-4 text-emerald-400" />
+                Log Wage Entry
+              </button>
 
-          <button
-            onClick={handleDisburseAll}
-            disabled={pendingCount === 0 || isDisbursing}
-            className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/20 disabled:opacity-50 text-xs cursor-pointer"
-          >
-            <CheckCircle2 className="w-4 h-4" />
-            {isDisbursing ? 'Processing...' : `Disburse Pending (₱${pendingAmount.toLocaleString()})`}
-          </button>
+              <button
+                onClick={handleDisburseAll}
+                disabled={pendingCount === 0 || isDisbursing}
+                className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/20 disabled:opacity-50 text-xs cursor-pointer"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                {isDisbursing ? 'Processing...' : `Disburse Pending (₱${pendingAmount.toLocaleString()})`}
+              </button>
+            </>
+          ) : (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-400">
+              <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+              <span>Disbursements Restricted to Finance</span>
+            </div>
+          )}
         </div>
       </div>
+
+      {/* Separation of Duties (SoD) Notice for Operations Role */}
+      {!isFinance && (
+        <div className="bg-amber-950/40 border border-amber-500/40 rounded-2xl p-4 flex flex-col md:flex-row md:items-center justify-between gap-4 text-xs font-mono">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <span className="font-bold text-amber-300 block">Separation of Duties (SoD) Enforced — Operations View</span>
+              <span className="text-slate-400">
+                You are viewing labor allocations and jobsite headcount. In accordance with enterprise governance, direct wage modifications, statutory deduction changes, and monetary disbursements are strictly managed by the Finance & Accounting Department.
+              </span>
+            </div>
+          </div>
+          <span className="px-3 py-1 rounded-full bg-slate-900 border border-amber-500/40 text-amber-400 font-bold shrink-0 self-start md:self-auto">
+            READ-ONLY
+          </span>
+        </div>
+      )}
 
       {feedback && (
         <div className="p-4 rounded-xl bg-emerald-950/80 text-emerald-300 border border-emerald-800 text-xs font-mono flex items-center gap-2 animate-fadeIn">
@@ -428,11 +483,10 @@ export default function PayrollManager({
               onChange={(e) => setProjectFilter(e.target.value)}
               className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-3 py-2 focus:outline-none focus:border-emerald-500 font-mono"
             >
-              <option value="ALL">All Commercial Projects</option>
-              <option value="NexBridge">NexBridge Software Hub</option>
-              <option value="BGComm">BGComm Global BPO Floor</option>
-              <option value="RedBin">RedBin Commercial HQ</option>
-              <option value="Owl">Owl Creative Studio</option>
+              <option value="ALL">All Commercial Projects ({availableProjectNames.length})</option>
+              {availableProjectNames.map((projName) => (
+                <option key={projName} value={projName}>{projName}</option>
+              ))}
             </select>
           </div>
 
@@ -537,7 +591,7 @@ export default function PayrollManager({
                     </td>
                     <td className="py-3.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1.5">
-                        {item.status === 'Pending' && (
+                        {isFinance && item.status === 'Pending' && (
                           <button
                             onClick={() => handleDisburseSingle(item.id)}
                             className="px-2 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800 text-[10px] font-bold transition cursor-pointer"
@@ -553,20 +607,24 @@ export default function PayrollManager({
                         >
                           <FileText className="w-3.5 h-3.5" />
                         </button>
-                        <button
-                          onClick={() => openEditModal(item)}
-                          className="p-1 text-slate-400 hover:text-amber-400 transition cursor-pointer"
-                          title="Edit Wage Entry"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(item.id)}
-                          className="p-1 text-slate-500 hover:text-rose-400 transition cursor-pointer"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        {isFinance && (
+                          <>
+                            <button
+                              onClick={() => openEditModal(item)}
+                              className="p-1 text-slate-400 hover:text-amber-400 transition cursor-pointer"
+                              title="Edit Wage Entry"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(item.id)}
+                              className="p-1 text-slate-500 hover:text-rose-400 transition cursor-pointer"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -653,10 +711,9 @@ export default function PayrollManager({
                     onChange={(e) => setNewProject(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
                   >
-                    <option value="NexBridge Software Hub">NexBridge Software Hub</option>
-                    <option value="BGComm Global BPO Floor">BGComm Global BPO Floor</option>
-                    <option value="RedBin Commercial HQ">RedBin Commercial HQ</option>
-                    <option value="Owl Creative Studio">Owl Creative Studio</option>
+                    {availableProjectNames.map((projName) => (
+                      <option key={projName} value={projName}>{projName}</option>
+                    ))}
                   </select>
                 </div>
 
@@ -807,10 +864,12 @@ export default function PayrollManager({
                     onChange={(e) => setEditProject(e.target.value)}
                     className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
                   >
-                    <option value="NexBridge Software Hub">NexBridge Software Hub</option>
-                    <option value="BGComm Global BPO Floor">BGComm Global BPO Floor</option>
-                    <option value="RedBin Commercial HQ">RedBin Commercial HQ</option>
-                    <option value="Owl Creative Studio">Owl Creative Studio</option>
+                    {editProject && !availableProjectNames.includes(editProject) && (
+                      <option value={editProject}>{editProject}</option>
+                    )}
+                    {availableProjectNames.map((projName) => (
+                      <option key={projName} value={projName}>{projName}</option>
+                    ))}
                   </select>
                 </div>
 

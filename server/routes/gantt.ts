@@ -34,25 +34,6 @@ export function createGanttRouter(prisma: PrismaClient) {
     return result;
   }
 
-  async function ensureCommercialProject(id: string, name?: string) {
-    try {
-      const existing = await prisma.commercialProject.findUnique({ where: { id } });
-      if (!existing) {
-        await prisma.commercialProject.create({
-          data: {
-            id,
-            name: name || `Commercial Site ${id}`,
-            clientName: 'CTVill Builders Corporation',
-            status: 'IN_PROGRESS',
-            progressPercentage: 45
-          }
-        });
-      }
-    } catch (e) {
-      // Ignored if already created
-    }
-  }
-
   /**
    * GET /api/projects/:projectId/gantt
    * Returns { data: tasks, links: links } formatted for Gantt engine
@@ -60,7 +41,14 @@ export function createGanttRouter(prisma: PrismaClient) {
   router.get('/:projectId/gantt', async (req: Request, res: Response) => {
     try {
       const { projectId } = req.params;
-      await ensureCommercialProject(projectId);
+      if (!projectId) {
+        return res.json({ data: [], links: [] });
+      }
+
+      const existingProject = await prisma.commercialProject.findUnique({ where: { id: projectId } });
+      if (!existingProject) {
+        return res.json({ data: [], links: [] });
+      }
 
       let tasks = await prisma.projectTask.findMany({
         where: { projectId },
@@ -129,7 +117,10 @@ export function createGanttRouter(prisma: PrismaClient) {
         return res.status(400).json({ error: 'Project ID is required' });
       }
 
-      await ensureCommercialProject(projectId);
+      const existingProject = await prisma.commercialProject.findUnique({ where: { id: projectId } });
+      if (!existingProject) {
+        return res.status(404).json({ error: 'Project not found' });
+      }
 
       const effectiveEntityType = entityType || (req.body.task ? 'task' : req.body.link ? 'link' : undefined);
       const effectiveData = data || req.body.task || req.body.link;
@@ -308,9 +299,11 @@ export function createGanttRouter(prisma: PrismaClient) {
 
           // Recalculate summary metrics for commercial_projects
           const allTasks = await tx.projectTask.findMany({ where: { projectId } });
+          let avgProgress = 0;
           if (allTasks.length > 0) {
-            const totalProgress = allTasks.reduce((acc, curr) => acc + (curr.progress || 0), 0);
-            const avgProgress = Math.round((totalProgress / allTasks.length) * 100);
+            const totalDuration = allTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
+            const weightedProgress = allTasks.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, curr.duration || 1), 0);
+            avgProgress = totalDuration > 0 ? Math.round((weightedProgress / totalDuration) * 100) : 0;
             await tx.commercialProject.update({
               where: { id: projectId },
               data: {
@@ -320,7 +313,13 @@ export function createGanttRouter(prisma: PrismaClient) {
             }).catch(() => {});
           }
 
-          return { action, entityType: effectiveEntityType, id: effectiveData?.id };
+          return { 
+            action, 
+            entityType: effectiveEntityType, 
+            id: effectiveData?.id,
+            projectProgress: avgProgress,
+            tasksCount: allTasks.length
+          };
         });
 
         return res.json({
@@ -422,9 +421,11 @@ export function createGanttRouter(prisma: PrismaClient) {
           where: { projectId }
         });
 
+        let avgProgress = 0;
         if (allTasks.length > 0) {
-          const totalProgress = allTasks.reduce((acc, curr) => acc + (curr.progress || 0), 0);
-          const avgProgress = Math.round((totalProgress / allTasks.length) * 100);
+          const totalDuration = allTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
+          const weightedProgress = allTasks.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, curr.duration || 1), 0);
+          avgProgress = totalDuration > 0 ? Math.round((weightedProgress / totalDuration) * 100) : 0;
 
           await tx.commercialProject.update({
             where: { id: projectId },
@@ -435,12 +436,13 @@ export function createGanttRouter(prisma: PrismaClient) {
           }).catch(() => {});
         }
 
-        return { tasksCount: tasks.length, linksCount: links.length };
+        return { tasksCount: tasks.length, linksCount: links.length, projectProgress: avgProgress };
       });
 
       res.json({
         success: true,
         message: `Successfully synchronized ${result.tasksCount} tasks and ${result.linksCount} links.`,
+        result,
         syncedAt: new Date().toISOString()
       });
     } catch (error) {

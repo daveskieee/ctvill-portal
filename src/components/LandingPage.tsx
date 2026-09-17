@@ -3,14 +3,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ArrowRight, Building2, ShieldCheck, Award, Sparkles, Phone, Mail, 
   MapPin, Activity, FileText, CheckCircle2, Calendar, Calculator, 
-  Compass, Layers, Eye, X, Check, Send, ChevronRight, HardHat, 
+  Compass, Layers, Eye, X, Check, Send, ChevronLeft, ChevronRight, HardHat, 
   Scale, Briefcase, Ruler, Clock, ExternalLink, Hammer, Wrench,
   CheckSquare, FileCheck, Users, HelpCircle, AlertTriangle, RefreshCw
 } from 'lucide-react';
+import { ThemeToggle } from './ThemeToggle';
 
 // Authentic CTVill Local Assets
 import logoJpg from '../assets/images/ctvill/logo.jpg';
@@ -163,11 +164,92 @@ const PROJECTS: ProjectData[] = [
   }
 ];
 
+const DYK_FACTS = [
+  {
+    icon: Layers,
+    tag: 'COGNITIVE ARCHITECTURE',
+    title: 'High Ceilings Foster Abstract Innovation; Focused Low Ceilings Enhance Precision',
+    body: 'Cognitive architectural studies demonstrate that high ceiling volumes encourage broader abstract synthesis (ideal for brainstorm nooks and design studios), while lower structural drops foster sharp detail orientation. We calibrate every elevation to the exact tasks performed within.'
+  },
+  {
+    icon: Activity,
+    tag: 'ACOUSTIC ENGINEERING',
+    title: 'Targeted Acoustic Baffles Reduce Cognitive Fatigue by Up to 40%',
+    body: 'Speech intelligibility in open-plan offices is the #1 driver of worker distraction. Strategic NRC 0.85+ ceiling baffles and wall panels absorb flanking sound waves, dramatically lowering stress hormones while preserving open team collaboration.'
+  },
+  {
+    icon: Sparkles,
+    tag: 'CIRCADIAN LIGHTING',
+    title: 'Dynamic 6,500K to 2,700K Kelvin Tuning Boosts Alertness by 16%',
+    body: 'Cool 6,500K daylight-mimicking LEDs trigger dopamine and alertness during peak mid-day sprints, while transitioning to warm 2,700K fixtures at dusk supports natural melatonin cycles. Our MEP engineers design human-centric lighting schemes for every shift.'
+  },
+  {
+    icon: Compass,
+    tag: 'BIOPHILIC PSYCHOLOGY',
+    title: 'Natural Textures & Living Elements Lower Workplace Stress by 37%',
+    body: 'Integrating real timber grain, slate textures, and live foliage reduces sympathetic nervous system arousal. Commercial workspaces with biophilic elements report 15% higher wellbeing and lower absenteeism compared to sterile cubicle layouts.'
+  },
+  {
+    icon: Ruler,
+    tag: 'ERGONOMIC ENGINEERING',
+    title: 'Task-Calibrated Workstations Reduce Repetitive Strain by 54%',
+    body: 'Proper desk clearances, ANSI/BIFMA-rated task chairs, and 105° visual angles prevent musculoskeletal strain in high-density BPO and tech setups. We optimize physical circulation paths to encourage subconscious movement breaks.'
+  },
+  {
+    icon: Eye,
+    tag: 'CHROMATIC PSYCHOLOGY',
+    title: 'High-Contrast Amber & Deep Slate Accelerates Visual Focus',
+    body: 'Warm amber accents paired with deep charcoal surfaces provide warm focal grounding without visual glare. This chromatic balance sharpens executive attention spans during high-stakes boardroom negotiations and agile scrums.'
+  }
+];
+
 export default function LandingPage({ onEnterPortal }: LandingPageProps) {
   // Navigation & transition state
   const [isNavigating, setIsNavigating] = useState<boolean>(false);
   const [selectedProject, setSelectedProject] = useState<ProjectData | null>(null);
   const [activeCategory, setActiveCategory] = useState<string>('all');
+
+  // Did You Know? auto-rotating carousel state
+  const [dykIndex, setDykIndex] = useState<number>(0);
+  const [dykFade, setDykFade] = useState<boolean>(true);
+  const [dykPaused, setDykPaused] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (dykPaused) return;
+    const timer = setInterval(() => {
+      setDykFade(false);
+      setTimeout(() => {
+        setDykIndex((prev) => (prev + 1) % DYK_FACTS.length);
+        setDykFade(true);
+      }, 400);
+    }, 7000);
+
+    return () => clearInterval(timer);
+  }, [dykPaused]);
+
+  const handleSelectDykFact = (idx: number) => {
+    if (idx === dykIndex) return;
+    setDykFade(false);
+    setTimeout(() => {
+      setDykIndex(idx);
+      setDykFade(true);
+    }, 250);
+  };
+
+  const handlePrevDykFact = () => {
+    handleSelectDykFact((dykIndex - 1 + DYK_FACTS.length) % DYK_FACTS.length);
+  };
+
+  const handleNextDykFact = () => {
+    handleSelectDykFact((dykIndex + 1) % DYK_FACTS.length);
+  };
+
+  const handleConsultFromDyk = () => {
+    const fact = DYK_FACTS[dykIndex];
+    setProjectScope(`Commercial Fit-Out (${fact.tag})`);
+    setProjectNotes(`Inquiring about ${fact.title.toLowerCase()} for our workplace layout.`);
+    setShowQuoteModal(true);
+  };
   
   // Quotation Modal State
   const [showQuoteModal, setShowQuoteModal] = useState<boolean>(false);
@@ -282,7 +364,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
             <span>estimate@ctvill.com</span>
           </span>
           <span className="bg-amber-400/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider hidden lg:inline">
-            PEZA & MACEA Compliant
+            PCAB-Licensed • PEZA & MACEA Permitting Specialist
           </span>
         </div>
       </div>
@@ -353,6 +435,8 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
 
           {/* Action Hub */}
           <div className="flex items-center gap-3">
+            <ThemeToggle />
+
             <button
               onClick={() => setShowQuoteModal(true)}
               className="hidden sm:flex px-4 py-2 border border-amber-500/40 hover:border-amber-500 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold rounded-xl cursor-pointer transition-all items-center gap-1.5"
@@ -623,23 +707,87 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
 
           </div>
 
-          {/* Science & Architecture Highlight Callout */}
-          <div className="mt-12 bg-slate-950 border border-slate-800 rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row items-center gap-6 justify-between">
-            <div className="space-y-2 max-w-2xl">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold flex items-center gap-1.5">
-                <Sparkles className="w-3.5 h-3.5" />
-                DID YOU KNOW?
-              </span>
-              <h4 className="font-sans font-bold text-white text-lg sm:text-xl">
-                High Ceilings Foster Abstract Innovation; Focused Low Ceilings Enhance Precision
-              </h4>
-              <p className="text-xs text-slate-400 leading-relaxed">
-                Cognitive architectural studies demonstrate that high ceiling volumes encourage broader abstract synthesis (ideal for brainstorm nooks and design studios), while lower structural drops foster sharp detail orientation. We calibrate every elevation to the exact tasks performed within.
-              </p>
+          {/* Science & Architecture Highlight Callout - Auto-Rotating "Did You Know?" */}
+          <div 
+            className="mt-12 bg-slate-950 border border-slate-800 rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row items-center gap-6 justify-between transition-all group relative overflow-hidden shadow-xl"
+            onMouseEnter={() => setDykPaused(true)}
+            onMouseLeave={() => setDykPaused(false)}
+          >
+            {/* Animated 7-Second Progress Bar at Bottom of Card */}
+            <div className="absolute bottom-0 left-0 right-0 h-1 bg-slate-900 overflow-hidden">
+              <div
+                key={dykIndex}
+                className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all"
+                style={{
+                  width: '100%',
+                  animation: 'dykProgress 7000ms linear forwards',
+                  animationPlayState: dykPaused ? 'paused' : 'running'
+                }}
+              />
             </div>
+
+            <div className="space-y-3 max-w-2xl w-full">
+              <div className="flex items-center justify-between gap-4">
+                <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold flex items-center gap-1.5">
+                  {React.createElement(DYK_FACTS[dykIndex].icon, { className: 'w-3.5 h-3.5' })}
+                  DID YOU KNOW? • {DYK_FACTS[dykIndex].tag}
+                </span>
+
+                {/* Carousel controls: Prev, Dots, Next, Counter */}
+                <div className="flex items-center gap-2" title="Hover to pause rotation">
+                  <button
+                    onClick={handlePrevDykFact}
+                    className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800/80 transition-colors cursor-pointer"
+                    aria-label="Previous fact"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                  </button>
+
+                  <div className="flex items-center gap-1.5">
+                    {DYK_FACTS.map((_, idx) => (
+                      <button
+                        key={idx}
+                        onClick={() => handleSelectDykFact(idx)}
+                        className={`h-1.5 rounded-full transition-all duration-300 ${
+                          idx === dykIndex 
+                            ? 'w-6 bg-amber-400' 
+                            : 'w-1.5 bg-slate-700 hover:bg-slate-500'
+                        }`}
+                        aria-label={`Go to fact ${idx + 1}`}
+                      />
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={handleNextDykFact}
+                    className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-slate-800/80 transition-colors cursor-pointer"
+                    aria-label="Next fact"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+
+                  <span className="text-[9px] font-mono text-slate-500 ml-1 hidden sm:inline">
+                    {dykIndex + 1}/{DYK_FACTS.length}
+                  </span>
+                </div>
+              </div>
+
+              <div className={`min-h-[120px] sm:min-h-[96px] flex flex-col justify-center transition-all duration-400 ${
+                dykFade ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'
+              }`}>
+                <h4 className="font-sans font-bold text-white text-lg sm:text-xl leading-snug">
+                  {DYK_FACTS[dykIndex].title}
+                </h4>
+                <p className="text-xs text-slate-400 leading-relaxed mt-2">
+                  {DYK_FACTS[dykIndex].body}
+                </p>
+              </div>
+            </div>
+
             <button
-              onClick={() => setShowQuoteModal(true)}
-              className="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl whitespace-nowrap cursor-pointer transition-colors shrink-0"
+              onClick={handleConsultFromDyk}
+              className="px-6 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl whitespace-nowrap cursor-pointer transition-colors shrink-0 shadow-lg shadow-amber-500/20"
+              title={`Consult with engineers regarding ${DYK_FACTS[dykIndex].tag}`}
             >
               Consult with Our Engineers ➔
             </button>
@@ -1184,7 +1332,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
             {/* Enterprise ERP Access */}
             <div className="lg:col-span-2 space-y-4 text-left">
               <h4 className="text-[10px] font-mono font-bold text-slate-300 tracking-wider uppercase border-l-2 border-blue-500 pl-2">
-                ERP WORKSPACES
+                PMS WORKSPACES
               </h4>
               <ul className="space-y-2.5 text-xs">
                 <li>
@@ -1239,11 +1387,11 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
           <div className="py-6 flex flex-wrap items-center justify-between gap-6 border-b border-slate-800 text-[10px] font-mono text-slate-500">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>PEZA ACCREDITATION COMPLIANT</span>
+              <span>PEZA PERMITTING & FIT-OUT CLEARANCE</span>
             </div>
             <div className="flex items-center gap-2">
               <Award className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>MACEA APPROVED OPERATING STANDARDS</span>
+              <span>MACEA (MAKATI CBD) PROTOCOL QUALIFIED</span>
             </div>
             <div className="flex items-center gap-2">
               <Building2 className="w-4 h-4 text-blue-400 shrink-0" />

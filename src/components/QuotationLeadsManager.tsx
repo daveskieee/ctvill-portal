@@ -7,9 +7,10 @@ import React, { useState } from 'react';
 import { 
   Briefcase, CheckCircle2, Clock, DollarSign, Mail, 
   Phone, Building2, User, Search, Filter, Sparkles, 
-  ArrowRight, Check, X, Tag, Calculator, Award
+  ArrowRight, Check, X, Tag, Calculator, Award, Download, Printer
 } from 'lucide-react';
 import { FitoutQuotationItem } from '../types';
+import { exportToCsv, printRegisterTable } from '../utils/exportUtils';
 
 interface QuotationLeadsManagerProps {
   quotations: FitoutQuotationItem[];
@@ -59,6 +60,48 @@ export default function QuotationLeadsManager({
     } finally {
       setIsConvertingId(null);
     }
+  };
+
+  const handleExportCsv = () => {
+    const headers = [
+      'Lead ID', 'Client Name', 'Email', 'Phone', 'Project Scope',
+      'Space Type', 'Finish Tier', 'Floor Area (sqm)', 'Est. Budget (PHP)',
+      'Est. Weeks', 'Lead Status', 'Date Submitted', 'Project Notes'
+    ];
+    const rows = filteredQuotes.map(q => [
+      q.id,
+      q.clientName,
+      q.clientEmail,
+      q.clientPhone || '',
+      q.projectScope,
+      q.spaceType || '',
+      q.finishTier || '',
+      q.estimatorArea,
+      q.estimatedCost,
+      q.estimatedWeeks,
+      q.status,
+      q.createdAt || '',
+      q.projectNotes || ''
+    ]);
+    exportToCsv('CTVill_Quotation_Leads', headers, rows);
+  };
+
+  const handlePrint = () => {
+    const headers = [
+      'Lead ID', 'Client Name', 'Email / Contact', 'Scope & Space',
+      'Area', 'Est. Budget', 'Duration', 'Status'
+    ];
+    const rows = filteredQuotes.map(q => [
+      q.id,
+      q.clientName,
+      `${q.clientEmail} ${q.clientPhone ? '• ' + q.clientPhone : ''}`,
+      `${q.projectScope} (${q.spaceType || 'Commercial'})`,
+      `${q.estimatorArea} sqm`,
+      `₱${Number(q.estimatedCost || 0).toLocaleString()}`,
+      `${q.estimatedWeeks} wks`,
+      q.status
+    ]);
+    printRegisterTable('Commercial Fit-Out Quotation Leads Register', 'Prospective Commercial Projects & Web Estimator Submissions', headers, rows);
   };
 
   return (
@@ -147,15 +190,35 @@ export default function QuotationLeadsManager({
           ))}
         </div>
 
-        <div className="relative w-full sm:w-72">
-          <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search client, email, scope..."
-            className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-          />
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="relative w-full sm:w-64">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search client, email, scope..."
+              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+
+          <button
+            onClick={handleExportCsv}
+            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            title="Export filtered leads to CSV"
+          >
+            <Download className="w-3.5 h-3.5 text-cyan-400" />
+            <span className="hidden md:inline">Export CSV</span>
+          </button>
+
+          <button
+            onClick={handlePrint}
+            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            title="Print or Save PDF report"
+          >
+            <Printer className="w-3.5 h-3.5 text-slate-300" />
+            <span className="hidden md:inline">Print / PDF</span>
+          </button>
         </div>
       </div>
 
