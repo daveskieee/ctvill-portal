@@ -4,7 +4,7 @@ import {
   MapPin, Award, Radio, ChevronRight, 
   UserCheck, X, LayoutGrid, Building, Star, CheckCircle2, Clock, Sliders, Check
 } from 'lucide-react';
-import { Contractor, DailyManpowerAudit, ProjectProfile } from '../types';
+import { Contractor, DailyManpowerAudit, ProjectProfile, isOfficeOrExecutive, isIndividualStaffOrEngineer } from '../types';
 
 // Curated high-resolution professional avatars for construction/fit-out personnel
 const DEFAULT_AVATARS: Record<string, string> = {
@@ -116,7 +116,8 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
     setAllocContractor(c);
     setAllocSite(c.activeProjectSite || (projects[0]?.name || ''));
     setAllocZone(c.assignedZone || '');
-    setAllocHeadcount(c.activeManpower || 1);
+    const isIndiv = isIndividualStaffOrEngineer(c);
+    setAllocHeadcount(isIndiv ? 1 : (c.activeManpower || 1));
     setIsAllocModalOpen(true);
   };
 
@@ -125,7 +126,8 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
     if (!allocContractor) return;
     const cleanSite = allocSite.trim();
     const cleanZone = allocZone.trim();
-    const cleanCount = Math.max(1, Number(allocHeadcount) || 1);
+    const isIndiv = isIndividualStaffOrEngineer(allocContractor);
+    const cleanCount = isIndiv ? 1 : Math.max(1, Number(allocHeadcount) || 1);
     const updated: Contractor = {
       ...allocContractor,
       activeProjectSite: cleanSite || undefined,
@@ -256,9 +258,6 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
               </span>
               <h3 className="text-base font-bold text-white tracking-wide flex items-center gap-2">
                 CTVill Workforce Directory &amp; Roster
-                <span className="text-xs bg-slate-800 text-teal-300 font-mono px-2.5 py-0.5 rounded-full font-semibold border border-slate-700">
-                  Messenger Style
-                </span>
               </h3>
             </div>
             <div className="text-xs text-slate-400 flex items-center gap-2 flex-wrap pt-0.5">
@@ -291,7 +290,7 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                 }`}
               >
                 <Users className="w-3.5 h-3.5" />
-                <span>Messenger View</span>
+                <span>Roster View</span>
               </button>
               <button
                 type="button"
@@ -390,7 +389,7 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
       {viewMode === 'MESSENGER' ? (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-start">
           {/* LEFT COLUMN: Messenger Contact List */}
-          <div className="lg:col-span-5 bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-lg flex flex-col h-[740px]">
+          <div className="lg:col-span-5 bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-lg flex flex-col h-[440px] lg:h-[740px]">
             {/* List Header */}
             <div className="p-3.5 border-b border-slate-800/80 bg-slate-900/40 flex items-center justify-between">
               <div className="flex items-center gap-2 font-mono text-xs text-slate-400">
@@ -488,7 +487,11 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                             {c.name}
                           </h4>
                           <span className="text-[10px] font-mono text-slate-500 shrink-0">
-                            {c.activeManpower} crew
+                            {isOfficeOrExecutive(c)
+                              ? 'Office Staff (1)'
+                              : isIndividualStaffOrEngineer(c)
+                                ? 'Field Pro (1)'
+                                : `${c.activeManpower} crew`}
                           </span>
                         </div>
 
@@ -534,7 +537,7 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
           </div>
 
           {/* RIGHT COLUMN: Full Worker Profile View & Field Dossier */}
-          <div className="lg:col-span-7 bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-lg flex flex-col h-[740px]">
+          <div className="lg:col-span-7 bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-lg flex flex-col h-[600px] lg:h-[740px]">
             {selectedContractor ? (
               <>
                 {/* Profile Cover & Header */}
@@ -738,16 +741,36 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
 
                   {/* Graphical Metrics & KPIs */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {/* Active Crew Under Lead */}
+                    {/* Active Crew / Role Metric */}
                     <div className="bg-slate-900/50 border border-slate-800 p-3.5 rounded-xl space-y-1">
-                      <span className="text-[10px] font-mono text-slate-400 block">Crew Managed</span>
+                      <span className="text-[10px] font-mono text-slate-400 block">
+                        {isOfficeOrExecutive(selectedContractor) 
+                          ? 'Workforce Class' 
+                          : isIndividualStaffOrEngineer(selectedContractor) 
+                            ? 'Field Deployment' 
+                            : 'Crew Managed'}
+                      </span>
                       <div className="flex items-baseline gap-1">
                         <strong className="text-lg font-bold text-white font-mono">
-                          {selectedContractor.activeManpower}
+                          {isOfficeOrExecutive(selectedContractor) 
+                            ? 'Corporate' 
+                            : isIndividualStaffOrEngineer(selectedContractor) 
+                              ? 'Supervisor' 
+                              : selectedContractor.activeManpower}
                         </strong>
-                        <span className="text-xs text-slate-500">workers</span>
+                        <span className="text-xs text-slate-500">
+                          {isOfficeOrExecutive(selectedContractor) || isIndividualStaffOrEngineer(selectedContractor) 
+                            ? '(1 Person)' 
+                            : 'workers'}
+                        </span>
                       </div>
-                      <span className="text-[10px] text-teal-400 font-mono">Skilled craft roster</span>
+                      <span className="text-[10px] text-teal-400 font-mono">
+                        {isOfficeOrExecutive(selectedContractor) 
+                          ? 'Executive & Admin Oversight' 
+                          : isIndividualStaffOrEngineer(selectedContractor) 
+                            ? 'Dedicated Site Professional' 
+                            : 'Skilled craft roster'}
+                      </span>
                     </div>
 
                     {/* QA Inspection Score */}
@@ -978,8 +1001,12 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                 <div className="space-y-2 pt-1 font-sans">
                   <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                     <div className="bg-slate-900/70 border border-slate-800 p-2 rounded-lg">
-                      <span className="text-[10px] text-slate-500 block">Crew Deployed</span>
-                      <strong className="text-white text-xs">{c.activeManpower} Workers</strong>
+                      <span className="text-[10px] text-slate-500 block">
+                        {isOfficeOrExecutive(c) ? 'Classification' : isIndividualStaffOrEngineer(c) ? 'Deployment' : 'Crew Deployed'}
+                      </span>
+                      <strong className="text-white text-xs">
+                        {isOfficeOrExecutive(c) ? 'Office Staff (1)' : isIndividualStaffOrEngineer(c) ? 'Field Pro (1)' : `${c.activeManpower} Workers`}
+                      </strong>
                     </div>
                     <div className="bg-slate-900/70 border border-slate-800 p-2 rounded-lg">
                       <span className="text-[10px] text-slate-500 block">Daily Rate</span>
@@ -1124,22 +1151,53 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                 <span className="text-[10px] text-slate-500 font-mono">Specific area or floor where this crew operates.</span>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="text-[11px] font-mono text-slate-300 font-bold block">
-                  Active Crew Headcount
-                </label>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="number"
-                    min={1}
-                    max={100}
-                    value={allocHeadcount}
-                    onChange={(e) => setAllocHeadcount(Math.max(1, parseInt(e.target.value) || 1))}
-                    className="w-28 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono text-sm focus:border-teal-500 focus:outline-none"
-                  />
-                  <span className="text-slate-400 font-mono text-xs">assigned laborers on-site</span>
+              {isOfficeOrExecutive(allocContractor) ? (
+                <div className="p-3 bg-purple-950/40 border border-purple-800/50 rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono text-purple-300 font-bold flex items-center gap-1.5">
+                      🏢 Corporate Office Executive / Management
+                    </span>
+                    <span className="text-[10px] font-mono bg-purple-900/70 text-purple-200 px-2 py-0.5 rounded-full font-bold border border-purple-700/60">
+                      Headcount: 1 (Fixed)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Assigned for executive governance, project sponsorship, and management oversight. Office staff do not contribute to physical labor crew headcount and cannot be scaled as field laborers.
+                  </p>
                 </div>
-              </div>
+              ) : isIndividualStaffOrEngineer(allocContractor) ? (
+                <div className="p-3 bg-cyan-950/40 border border-cyan-800/50 rounded-xl space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-mono text-cyan-300 font-bold flex items-center gap-1.5">
+                      👷 Field Professional / Site Supervisor
+                    </span>
+                    <span className="text-[10px] font-mono bg-cyan-900/70 text-cyan-200 px-2 py-0.5 rounded-full font-bold border border-cyan-700/60">
+                      Headcount: 1 (Fixed)
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">
+                    Dedicated individual site deployment (e.g. Project Manager, Site Engineer, Safety Officer).
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-300 font-bold block flex items-center justify-between">
+                    <span>Active Crew Headcount</span>
+                    <span className="text-[10px] font-normal text-teal-400">Trade Crew Gang Size</span>
+                  </label>
+                  <div className="flex items-center gap-3">
+                    <input
+                      type="number"
+                      min={1}
+                      max={200}
+                      value={allocHeadcount}
+                      onChange={(e) => setAllocHeadcount(Math.max(1, parseInt(e.target.value) || 1))}
+                      className="w-28 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-white font-mono text-sm focus:border-teal-500 focus:outline-none"
+                    />
+                    <span className="text-slate-400 font-mono text-xs">assigned trade craft laborers on-site</span>
+                  </div>
+                </div>
+              )}
 
               <div className="p-3 bg-blue-950/40 border border-blue-900/50 rounded-xl text-[11px] text-blue-300 flex items-start gap-2">
                 <ShieldCheck className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />

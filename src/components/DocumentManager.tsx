@@ -1035,8 +1035,46 @@ export default function DocumentManager({
 
                   <div className="flex items-center gap-2 pt-2">
                     <button
-                      onClick={() => alert(`Downloading verified copy of ${previewDoc.title}`)}
-                      className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold rounded-xl flex items-center gap-2 cursor-pointer shadow-lg shadow-teal-950"
+                      onClick={() => {
+                        const doc = previewDoc;
+                        if (doc.fileUrl && doc.fileUrl.startsWith('http')) {
+                          const link = document.createElement('a');
+                          link.href = doc.fileUrl;
+                          link.download = doc.fileName || `${doc.title.replace(/\s+/g, '_')}.pdf`;
+                          link.target = '_blank';
+                          document.body.appendChild(link);
+                          link.click();
+                          document.body.removeChild(link);
+                          return;
+                        }
+                        const archiveText = `CTVILL DESIGN & CONSTRUCTION - OFFICIAL DOCUMENT ARCHIVE
+========================================================================
+Document Title:    ${doc.title}
+Document ID:       ${doc.id}
+Category:          ${doc.category}
+Revision / Version: v${doc.version}
+File Size:         ${doc.fileSize || '3.2 MB'}
+Upload Date:       ${doc.uploadDate || new Date().toISOString().split('T')[0]}
+Uploaded By:       ${doc.uploadedBy || 'Engineering Records Officer'}
+Verification:      VERIFIED & SEALED ARCHIVAL COPY
+Security Level:    CONFIDENTIAL - RESTRICTED DISTRIBUTION
+------------------------------------------------------------------------
+Document Notes & Specifications:
+${doc.notes || 'Official project architectural and engineering record archived in CTVill Centralized Document Management System.'}
+========================================================================
+Archived by CTVill Project Management Operations
+`;
+                        const blob = new Blob([archiveText], { type: 'text/plain;charset=utf-8' });
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.href = url;
+                        link.download = `${(doc.title || 'Document').replace(/[^a-zA-Z0-9_-]/g, '_')}_v${doc.version}_Archived.txt`;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        URL.revokeObjectURL(url);
+                      }}
+                      className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold rounded-xl flex items-center gap-2 cursor-pointer shadow-lg shadow-teal-950 transition-all hover:scale-105 active:scale-95"
                     >
                       <Download className="w-4 h-4" />
                       <span>Download Archive Copy</span>

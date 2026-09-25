@@ -124,7 +124,7 @@ export async function mapUserToClient(user: any) {
 // In-Memory Performance Cache for /api/all-data
 let allDataCache: any = null;
 let allDataCacheTime = 0;
-const ALL_DATA_CACHE_TTL = 3000;
+const ALL_DATA_CACHE_TTL = 1500;
 
 export function invalidateAllDataCache() {
   allDataCache = null;
@@ -136,7 +136,8 @@ setCacheInvalidator(invalidateAllDataCache);
 // GET /api/all-data: Fetches operational models concurrently
 legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
   try {
-    if (allDataCache && (Date.now() - allDataCacheTime < ALL_DATA_CACHE_TTL)) {
+    const bypassCache = req.query.nocache === 'true' || req.headers['cache-control'] === 'no-cache';
+    if (!bypassCache && allDataCache && (Date.now() - allDataCacheTime < ALL_DATA_CACHE_TTL)) {
       return res.json(allDataCache);
     }
 
@@ -210,7 +211,10 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         _sum: { amountPaid: true }
       }),
       prisma.clientPackage.count(),
-      pool.query('SELECT * FROM manpower_audits ORDER BY audit_date DESC LIMIT 50').catch(() => ({ rows: [] })),
+      prisma.dailyManpowerAudit.findMany({
+        orderBy: { date: 'desc' },
+        take: 50
+      }).catch(() => [] as any[]),
       prisma.projectTask.findMany({ 
         include: { assignedContractor: true },
         orderBy: { createdAt: 'desc' } 
@@ -504,7 +508,24 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         workerName: r.worker_name || r.contractor_name,
         tradeType: r.trade_type || 'Artisan'
       })),
-      manpowerAudits: dbManpowerAudits.rows || [],
+      manpowerAudits: ((Array.isArray(dbManpowerAudits) ? dbManpowerAudits : (dbManpowerAudits as any)?.rows) || []).map((a: any) => ({
+        id: a.id,
+        date: a.date ? (a.date instanceof Date ? a.date.toISOString().split('T')[0] : String(a.date).split('T')[0]) : new Date().toISOString().split('T')[0],
+        contractorId: a.contractorId || a.contractor_id,
+        contractorName: a.contractorName || a.contractor_name,
+        specialty: a.specialty,
+        shift: a.shift || 'Morning',
+        claimedHeadcount: Number(a.claimedHeadcount ?? a.claimed_headcount ?? 0),
+        verifiedHeadcount: Number(a.verifiedHeadcount ?? a.verified_headcount ?? 0),
+        discrepancy: Number(a.discrepancy ?? (Number(a.claimedHeadcount ?? a.claimed_headcount ?? 0) - Number(a.verifiedHeadcount ?? a.verified_headcount ?? 0))),
+        assignedSectorOrLot: a.assignedSectorOrLot || a.assigned_sector_or_lot || 'Active Site',
+        supervisorName: a.supervisorName || a.supervisor_name || 'Site Supervisor',
+        gpsCoordinates: a.gpsCoordinates || a.gps_coordinates || '14.2789° N, 121.1245° E (Site Geofence)',
+        verificationStatus: a.verificationStatus || a.verification_status || 'VERIFIED_MATCH',
+        photoEvidenceVerified: Boolean(a.photoEvidenceVerified ?? a.photo_evidence_verified ?? true),
+        remarks: a.remarks || '',
+        productivityIndex: Number(a.productivityIndex ?? a.productivity_index ?? 90)
+      })),
       rfis: (dbRfisRes.rows || []).map((r: any) => ({
         id: r.id,
         rfiNumber: r.rfi_number,

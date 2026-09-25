@@ -8,7 +8,8 @@ import {
   Calendar, RefreshCw, ZoomIn, ZoomOut, Save, Plus,
   CheckCircle2, Layers, HardHat, AlertTriangle, Edit3, Trash2,
   X, ChevronRight, ChevronDown, Clock, ArrowRight, Link2,
-  AlertCircle, ChevronLeft, CornerDownRight
+  AlertCircle, ChevronLeft, CornerDownRight, ChevronsDown, ChevronsUp,
+  Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Scan
 } from 'lucide-react';
 import { ProjectProfile, Contractor, DailySiteLog } from '../types';
 
@@ -50,9 +51,10 @@ interface GanttTimelineProps {
   milestones?: any[];
   tasks?: any[];
   onUpdateProject?: (id: string, updates: Partial<ProjectProfile>) => void | Promise<void>;
+  onDeleteTask?: (taskId: string) => void;
 }
 
-type ZoomLevel = 'day' | 'week' | 'month';
+type ZoomLevel = 'year' | 'quarter' | 'month' | 'week' | 'day';
 
 interface DragState {
   active: boolean;
@@ -73,12 +75,24 @@ export function isSunday(d: Date): boolean {
 }
 
 export function parseDate(dateStr: string | Date | null | undefined): Date {
-  if (!dateStr) return new Date();
-  if (dateStr instanceof Date) return new Date(dateStr);
+  if (!dateStr) {
+    const fallback = new Date();
+    fallback.setHours(12, 0, 0, 0);
+    return fallback;
+  }
+  if (dateStr instanceof Date) {
+    const d = new Date(dateStr);
+    d.setHours(12, 0, 0, 0);
+    return d;
+  }
   const cleanStr = String(dateStr).split('T')[0].split(' ')[0];
   const [year, month, day] = cleanStr.split('-').map(n => parseInt(n, 10));
-  if (isNaN(year) || isNaN(month) || isNaN(day)) return new Date();
-  return new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (isNaN(year) || isNaN(month) || isNaN(day)) {
+    const fallback = new Date();
+    fallback.setHours(12, 0, 0, 0);
+    return fallback;
+  }
+  return new Date(year, month - 1, day, 12, 0, 0, 0);
 }
 
 export function formatDateISO(date: Date): string {
@@ -103,14 +117,19 @@ export function formatDateShort(dateStr: string | Date | null | undefined): stri
 // Add working days (Mon-Sat, skipping Sundays)
 export function addWorkingDays(startDate: Date | string, durationDays: number): Date {
   const result = parseDate(startDate);
+  // If start is Sunday, advance to first working day (Monday)
+  while (isSunday(result)) {
+    result.setDate(result.getDate() + 1);
+    result.setHours(12, 0, 0, 0);
+  }
   if (durationDays <= 1) {
-    if (isSunday(result)) result.setDate(result.getDate() + 1);
     return result;
   }
 
   let added = 1;
   while (added < durationDays) {
     result.setDate(result.getDate() + 1);
+    result.setHours(12, 0, 0, 0);
     if (!isSunday(result)) {
       added++;
     }
@@ -122,6 +141,8 @@ export function addWorkingDays(startDate: Date | string, durationDays: number): 
 export function countWorkingDays(startDate: Date | string, endDate: Date | string): number {
   const start = parseDate(startDate);
   const end = parseDate(endDate);
+  start.setHours(12, 0, 0, 0);
+  end.setHours(12, 0, 0, 0);
   if (end < start) return 0;
 
   let count = 0;
@@ -131,6 +152,7 @@ export function countWorkingDays(startDate: Date | string, endDate: Date | strin
       count++;
     }
     curr.setDate(curr.getDate() + 1);
+    curr.setHours(12, 0, 0, 0);
   }
   return count;
 }
@@ -139,8 +161,10 @@ export function countWorkingDays(startDate: Date | string, endDate: Date | strin
 export function getNextWorkingDay(date: Date | string): Date {
   const next = parseDate(date);
   next.setDate(next.getDate() + 1);
+  next.setHours(12, 0, 0, 0);
   while (isSunday(next)) {
     next.setDate(next.getDate() + 1);
+    next.setHours(12, 0, 0, 0);
   }
   return next;
 }
@@ -217,11 +241,26 @@ export default function GanttTimeline({
   projects = [],
   contractors = [],
   siteLogs = [],
-  onUpdateProject
+  tasks: tasksProp = [],
+  onUpdateProject,
+  onDeleteTask
 }: GanttTimelineProps) {
   const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
     return projects.length > 0 ? projects[0].id : '';
   });
+
+  // Client-side tombstone registry to prevent race-condition reappearances
+  const recentlyDeletedTaskIdsRef = useRef<Map<string, number>>(new Map());
+
+  const isTaskTombstoned = useCallback((id: string) => {
+    const exp = recentlyDeletedTaskIdsRef.current.get(id);
+    if (!exp) return false;
+    if (Date.now() > exp) {
+      recentlyDeletedTaskIdsRef.current.delete(id);
+      return false;
+    }
+    return true;
+  }, []);
 
   // Keep selectedProjectId synchronized with available projects
   useEffect(() => {
@@ -239,9 +278,82 @@ export default function GanttTimeline({
   const [tasks, setTasks] = useState<GanttTaskItem[]>([]);
   const [links, setLinks] = useState<GanttLinkItem[]>([]);
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>('week');
+  const [zoomFactor, setZoomFactor] = useState<number>(1.0);
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+  const [isLeftPaneCollapsed, setIsLeftPaneCollapsed] = useState<boolean>(false);
+  const [timelineContainerWidth, setTimelineContainerWidth] = useState<number>(1000);
+  const ganttContainerRef = useRef<HTMLDivElement>(null);
+  const tableBodyRef = useRef<HTMLDivElement>(null);
+  const timelineScrollRef = useRef<HTMLDivElement>(null);
+  const isScrollingSync = useRef<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   const [syncFeedback, setSyncFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+
+  // Synchronize dynamic container width for zero-scroll auto-fit
+  useEffect(() => {
+    const el = timelineScrollRef.current;
+    if (!el) return;
+    const updateWidth = () => {
+      if (el.clientWidth > 0) {
+        setTimelineContainerWidth(el.clientWidth);
+      }
+    };
+    updateWidth();
+    const ro = new ResizeObserver(updateWidth);
+    ro.observe(el);
+    window.addEventListener('resize', updateWidth);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
+  }, [isFullscreen, isLeftPaneCollapsed]);
+
+  const toggleFullscreen = useCallback(() => {
+    if (!isFullscreen) {
+      if (ganttContainerRef.current?.requestFullscreen) {
+        ganttContainerRef.current.requestFullscreen().catch(() => {});
+      }
+      setIsFullscreen(true);
+    } else {
+      if (document.fullscreenElement && document.exitFullscreen) {
+        document.exitFullscreen().catch(() => {});
+      }
+      setIsFullscreen(false);
+    }
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isFullscreen) {
+        if (document.fullscreenElement && document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        }
+        setIsFullscreen(false);
+      }
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isFullscreen]);
+
+  const handleZoomIn = useCallback(() => {
+    setZoomFactor(prev => Math.min(3.0, +(prev + 0.15).toFixed(2)));
+  }, []);
+
+  const handleZoomOut = useCallback(() => {
+    setZoomFactor(prev => Math.max(0.15, +(prev - 0.15).toFixed(2)));
+  }, []);
+
+  const handleResetZoom = useCallback(() => {
+    setZoomFactor(1.0);
+  }, []);
 
   // Helper to compute duration-weighted physical progress from tasks
   const computeProjectProgress = useCallback((taskList: GanttTaskItem[]) => {
@@ -259,7 +371,8 @@ export default function GanttTimeline({
     return projects.find(p => p.id === selectedProjectId) || null;
   }, [projects, selectedProjectId]);
 
-  // Edit Modal State
+  // Edit Modal & Creation Draft State
+  const [isNewTaskDraft, setIsNewTaskDraft] = useState<boolean>(false);
   const [editingTask, setEditingTask] = useState<GanttTaskItem | null>(null);
   const [editFormData, setEditFormData] = useState<{
     text: string;
@@ -294,11 +407,6 @@ export default function GanttTimeline({
 
   // Debounced Sync Queue
   const pendingSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Synchronized Scrolling References
-  const tableBodyRef = useRef<HTMLDivElement>(null);
-  const timelineScrollRef = useRef<HTMLDivElement>(null);
-  const isScrollingSync = useRef<boolean>(false);
 
   // Handle synchronized vertical scroll
   const handleTableScroll = () => {
@@ -392,15 +500,19 @@ export default function GanttTimeline({
         lag: Number(l.lag ?? 0)
       }));
 
-      setTasks(parsedTasks);
-      setLinks(parsedLinks);
+      // Filter out any recently deleted tasks that might still be returned due to race conditions
+      const validTasks = parsedTasks.filter(t => !isTaskTombstoned(t.id));
+      const validLinks = parsedLinks.filter(l => !isTaskTombstoned(l.source) && !isTaskTombstoned(l.target));
+
+      setTasks(validTasks);
+      setLinks(validLinks);
     } catch (err) {
       console.error('Failed to load project gantt data:', err);
       setSyncFeedback({ type: 'error', message: 'Failed to retrieve project timeline.' });
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [isTaskTombstoned]);
 
   useEffect(() => {
     loadGanttData(selectedProjectId);
@@ -469,16 +581,144 @@ export default function GanttTimeline({
   }, [syncBackend]);
 
   // ==========================================
+  // 6b. Multi-Level Task Tree & Collapsible Subtasks
+  // ==========================================
+  const [collapsedTaskIds, setCollapsedTaskIds] = useState<Set<string>>(new Set());
+
+  const toggleTaskCollapse = useCallback((taskId: string) => {
+    setCollapsedTaskIds(prev => {
+      const next = new Set(prev);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleExpandAll = useCallback(() => {
+    setCollapsedTaskIds(new Set());
+  }, []);
+
+  const handleCollapseAll = useCallback(() => {
+    // Collect all task IDs that have children
+    const parentIds = new Set<string>();
+    tasks.forEach(t => {
+      if (t.parentTaskId) {
+        parentIds.add(t.parentTaskId);
+      }
+    });
+    setCollapsedTaskIds(parentIds);
+  }, [tasks]);
+
+  const { visibleTasks, depthMap, hasChildrenMap, descendantCountMap } = useMemo(() => {
+    const allIds = new Set(tasks.map(t => t.id));
+    const childMap = new Map<string, GanttTaskItem[]>();
+    const rootTasks: GanttTaskItem[] = [];
+
+    // Group tasks into parent-children buckets
+    tasks.forEach(t => {
+      if (t.parentTaskId && allIds.has(t.parentTaskId)) {
+        if (!childMap.has(t.parentTaskId)) childMap.set(t.parentTaskId, []);
+        childMap.get(t.parentTaskId)!.push(t);
+      } else {
+        rootTasks.push(t);
+      }
+    });
+
+    const dMap = new Map<string, number>();
+    const hcMap = new Map<string, boolean>();
+    const descCountMap = new Map<string, number>();
+
+    // Recursively count all descendants (children, grandchildren, etc.)
+    const countDescendants = (taskId: string): number => {
+      const children = childMap.get(taskId) || [];
+      let count = children.length;
+      for (const child of children) {
+        count += countDescendants(child.id);
+      }
+      descCountMap.set(taskId, count);
+      return count;
+    };
+
+    tasks.forEach(t => {
+      hcMap.set(t.id, (childMap.get(t.id)?.length || 0) > 0);
+      countDescendants(t.id);
+    });
+
+    // Traverse tree in depth-first order to construct properly nested list
+    const ordered: { task: GanttTaskItem; depth: number }[] = [];
+    const visited = new Set<string>();
+
+    const traverse = (items: GanttTaskItem[], depth: number) => {
+      items.forEach(item => {
+        if (visited.has(item.id)) return;
+        visited.add(item.id);
+        dMap.set(item.id, depth);
+        ordered.push({ task: item, depth });
+        const children = childMap.get(item.id) || [];
+        if (children.length > 0) {
+          traverse(children, depth + 1);
+        }
+      });
+    };
+
+    traverse(rootTasks, 0);
+
+    // Fallback for any unreachable tasks (e.g. self-referencing)
+    tasks.forEach(t => {
+      if (!visited.has(t.id)) {
+        dMap.set(t.id, 0);
+        ordered.push({ task: t, depth: 0 });
+      }
+    });
+
+    // Build visible list: task is visible if NO ancestor is collapsed
+    const visList: GanttTaskItem[] = [];
+    ordered.forEach(({ task }) => {
+      let isHidden = false;
+      let currParentId = task.parentTaskId;
+
+      const ancestorChain = new Set<string>();
+      while (currParentId && allIds.has(currParentId) && !ancestorChain.has(currParentId)) {
+        ancestorChain.add(currParentId);
+        if (collapsedTaskIds.has(currParentId)) {
+          isHidden = true;
+          break;
+        }
+        const parentObj = tasks.find(t => t.id === currParentId);
+        currParentId = parentObj?.parentTaskId || null;
+      }
+
+      if (!isHidden) {
+        visList.push(task);
+      }
+    });
+
+    return {
+      visibleTasks: visList,
+      depthMap: dMap,
+      hasChildrenMap: hcMap,
+      descendantCountMap: descCountMap
+    };
+  }, [tasks, collapsedTaskIds]);
+
+  // ==========================================
   // 7. Timescale & Geometry Math
   // ==========================================
 
   const columnWidth = useMemo(() => {
+    let base = 22;
     switch (zoomLevel) {
-      case 'day': return 36;
-      case 'week': return 22;
-      case 'month': return 9;
+      case 'day': base = 42; break;
+      case 'week': base = 22; break;
+      case 'month': base = 10; break;
+      case 'quarter': base = 5; break;
+      case 'year': base = 2.5; break;
     }
-  }, [zoomLevel]);
+    return Math.max(1.5, +(base * zoomFactor).toFixed(2));
+  }, [zoomLevel, zoomFactor]);
 
   const ROW_HEIGHT = 54;
 
@@ -486,10 +726,10 @@ export default function GanttTimeline({
   const { timelineStart, timelineEnd, totalDays } = useMemo(() => {
     if (tasks.length === 0) {
       const now = new Date();
-      const start = new Date(now.getFullYear(), now.getMonth(), 1);
-      const end = new Date(now.getFullYear(), now.getMonth() + 3, 0);
+      const start = new Date(now.getFullYear(), now.getMonth(), 1, 12, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth() + 3, 0, 12, 0, 0, 0);
       const diff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
-      return { timelineStart: start, timelineEnd: end, totalDays: diff };
+      return { timelineStart: start, timelineEnd: end, totalDays: Math.max(diff, 60) };
     }
 
     let minTime = Infinity;
@@ -498,44 +738,100 @@ export default function GanttTimeline({
     tasks.forEach(t => {
       const s = parseDate(t.startDate).getTime();
       const e = parseDate(t.endDate).getTime();
-      if (s < minTime) minTime = s;
-      if (e > maxTime) maxTime = e;
+      if (!isNaN(s) && s < minTime) minTime = s;
+      if (!isNaN(e) && e > maxTime) maxTime = e;
       if (t.baselineStart) {
         const bs = parseDate(t.baselineStart).getTime();
-        if (bs < minTime) minTime = bs;
+        if (!isNaN(bs) && bs < minTime) minTime = bs;
       }
       if (t.baselineEnd) {
         const be = parseDate(t.baselineEnd).getTime();
-        if (be > maxTime) maxTime = be;
+        if (!isNaN(be) && be > maxTime) maxTime = be;
       }
     });
 
+    if (!isFinite(minTime) || !isFinite(maxTime) || isNaN(minTime) || isNaN(maxTime)) {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth(), 1, 12, 0, 0, 0);
+      const end = new Date(now.getFullYear(), now.getMonth() + 3, 0, 12, 0, 0, 0);
+      const diff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+      return { timelineStart: start, timelineEnd: end, totalDays: Math.max(diff, 60) };
+    }
+
     const start = new Date(minTime);
-    start.setDate(start.getDate() - 7); // 7-day left padding
-    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - 3); // 3-day left padding
+    start.setHours(12, 0, 0, 0);
 
     const end = new Date(maxTime);
-    end.setDate(end.getDate() + 21); // 21-day right padding
-    end.setHours(0, 0, 0, 0);
+    end.setDate(end.getDate() + 5); // 5-day right padding (eliminated 3 weeks of blank void)
+    end.setHours(12, 0, 0, 0);
 
     const diff = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)) + 1;
     return { timelineStart: start, timelineEnd: end, totalDays: Math.max(diff, 60) };
   }, [tasks]);
 
-  const timelineWidth = Math.max(1200, totalDays * columnWidth);
+  const timelineWidth = Math.max(timelineContainerWidth, Math.round(totalDays * columnWidth));
+
+  // Fit Entire Project Timeline to Screen (Zero horizontal scroll)
+  const handleFitToScreen = useCallback(() => {
+    const containerW = timelineScrollRef.current?.clientWidth || timelineContainerWidth || 1000;
+    const availableW = Math.max(300, containerW - 32);
+    const targetColW = availableW / Math.max(1, totalDays);
+
+    let base = 10;
+    let targetLevel: ZoomLevel = 'month';
+    if (targetColW <= 3.5) {
+      targetLevel = 'year';
+      base = 2.5;
+    } else if (targetColW <= 7.5) {
+      targetLevel = 'quarter';
+      base = 5.0;
+    } else if (targetColW <= 16) {
+      targetLevel = 'month';
+      base = 10.0;
+    } else if (targetColW <= 30) {
+      targetLevel = 'week';
+      base = 22.0;
+    } else {
+      targetLevel = 'day';
+      base = 42.0;
+    }
+    const factor = +(targetColW / base).toFixed(2);
+    setZoomLevel(targetLevel);
+    setZoomFactor(Math.max(0.15, Math.min(3.0, factor)));
+    if (timelineScrollRef.current) {
+      timelineScrollRef.current.scrollLeft = 0;
+    }
+  }, [timelineContainerWidth, totalDays]);
+
+  // Automatically fit all tasks and milestones across the monitor whenever Full Screen Mode is activated
+  useEffect(() => {
+    if (isFullscreen) {
+      const timer = setTimeout(() => {
+        handleFitToScreen();
+      }, 150);
+      return () => clearTimeout(timer);
+    }
+  }, [isFullscreen, handleFitToScreen]);
 
   const dateToPixel = useCallback((date: Date | string): number => {
     const d = parseDate(date);
-    const diffTime = d.getTime() - timelineStart.getTime();
+    const tStart = timelineStart instanceof Date && !isNaN(timelineStart.getTime()) ? timelineStart : new Date();
+    const dTime = !isNaN(d.getTime()) ? d.getTime() : tStart.getTime();
+    const diffTime = dTime - tStart.getTime();
     const diffDays = diffTime / (1000 * 60 * 60 * 24);
-    return diffDays * columnWidth;
+    const colW = columnWidth || 22;
+    const px = diffDays * colW;
+    return isNaN(px) ? 0 : Math.round(px);
   }, [timelineStart, columnWidth]);
 
   const pixelToDate = useCallback((pixelX: number): Date => {
-    const days = Math.round(pixelX / columnWidth);
-    const result = new Date(timelineStart);
-    result.setDate(result.getDate() + days);
-    result.setHours(0, 0, 0, 0);
+    const colW = columnWidth || 22;
+    const days = Math.round((pixelX || 0) / colW);
+    const tStart = timelineStart instanceof Date && !isNaN(timelineStart.getTime()) ? timelineStart : new Date();
+    const result = new Date(tStart);
+    result.setDate(result.getDate() + (isNaN(days) ? 0 : days));
+    result.setHours(12, 0, 0, 0);
     return result;
   }, [timelineStart, columnWidth]);
 
@@ -564,21 +860,22 @@ export default function GanttTimeline({
 
   // Month grouping headers
   const monthHeaders = useMemo(() => {
-    const headers: { monthLabel: string; leftPixel: number; widthPixel: number }[] = [];
-    let currentMonth = -1;
+    const headers: { monthLabel: string; shortLabel: string; leftPixel: number; widthPixel: number }[] = [];
+    let currentMonthKey = '';
     let startIdx = 0;
 
     daysList.forEach((day, idx) => {
-      const m = day.date.getMonth();
-      if (m !== currentMonth) {
-        if (currentMonth !== -1) {
+      const monthKey = `${day.date.getFullYear()}-${day.date.getMonth()}`;
+      if (monthKey !== currentMonthKey) {
+        if (currentMonthKey !== '') {
           headers.push({
             monthLabel: daysList[startIdx].date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+            shortLabel: daysList[startIdx].date.toLocaleDateString('en-US', { month: 'short' }),
             leftPixel: startIdx * columnWidth,
             widthPixel: (idx - startIdx) * columnWidth
           });
         }
-        currentMonth = m;
+        currentMonthKey = monthKey;
         startIdx = idx;
       }
     });
@@ -586,6 +883,7 @@ export default function GanttTimeline({
     if (startIdx < daysList.length) {
       headers.push({
         monthLabel: daysList[startIdx].date.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+        shortLabel: daysList[startIdx].date.toLocaleDateString('en-US', { month: 'short' }),
         leftPixel: startIdx * columnWidth,
         widthPixel: (daysList.length - startIdx) * columnWidth
       });
@@ -695,6 +993,7 @@ export default function GanttTimeline({
   // ==========================================
 
   const handleOpenEditModal = (task: GanttTaskItem) => {
+    setIsNewTaskDraft(false);
     setEditingTask(task);
     setEditFormData({
       text: task.text,
@@ -715,9 +1014,15 @@ export default function GanttTimeline({
     const progressVal = Math.max(0, Math.min(1, editFormData.progress / 100));
     const sDate = parseDate(editFormData.startDate);
     const dur = Math.max(0, Number(editFormData.duration));
-    const eDate = dur === 0 || editFormData.type === 'milestone' 
-      ? sDate 
-      : addWorkingDays(sDate, dur);
+    
+    // For milestones (or 0-day tasks): respect target endDate if provided by user, otherwise fallback to sDate
+    let eDate: Date;
+    if (dur === 0 || editFormData.type === 'milestone') {
+      eDate = editFormData.endDate ? parseDate(editFormData.endDate) : sDate;
+      if (eDate < sDate) eDate = sDate;
+    } else {
+      eDate = addWorkingDays(sDate, dur);
+    }
 
     const updatedTask: GanttTaskItem = {
       ...editingTask,
@@ -726,9 +1031,9 @@ export default function GanttTimeline({
       endDate: formatDateISO(eDate),
       duration: dur,
       progress: progressVal,
-      type: dur === 0 ? 'milestone' : editFormData.type,
+      type: (dur === 0 || editFormData.type === 'milestone') ? 'milestone' : editFormData.type,
       assignedContractorId: editFormData.assignedContractorId || null,
-      contractorName: contractor?.name || editingTask.contractorName,
+      contractorName: contractor?.name || editingTask.contractorName || 'CTVill Construction Crew',
       predecessorIds: editFormData.predecessorIds
     };
 
@@ -748,21 +1053,35 @@ export default function GanttTimeline({
 
     setLinks(updatedLinks);
 
-    // Update tasks state and cascade
-    setTasks(prev => {
-      const idx = prev.findIndex(t => t.id === updatedTask.id);
-      const copy = [...prev];
-      copy[idx] = updatedTask;
-      const scheduled = cascadeDownstreamSchedule(copy, updatedLinks, updatedTask.id);
-      const newProg = computeProjectProgress(scheduled);
-      onUpdateProject?.(selectedProjectId, {
-        progressPercentage: newProg,
-        tasksCount: scheduled.length
+    if (isNewTaskDraft) {
+      setTasks(prev => {
+        const next = [...prev, updatedTask];
+        const scheduled = cascadeDownstreamSchedule(next, updatedLinks, updatedTask.id);
+        const newProg = computeProjectProgress(scheduled);
+        onUpdateProject?.(selectedProjectId, {
+          progressPercentage: newProg,
+          tasksCount: scheduled.length
+        });
+        return scheduled;
       });
-      return scheduled;
-    });
+      syncBackend('create', updatedTask);
+    } else {
+      setTasks(prev => {
+        const idx = prev.findIndex(t => t.id === updatedTask.id);
+        const copy = [...prev];
+        if (idx !== -1) copy[idx] = updatedTask;
+        const scheduled = cascadeDownstreamSchedule(copy, updatedLinks, updatedTask.id);
+        const newProg = computeProjectProgress(scheduled);
+        onUpdateProject?.(selectedProjectId, {
+          progressPercentage: newProg,
+          tasksCount: scheduled.length
+        });
+        return scheduled;
+      });
+      syncBackend('update', updatedTask);
+    }
 
-    syncBackend('update', updatedTask);
+    setIsNewTaskDraft(false);
     setEditingTask(null);
   };
 
@@ -773,6 +1092,9 @@ export default function GanttTimeline({
     if (!window.confirm(`Are you sure you want to delete "${task.text}"? Connected dependency lines will be unlinked.`)) {
       return;
     }
+
+    // Tombstone for 15 seconds to guarantee zero ghost reappearances
+    recentlyDeletedTaskIdsRef.current.set(taskId, Date.now() + 15000);
 
     setTasks(prev => {
       const remaining = prev.filter(t => t.id !== taskId).map(t => ({
@@ -788,10 +1110,19 @@ export default function GanttTimeline({
     });
 
     setLinks(prev => prev.filter(l => l.source !== taskId && l.target !== taskId));
+    setCollapsedTaskIds(prev => {
+      const next = new Set(prev);
+      next.delete(taskId);
+      return next;
+    });
+
+    // Notify parent App component to drop task from App state immediately
+    onDeleteTask?.(taskId);
 
     syncBackend('delete', { id: taskId });
     if (editingTask && editingTask.id === taskId) {
       setEditingTask(null);
+      setIsNewTaskDraft(false);
     }
   };
 
@@ -800,11 +1131,20 @@ export default function GanttTimeline({
     const newId = `task-${Date.now()}`;
     const newStart = parentStart;
     const newEnd = addWorkingDays(newStart, 3);
+    const existingChildrenCount = tasks.filter(t => t.parentTaskId === parentTask.id).length;
+
+    // Clean WBS generation:
+    // e.g. parent "1.0" -> "1.1", "1.2"; parent "1.1" -> "1.1.1"; parent "2" -> "2.1"
+    let baseCode = parentTask.wbsCode || '1.0';
+    if (baseCode.endsWith('.0')) {
+      baseCode = baseCode.slice(0, -2);
+    }
+    const childWbs = `${baseCode}.${existingChildrenCount + 1}`;
 
     const newSubtask: GanttTaskItem = {
       id: newId,
       projectId: selectedProjectId,
-      wbsCode: `${parentTask.wbsCode}.${tasks.filter(t => t.parentTaskId === parentTask.id).length + 1}`,
+      wbsCode: childWbs,
       text: `Subtask of ${parentTask.text}`,
       startDate: formatDateISO(newStart),
       endDate: formatDateISO(newEnd),
@@ -812,7 +1152,7 @@ export default function GanttTimeline({
       progress: 0,
       type: 'task',
       parentTaskId: parentTask.id,
-      sortOrder: tasks.length + 1,
+      sortOrder: parentTask.sortOrder + 1,
       assignedContractorId: parentTask.assignedContractorId,
       contractorName: parentTask.contractorName,
       predecessorIds: [parentTask.id]
@@ -826,15 +1166,33 @@ export default function GanttTimeline({
       lag: 0
     };
 
+    // Auto-expand parent task if it was collapsed
+    setCollapsedTaskIds(prev => {
+      const next = new Set(prev);
+      next.delete(parentTask.id);
+      return next;
+    });
+
     setLinks(prev => [...prev, newLink]);
     setTasks(prev => {
-      const next = [...prev, newSubtask];
-      const newProg = computeProjectProgress(next);
+      // Find parent index and insert immediately below it (or after existing children of that parent)
+      const parentIdx = prev.findIndex(t => t.id === parentTask.id);
+      if (parentIdx === -1) {
+        return [...prev, newSubtask];
+      }
+      let insertIdx = parentIdx + 1;
+      while (insertIdx < prev.length && prev[insertIdx].parentTaskId === parentTask.id) {
+        insertIdx++;
+      }
+      const next = [...prev];
+      next.splice(insertIdx, 0, newSubtask);
+      const reindexed = next.map((t, idx) => ({ ...t, sortOrder: idx + 1 }));
+      const newProg = computeProjectProgress(reindexed);
       onUpdateProject?.(selectedProjectId, {
         progressPercentage: newProg,
-        tasksCount: next.length
+        tasksCount: reindexed.length
       });
-      return next;
+      return reindexed;
     });
     syncBackend('create', newSubtask);
   };
@@ -847,7 +1205,7 @@ export default function GanttTimeline({
     const startStr = formatDateISO(now);
     const endStr = formatDateISO(addWorkingDays(now, 5));
 
-    const newTask: GanttTaskItem = {
+    const draftTask: GanttTaskItem = {
       id: newId,
       projectId: selectedProjectId,
       wbsCode: `${tasks.length + 1}.0`,
@@ -864,17 +1222,18 @@ export default function GanttTimeline({
       predecessorIds: []
     };
 
-    setTasks(prev => {
-      const next = [...prev, newTask];
-      const newProg = computeProjectProgress(next);
-      onUpdateProject?.(selectedProjectId, {
-        progressPercentage: newProg,
-        tasksCount: next.length
-      });
-      return next;
+    setIsNewTaskDraft(true);
+    setEditingTask(draftTask);
+    setEditFormData({
+      text: draftTask.text,
+      startDate: draftTask.startDate,
+      endDate: draftTask.endDate,
+      duration: draftTask.duration,
+      progress: 0,
+      type: draftTask.type,
+      assignedContractorId: draftTask.assignedContractorId || '',
+      predecessorIds: []
     });
-    syncBackend('create', newTask);
-    handleOpenEditModal(newTask);
   };
 
   const handleAddNewMilestone = () => {
@@ -884,7 +1243,7 @@ export default function GanttTimeline({
     const newId = `milestone-${Date.now()}`;
     const dateStr = formatDateISO(now);
 
-    const newMilestone: GanttTaskItem = {
+    const draftMilestone: GanttTaskItem = {
       id: newId,
       projectId: selectedProjectId,
       wbsCode: `${tasks.length + 1}.M`,
@@ -901,17 +1260,18 @@ export default function GanttTimeline({
       predecessorIds: []
     };
 
-    setTasks(prev => {
-      const next = [...prev, newMilestone];
-      const newProg = computeProjectProgress(next);
-      onUpdateProject?.(selectedProjectId, {
-        progressPercentage: newProg,
-        tasksCount: next.length
-      });
-      return next;
+    setIsNewTaskDraft(true);
+    setEditingTask(draftMilestone);
+    setEditFormData({
+      text: draftMilestone.text,
+      startDate: draftMilestone.startDate,
+      endDate: draftMilestone.endDate,
+      duration: 0,
+      progress: 0,
+      type: 'milestone',
+      assignedContractorId: '',
+      predecessorIds: []
     });
-    syncBackend('create', newMilestone);
-    handleOpenEditModal(newMilestone);
   };
 
   // Quick Metrics
@@ -922,50 +1282,102 @@ export default function GanttTimeline({
     return { total, completed, milestones };
   }, [tasks]);
 
-  return (
-    <div className="space-y-4 select-none">
-      {/* 1. Header Toolbar */}
-      <div className="bg-slate-900/95 border border-slate-800 rounded-2xl p-5 shadow-2xl backdrop-blur-xl">
-        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase">
-                Enterprise Gantt Scheduling Engine
-              </span>
-              <span className="text-xs text-slate-400 font-mono">React 19 Direct Manipulation • 6-Day Workweek</span>
-            </div>
-            <h2 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
-              <Layers className="w-6 h-6 text-amber-400" />
-              Construction CPM Scheduling & Task Management
-            </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
-              Drag bars to reschedule, drag edges to adjust duration, or double-click to configure predecessors and dependencies.
-            </p>
-          </div>
+  const totalGridHeight = useMemo(() => {
+    return Math.max(600, visibleTasks.length * ROW_HEIGHT);
+  }, [visibleTasks.length]);
 
-          {/* Metrics summary */}
-          <div className="flex items-center gap-4 text-xs font-mono bg-slate-950/80 px-4 py-2.5 rounded-xl border border-slate-800">
+  const handleScrollToToday = useCallback(() => {
+    if (timelineScrollRef.current && todayPixel >= 0) {
+      timelineScrollRef.current.scrollTo({
+        left: Math.max(0, todayPixel - 200),
+        behavior: 'smooth'
+      });
+    }
+  }, [todayPixel]);
+
+  const handleScrollToFirstTask = useCallback(() => {
+    if (timelineScrollRef.current && visibleTasks.length > 0) {
+      const firstTaskStart = visibleTasks[0].startDate;
+      const px = dateToPixel(firstTaskStart);
+      timelineScrollRef.current.scrollTo({
+        left: Math.max(0, px - 150),
+        behavior: 'smooth'
+      });
+    }
+  }, [visibleTasks, dateToPixel]);
+
+  return (
+    <div 
+      ref={ganttContainerRef}
+      className={`transition-all duration-300 ${
+        isFullscreen 
+          ? 'fixed inset-0 z-50 bg-slate-950 p-4 md:p-6 flex flex-col h-screen w-screen overflow-hidden' 
+          : 'space-y-4 select-none'
+      }`}
+    >
+      {/* 1. Header Toolbar */}
+      <div className={`bg-slate-900/95 border border-slate-800 rounded-2xl shadow-2xl backdrop-blur-xl transition-all ${
+        isFullscreen ? 'p-3 mb-2 shrink-0' : 'p-5'
+      }`}>
+        {!isFullscreen ? (
+          <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
             <div>
-              <span className="text-slate-500 text-[10px] uppercase block">Total Items</span>
-              <span className="font-bold text-white text-sm">{metrics.total}</span>
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase">
+                  Enterprise Gantt Scheduling Engine
+                </span>
+                <span className="text-xs text-slate-400 font-mono">React 19 Direct Manipulation • 6-Day Workweek</span>
+              </div>
+              <h2 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2.5">
+                <Layers className="w-6 h-6 text-amber-400" />
+                Construction CPM Scheduling & Task Management
+              </h2>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Drag bars to reschedule, drag edges to adjust duration, or double-click to configure predecessors and dependencies.
+              </p>
             </div>
-            <div className="h-6 w-px bg-slate-800" />
-            <div>
-              <span className="text-slate-500 text-[10px] uppercase block">Completed</span>
-              <span className="font-bold text-emerald-400 text-sm">{metrics.completed}</span>
-            </div>
-            <div className="h-6 w-px bg-slate-800" />
-            <div>
-              <span className="text-slate-500 text-[10px] uppercase block">Milestones</span>
-              <span className="font-bold text-amber-400 text-sm">{metrics.milestones}</span>
-            </div>
-            <div className="h-6 w-px bg-slate-800" />
-            <div>
-              <span className="text-slate-500 text-[10px] uppercase block">Physical Progress</span>
-              <span className="font-bold text-amber-400 text-sm">{currentProjectProgress}%</span>
+
+            {/* Metrics summary */}
+            <div className="flex items-center gap-4 text-xs font-mono bg-slate-950/80 px-4 py-2.5 rounded-xl border border-slate-800">
+              <div>
+                <span className="text-slate-500 text-[10px] uppercase block">Total Items</span>
+                <span className="font-bold text-white text-sm">{metrics.total}</span>
+              </div>
+              <div className="h-6 w-px bg-slate-800" />
+              <div>
+                <span className="text-slate-500 text-[10px] uppercase block">Completed</span>
+                <span className="font-bold text-emerald-400 text-sm">{metrics.completed}</span>
+              </div>
+              <div className="h-6 w-px bg-slate-800" />
+              <div>
+                <span className="text-slate-500 text-[10px] uppercase block">Milestones</span>
+                <span className="font-bold text-amber-400 text-sm">{metrics.milestones}</span>
+              </div>
+              <div className="h-6 w-px bg-slate-800" />
+              <div>
+                <span className="text-slate-500 text-[10px] uppercase block">Physical Progress</span>
+                <span className="font-bold text-amber-400 text-sm">{currentProjectProgress}%</span>
+              </div>
             </div>
           </div>
-        </div>
+        ) : (
+          /* Sleek Fullscreen Status Banner */
+          <div className="flex items-center justify-between gap-4 text-xs font-mono pb-2 border-b border-slate-800/80">
+            <div className="flex items-center gap-3">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse" />
+              <span className="font-bold text-white text-sm tracking-tight flex items-center gap-2">
+                <Layers className="w-4 h-4 text-amber-400" />
+                {activeProject?.name || 'Project Schedule'}
+              </span>
+              <span className="text-xs text-amber-400 font-bold bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                {currentProjectProgress}% Done ({metrics.completed}/{metrics.total} Tasks • {metrics.milestones} Milestones)
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-slate-400 text-[11px]">
+              <span>Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-slate-200">Esc</kbd> to exit full screen</span>
+            </div>
+          </div>
+        )}
 
         {/* Action Controls Bar */}
         <div className="mt-4 pt-4 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3">
@@ -1008,21 +1420,98 @@ export default function GanttTimeline({
               </div>
             )}
 
-            {/* Timescale Zoom */}
+            {/* HERO BUTTON: Full Screen Mode */}
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold transition shadow-lg cursor-pointer ${
+                isFullscreen
+                  ? 'bg-amber-400 text-slate-950 hover:bg-amber-300 shadow-amber-400/20 ring-2 ring-amber-400/40'
+                  : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-amber-500/20'
+              }`}
+              title={isFullscreen ? 'Exit Full Screen Mode (Esc)' : 'Open Full Screen Mode (Auto-fits entire schedule across monitor)'}
+            >
+              {isFullscreen ? (
+                <>
+                  <Minimize2 className="w-4 h-4 text-slate-950" />
+                  <span>Exit Full Screen (Esc)</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className="w-4 h-4 text-slate-950" />
+                  <span>Full Screen Mode</span>
+                </>
+              )}
+            </button>
+
+            {/* Left Task Grid Pane Toggle (Wide Timeline View) */}
+            <button
+              type="button"
+              onClick={() => setIsLeftPaneCollapsed(prev => !prev)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-mono font-medium border transition cursor-pointer ${
+                isLeftPaneCollapsed
+                  ? 'bg-indigo-600/30 text-indigo-300 border-indigo-500/50 hover:bg-indigo-600/40'
+                  : 'bg-slate-900/90 text-slate-300 border-slate-800 hover:text-white hover:bg-slate-800'
+              }`}
+              title={isLeftPaneCollapsed ? 'Show Task Grid' : 'Maximize Timeline (Hide Task Grid)'}
+            >
+              {isLeftPaneCollapsed ? <PanelLeftOpen className="w-3.5 h-3.5" /> : <PanelLeftClose className="w-3.5 h-3.5" />}
+              <span>{isLeftPaneCollapsed ? 'Show Grid' : 'Wide Timeline'}</span>
+            </button>
+
+            {/* Timescale Zoom Controls with Zoom In & Zoom Out */}
             <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-1 gap-1">
-              <span className="text-[10px] text-slate-500 font-mono uppercase px-2">Zoom:</span>
-              {(['day', 'week', 'month'] as ZoomLevel[]).map(z => (
-                <button
-                  key={z}
-                  type="button"
-                  onClick={() => setZoomLevel(z)}
-                  className={`px-2.5 py-1 text-xs rounded-lg font-mono font-semibold transition cursor-pointer capitalize ${
-                    zoomLevel === z ? 'bg-amber-500 text-slate-950 shadow-md' : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {z}
-                </button>
-              ))}
+              <button
+                type="button"
+                onClick={handleZoomOut}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
+                title="Zoom Out Timeline (-)"
+              >
+                <ZoomOut className="w-3.5 h-3.5" />
+              </button>
+
+              <div className="flex items-center gap-0.5 border-x border-slate-800 px-1">
+                {(['year', 'quarter', 'month', 'week', 'day'] as ZoomLevel[]).map(z => (
+                  <button
+                    key={z}
+                    type="button"
+                    onClick={() => { setZoomLevel(z); setZoomFactor(1); }}
+                    className={`px-2 py-1 text-xs rounded-lg font-mono font-semibold transition cursor-pointer capitalize ${
+                      zoomLevel === z ? 'bg-amber-500 text-slate-950 shadow-md font-bold' : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {z}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={handleZoomIn}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
+                title="Zoom In Timeline (+)"
+              >
+                <ZoomIn className="w-3.5 h-3.5" />
+              </button>
+
+              {/* Quick Auto-Fit Helper Button inside zoom group */}
+              <button
+                type="button"
+                onClick={handleFitToScreen}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
+                title="Auto-Fit Timeline into current window width"
+              >
+                <Scan className="w-3.5 h-3.5" />
+              </button>
+
+              <button
+                type="button"
+                onClick={handleResetZoom}
+                className="text-[10px] font-mono text-slate-400 hover:text-amber-300 px-1.5 py-0.5 rounded transition cursor-pointer"
+                title="Reset Zoom to 100%"
+              >
+                {Math.round(zoomFactor * 100)}%
+              </button>
             </div>
 
             {/* Add Task / Milestone Buttons */}
@@ -1054,8 +1543,50 @@ export default function GanttTimeline({
             </button>
           </div>
 
-          {/* Sync status & Refresh */}
-          <div className="flex items-center gap-2">
+          {/* Tree Expand / Collapse All Quick Controls */}
+          <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-xl p-1">
+              <button
+                type="button"
+                onClick={handleExpandAll}
+                className="px-2.5 py-1 rounded-lg text-xs font-mono text-slate-300 hover:text-white hover:bg-slate-800 transition flex items-center gap-1.5 cursor-pointer"
+                title="Expand All Subtasks"
+              >
+                <ChevronsDown className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Expand All</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleCollapseAll}
+                className="px-2.5 py-1 rounded-lg text-xs font-mono text-slate-300 hover:text-white hover:bg-slate-800 transition flex items-center gap-1.5 cursor-pointer"
+                title="Collapse All Subtasks"
+              >
+                <ChevronsUp className="w-3.5 h-3.5 text-slate-400" />
+                <span className="hidden sm:inline">Collapse All</span>
+              </button>
+            </div>
+
+            {/* Quick Timeline Scroll Jumper */}
+            <div className="flex items-center gap-1 bg-slate-900/90 border border-slate-800 rounded-xl p-1">
+              <button
+                type="button"
+                onClick={handleScrollToToday}
+                className="px-2 py-1 rounded-lg text-xs font-mono text-rose-400 hover:text-white hover:bg-slate-800 transition flex items-center gap-1 cursor-pointer"
+                title="Scroll Timeline View to Today"
+              >
+                <span>Today</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleScrollToFirstTask}
+                className="px-2 py-1 rounded-lg text-xs font-mono text-amber-400 hover:text-white hover:bg-slate-800 transition flex items-center gap-1 cursor-pointer"
+                title="Scroll Timeline View to First Scheduled Task"
+              >
+                <span>Jump to Tasks</span>
+              </button>
+            </div>
+
+            {/* Sync status & Refresh */}
+            <div className="flex items-center gap-2">
             {isSyncing && (
               <span className="text-[11px] font-mono text-indigo-400 bg-indigo-950/60 border border-indigo-700 px-2.5 py-1 rounded-lg flex items-center gap-1.5 animate-pulse">
                 <RefreshCw className="w-3 h-3 animate-spin" />
@@ -1089,57 +1620,102 @@ export default function GanttTimeline({
       </div>
 
       {/* 2. Visual Legend & Operation Tips */}
-      <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
-        <div className="flex flex-wrap items-center gap-4 text-slate-400">
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-1.5 rounded-sm bg-slate-500 inline-block border border-slate-400" />
-            <span>Top Thin Bar: Baseline</span>
+      {!isFullscreen && (
+        <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
+          <div className="flex flex-wrap items-center gap-4 text-slate-400">
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-1.5 rounded-sm bg-slate-500 inline-block border border-slate-400" />
+              <span>Top Thin Bar: Baseline</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-indigo-600 inline-block border border-indigo-400" />
+              <span>Bottom Bar: Actual Schedule (Drag / Resize)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-emerald-600 inline-block border border-emerald-400" />
+              <span>Completed (100%)</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rotate-45 bg-amber-400 inline-block border border-amber-300" />
+              <span>Milestone Diamond</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-0.5 bg-amber-400 inline-block" />
+              <span>Valid Dependency Link</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-0.5 bg-rose-500 inline-block" />
+              <span>Collision / Schedule Breach</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-rose-500/30 border border-rose-500/60 inline-block" />
+              <span>Red Today Line</span>
+            </div>
           </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-indigo-600 inline-block border border-indigo-400" />
-            <span>Bottom Bar: Actual Schedule (Drag / Resize)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-emerald-600 inline-block border border-emerald-400" />
-            <span>Completed (100%)</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rotate-45 bg-amber-400 inline-block border border-amber-300" />
-            <span>Milestone Diamond</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-amber-400 inline-block" />
-            <span>Valid Dependency Link</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-rose-500 inline-block" />
-            <span>Collision / Schedule Breach</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded bg-rose-500/30 border border-rose-500/60 inline-block" />
-            <span>Red Today Line</span>
-          </div>
-        </div>
 
-        <div className="text-[11px] text-slate-500">
-          Double-click any task bar or click ✏️ to edit dates & dependencies.
+          <div className="text-[11px] text-slate-500">
+            Double-click any task bar or click ✏️ to edit dates & dependencies.
+          </div>
         </div>
-      </div>
+      )}
 
       {/* 3. Dual-Pane Synchronized Gantt Canvas */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col xl:flex-row h-[660px]">
-        {/* LEFT PANE: WBS Data Grid */}
-        <div className="w-full xl:w-[480px] shrink-0 border-r border-slate-800 flex flex-col bg-slate-950">
-          {/* Table Header */}
-          <div className="h-[60px] bg-slate-900 border-b border-slate-800 flex items-center px-3 text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider">
-            <div className="w-12 text-center">WBS</div>
-            <div className="w-[170px] px-2 truncate">Task Name</div>
-            <div className="w-16 text-center">Start</div>
-            <div className="w-16 text-center">End</div>
-            <div className="w-12 text-center">Days</div>
-            <div className="w-14 text-center">Progress</div>
-            <div className="w-20 text-center">Actions</div>
-          </div>
+      <div className={`bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-2xl flex flex-col xl:flex-row ${
+        isFullscreen ? 'flex-1 min-h-0' : 'h-[520px] sm:h-[600px] xl:h-[660px]'
+      }`}>
+        {/* LEFT PANE: WBS Data Grid (Collapsible to maximize Timeline Canvas) */}
+        <div className={`${
+          isLeftPaneCollapsed ? 'w-14 shrink-0' : 'w-full xl:w-[580px] shrink-0'
+        } border-r border-slate-800 flex flex-col bg-slate-950 transition-all duration-200 select-none`}>
+          {isLeftPaneCollapsed ? (
+            <div className="flex flex-col items-center py-4 h-full justify-between bg-slate-950">
+              <div className="flex flex-col items-center gap-4">
+                <button
+                  type="button"
+                  onClick={() => setIsLeftPaneCollapsed(false)}
+                  className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-amber-400 hover:text-amber-300 border border-slate-800 transition cursor-pointer shadow-md"
+                  title="Expand WBS Task Grid"
+                >
+                  <PanelLeftOpen className="w-4 h-4" />
+                </button>
+                <div className="[writing-mode:vertical-rl] rotate-180 text-[10px] font-mono tracking-widest text-slate-400 uppercase font-bold py-2">
+                  Task Grid ({visibleTasks.length})
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsLeftPaneCollapsed(false)}
+                className="p-2 rounded-lg text-slate-500 hover:text-slate-300 transition cursor-pointer"
+                title="Open Task Details"
+              >
+                <Layers className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <>
+              {/* Table Header */}
+              <div className="h-[60px] bg-slate-900 border-b border-slate-800 flex items-center px-3 text-[11px] font-mono font-bold text-slate-400 uppercase tracking-wider">
+                <button
+                  type="button"
+                  onClick={() => setIsLeftPaneCollapsed(true)}
+                  className="p-1 -ml-1 mr-1.5 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
+                  title="Collapse Task Grid (Maximize Timeline Canvas)"
+                >
+                  <PanelLeftClose className="w-3.5 h-3.5" />
+                </button>
+                <div className="w-12 text-center">WBS</div>
+                <div className="flex-1 px-2 flex items-center justify-between min-w-[200px] gap-2">
+                  <span className="truncate">Task Hierarchy</span>
+                  <span className="text-[10px] text-slate-500 font-normal normal-case shrink-0">
+                    {visibleTasks.length}/{tasks.length} shown
+                  </span>
+                </div>
+                <div className="w-16 text-center">Start</div>
+                <div className="w-16 text-center">End</div>
+                <div className="w-12 text-center">Days</div>
+                <div className="w-14 text-center">Prog</div>
+                <div className="w-20 text-center">Actions</div>
+              </div>
 
           {/* Table Body (Synchronized Scroll) */}
           <div 
@@ -1147,29 +1723,96 @@ export default function GanttTimeline({
             onScroll={handleTableScroll}
             className="flex-1 overflow-y-auto overflow-x-hidden divide-y divide-slate-900"
           >
-            {tasks.map((task) => {
+            {visibleTasks.map((task) => {
               const isMilestone = task.type === 'milestone' || task.duration === 0;
               const pct = Math.round(task.progress * 100);
+              const depth = depthMap.get(task.id) || 0;
+              const hasChildren = hasChildrenMap.get(task.id) || false;
+              const isCollapsed = collapsedTaskIds.has(task.id);
+              const hiddenCount = descendantCountMap.get(task.id) || 0;
 
               return (
                 <div
                   key={task.id}
                   style={{ height: `${ROW_HEIGHT}px` }}
                   onDoubleClick={() => handleOpenEditModal(task)}
-                  className="flex items-center px-3 text-xs font-mono hover:bg-slate-900/60 transition group cursor-pointer"
+                  className={`flex items-center px-3 text-xs font-mono transition group cursor-pointer ${
+                    depth === 0 ? 'hover:bg-slate-900/80 bg-slate-950/40 border-t border-slate-900/80' : 'hover:bg-slate-900/50 bg-slate-950/80'
+                  }`}
                 >
-                  <div className="w-12 text-center font-bold text-amber-400/90 truncate">
+                  <div className={`w-12 text-center truncate ${depth === 0 ? 'font-bold text-amber-400/90 text-[11px]' : 'text-slate-400 text-[10px]'}`}>
                     {task.wbsCode}
                   </div>
-                  <div className="w-[170px] px-2 truncate">
+
+                  {/* Hierarchical Tree Item (Indented with branch connector, collapse/expand arrow & bullet) */}
+                  <div 
+                    className="flex-1 px-2 truncate flex items-center min-w-0"
+                    style={{ paddingLeft: `${depth * 28}px` }}
+                  >
+                    {/* Visual Branch Line for Subtasks */}
+                    {depth > 0 && (
+                      <span className="text-slate-500 font-mono text-xs mr-1.5 select-none shrink-0 inline-flex items-center">
+                        ↳
+                      </span>
+                    )}
+
+                    {hasChildren ? (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleTaskCollapse(task.id);
+                        }}
+                        className="p-1 -ml-1 mr-1 rounded hover:bg-slate-800 text-amber-400 hover:text-amber-300 transition-colors flex items-center shrink-0 cursor-pointer"
+                        title={isCollapsed ? `Expand ${hiddenCount} subtask(s)` : 'Collapse subtasks'}
+                      >
+                        {isCollapsed ? (
+                          <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                        ) : (
+                          <ChevronDown className="w-3.5 h-3.5 stroke-[2.5]" />
+                        )}
+                      </button>
+                    ) : (
+                      <span className="w-4 h-4 mr-1 inline-flex items-center justify-center shrink-0 text-slate-500/80 select-none text-[12px] font-bold">
+                        •
+                      </span>
+                    )}
+
+                    {/* Bullet marker for tasks with children */}
+                    {hasChildren && (
+                      <span className="text-amber-400/80 text-[11px] mr-1.5 select-none font-bold shrink-0">•</span>
+                    )}
+
                     <span 
-                      className={`${isMilestone ? 'font-bold text-amber-300' : 'text-slate-200 font-medium'} truncate block`}
+                      className={`truncate ${
+                        isMilestone 
+                          ? 'font-bold text-amber-300' 
+                          : depth === 0 
+                            ? 'font-semibold text-slate-100 text-[12.5px]' 
+                            : depth === 1 
+                              ? 'font-medium text-slate-200' 
+                              : 'text-slate-300 text-[11px]'
+                      }`}
                       title={task.text}
                     >
-                      {task.parentTaskId && <span className="text-slate-600 mr-1">↳</span>}
                       {task.text}
                     </span>
+
+                    {/* Collapsed Hidden Subtask Counter Badge */}
+                    {isCollapsed && hiddenCount > 0 && (
+                      <span 
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleTaskCollapse(task.id);
+                        }}
+                        className="ml-1.5 px-1.5 py-0.5 text-[9px] font-mono font-bold rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 shrink-0 hover:bg-amber-500/25 transition cursor-pointer"
+                        title={`Click to expand ${hiddenCount} hidden subtasks`}
+                      >
+                        +{hiddenCount} subtask{hiddenCount > 1 ? 's' : ''}
+                      </span>
+                    )}
                   </div>
+
                   <div className="w-16 text-center text-[11px] text-slate-400 truncate">
                     {formatDateShort(task.startDate)}
                   </div>
@@ -1217,7 +1860,9 @@ export default function GanttTimeline({
                 </div>
               );
             })}
-          </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* RIGHT PANE: Interactive Timeline Grid */}
@@ -1228,20 +1873,24 @@ export default function GanttTimeline({
           onPointerUp={handlePointerUp}
           className="flex-1 overflow-auto bg-slate-950/90 relative relative-timeline"
         >
-          <div style={{ width: `${timelineWidth}px` }} className="relative min-h-full">
+          <div style={{ width: `${timelineWidth}px`, height: `${totalGridHeight + 60}px` }} className="relative min-h-full">
             {/* Timeline Multi-Tier Header */}
             <div className="sticky top-0 z-30 bg-slate-900 border-b border-slate-800 shadow-md">
               {/* Tier 1: Month Groups */}
               <div className="h-7 border-b border-slate-800 relative text-xs font-mono font-bold text-slate-300">
-                {monthHeaders.map((m, idx) => (
-                  <div
-                    key={idx}
-                    style={{ left: `${m.leftPixel}px`, width: `${m.widthPixel}px` }}
-                    className="absolute top-0 bottom-0 flex items-center px-3 border-r border-slate-800 truncate"
-                  >
-                    {m.monthLabel}
-                  </div>
-                ))}
+                {monthHeaders.map((m, idx) => {
+                  const isNarrow = m.widthPixel < 65;
+                  return (
+                    <div
+                      key={idx}
+                      style={{ left: `${m.leftPixel}px`, width: `${m.widthPixel}px` }}
+                      className="absolute top-0 bottom-0 flex items-center px-2 border-r border-slate-800 truncate text-[11px]"
+                      title={m.monthLabel}
+                    >
+                      {isNarrow ? m.shortLabel : m.monthLabel}
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Tier 2: Days Header */}
@@ -1256,12 +1905,14 @@ export default function GanttTimeline({
                       'text-slate-400'
                     }`}
                   >
-                    {zoomLevel === 'day' ? (
+                    {columnWidth >= 28 ? (
                       <span>{d.date.getDate()}</span>
-                    ) : zoomLevel === 'week' ? (
-                      <span>{idx % 7 === 0 ? `Wk${Math.ceil((idx + 1) / 7)}` : ''}</span>
+                    ) : columnWidth >= 14 ? (
+                      <span>{d.date.getDay() === 1 ? d.date.getDate() : ''}</span>
+                    ) : columnWidth >= 6 ? (
+                      <span>{idx % 7 === 0 ? `W${Math.ceil((idx + 1) / 7)}` : ''}</span>
                     ) : (
-                      <span>{idx % 30 === 0 ? d.date.getMonth() + 1 : ''}</span>
+                      <span>{d.date.getDate() === 1 ? d.date.getMonth() + 1 : ''}</span>
                     )}
                   </div>
                 ))}
@@ -1269,7 +1920,10 @@ export default function GanttTimeline({
             </div>
 
             {/* Timeline Background Grid Columns */}
-            <div className="absolute top-[60px] bottom-0 left-0 right-0 flex pointer-events-none z-0">
+            <div 
+              style={{ height: `${totalGridHeight}px` }}
+              className="absolute top-[60px] left-0 right-0 flex pointer-events-none z-0"
+            >
               {daysList.map((d, idx) => (
                 <div
                   key={idx}
@@ -1285,8 +1939,8 @@ export default function GanttTimeline({
             {/* Red "Today" Line Marker */}
             {todayPixel >= 0 && todayPixel <= timelineWidth && (
               <div
-                style={{ left: `${todayPixel}px` }}
-                className="absolute top-0 bottom-0 w-0.5 bg-rose-500 z-25 pointer-events-none shadow-[0_0_10px_#ef4444]"
+                style={{ left: `${todayPixel}px`, height: `${totalGridHeight + 60}px` }}
+                className="absolute top-0 w-0.5 bg-rose-500 z-25 pointer-events-none shadow-[0_0_10px_#ef4444]"
               >
                 <div className="sticky top-[62px] -ml-6 bg-rose-500 text-white font-mono text-[9px] font-extrabold px-1.5 py-0.5 rounded shadow-lg uppercase tracking-wider">
                   TODAY
@@ -1297,7 +1951,7 @@ export default function GanttTimeline({
             {/* SVG Dependency Connector Curves */}
             <svg
               className="absolute top-[60px] left-0 pointer-events-none z-10"
-              style={{ width: `${timelineWidth}px`, height: `${tasks.length * ROW_HEIGHT}px` }}
+              style={{ width: `${timelineWidth}px`, height: `${totalGridHeight}px` }}
             >
               <defs>
                 <marker
@@ -1322,19 +1976,21 @@ export default function GanttTimeline({
                 </marker>
               </defs>
 
-              {tasks.flatMap((task, succIndex) => {
+              {visibleTasks.flatMap((task, succIndex) => {
                 const succY = succIndex * ROW_HEIGHT + 30;
                 const succX = dateToPixel(task.startDate);
 
                 return (task.predecessorIds || []).map(predId => {
-                  const predIndex = tasks.findIndex(t => t.id === predId);
+                  const predIndex = visibleTasks.findIndex(t => t.id === predId);
                   if (predIndex === -1) return null;
-                  const predTask = tasks[predIndex];
+                  const predTask = visibleTasks[predIndex];
 
                   const predY = predIndex * ROW_HEIGHT + 30;
                   const predX = (predTask.type === 'milestone' || predTask.duration === 0)
                     ? dateToPixel(predTask.startDate) + 12
                     : dateToPixel(predTask.endDate);
+
+                  if (isNaN(predX) || isNaN(predY) || isNaN(succX) || isNaN(succY)) return null;
 
                   // Conflict detection: Upstream predecessor's end date breaches/collides with successor's start date
                   const isBreached = parseDate(predTask.endDate) >= parseDate(task.startDate);
@@ -1362,13 +2018,16 @@ export default function GanttTimeline({
                       className="transition-all duration-200"
                     />
                   );
-                });
+                }).filter(Boolean);
               })}
             </svg>
 
             {/* Timeline Task Rows & Double-Bars */}
-            <div className="absolute top-[60px] left-0 right-0 z-20">
-              {tasks.map((task, rowIndex) => {
+            <div 
+              style={{ height: `${totalGridHeight}px` }}
+              className="absolute top-[60px] left-0 right-0 z-20"
+            >
+              {visibleTasks.map((task, rowIndex) => {
                 const isMilestone = task.type === 'milestone' || task.duration === 0;
                 const startX = dateToPixel(task.startDate);
                 const endX = dateToPixel(task.endDate);
@@ -1402,10 +2061,11 @@ export default function GanttTimeline({
                       <div
                         style={{ left: `${startX - 10}px` }}
                         onDoubleClick={() => handleOpenEditModal(task)}
-                        className="absolute top-[20px] flex items-center gap-2 cursor-pointer group/ms"
+                        className="absolute top-[20px] flex items-center gap-2 cursor-pointer group/ms z-30"
+                        title={`Milestone: ${task.text} (${formatDateShort(task.startDate)})`}
                       >
-                        <div className="w-5 h-5 rotate-45 bg-amber-400 border-2 border-amber-200 rounded-xs shadow-lg shadow-amber-500/40 hover:scale-125 transition-transform" />
-                        <span className="text-[11px] font-mono font-bold text-amber-400 whitespace-nowrap drop-shadow">
+                        <div className="w-5 h-5 rotate-45 bg-amber-400 border-2 border-amber-200 rounded-xs shadow-lg shadow-amber-500/40 hover:scale-125 transition-transform shrink-0" />
+                        <span className="text-[11px] font-mono font-bold text-amber-400 whitespace-nowrap drop-shadow bg-slate-950/80 px-1.5 py-0.5 rounded border border-amber-500/30">
                           {task.text} ({formatDateShort(task.startDate)})
                         </span>
                       </div>
@@ -1436,11 +2096,20 @@ export default function GanttTimeline({
                           className="h-full bg-white/20 rounded-l-lg pointer-events-none transition-all"
                         />
 
-                        {/* Text Inside Bar */}
-                        <div className="absolute inset-0 px-2 flex items-center justify-between text-[11px] font-mono font-bold text-white pointer-events-none truncate drop-shadow">
-                          <span className="truncate max-w-[80%]">{task.text}</span>
-                          <span className="text-[10px] opacity-90">{pct}%</span>
-                        </div>
+                        {/* Text Inside or Beside Bar */}
+                        {barWidth < 55 ? (
+                          <div 
+                            className="absolute left-full ml-1.5 top-0 bottom-0 flex items-center text-[10px] font-mono font-bold text-slate-300 pointer-events-none whitespace-nowrap drop-shadow z-10 bg-slate-950/70 px-1 rounded"
+                            title={`${task.text} (${pct}%)`}
+                          >
+                            {task.text} ({pct}%)
+                          </div>
+                        ) : (
+                          <div className="absolute inset-0 px-2 flex items-center justify-between text-[11px] font-mono font-bold text-white pointer-events-none truncate drop-shadow">
+                            <span className="truncate max-w-[80%]">{task.text}</span>
+                            <span className="text-[10px] opacity-90">{pct}%</span>
+                          </div>
+                        )}
 
                         {/* Right Edge Resize Handle */}
                         <div
@@ -1636,7 +2305,14 @@ export default function GanttTimeline({
                   <span className="text-slate-500 font-normal">Successor starts after predecessor finishes</span>
                 </label>
                 <div className="bg-slate-950 border border-slate-800 rounded-xl p-3 max-h-36 overflow-y-auto space-y-1.5">
-                  {tasks.filter(t => t.id !== editingTask.id).map(t => {
+                  {tasks
+                    .filter(t => {
+                      if (t.id === editingTask.id) return false;
+                      // Milestones should only link to parent tasks / milestones, not granular subtasks
+                      if (editFormData.type === 'milestone' && t.parentTaskId) return false;
+                      return true;
+                    })
+                    .map(t => {
                     const isChecked = editFormData.predecessorIds.includes(t.id);
                     return (
                       <label 
@@ -1673,19 +2349,29 @@ export default function GanttTimeline({
 
             {/* Modal Actions */}
             <div className="px-5 py-4 border-t border-slate-800 bg-slate-950 flex items-center justify-between gap-3">
-              <button
-                type="button"
-                onClick={() => handleDeleteTask(editingTask.id)}
-                className="px-3 py-2 bg-rose-950/80 hover:bg-rose-900 text-rose-300 font-bold rounded-xl text-xs border border-rose-800 transition cursor-pointer flex items-center gap-1.5"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Delete Task</span>
-              </button>
+              {isNewTaskDraft ? (
+                <button
+                  type="button"
+                  onClick={() => { setEditingTask(null); setIsNewTaskDraft(false); }}
+                  className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white font-medium rounded-xl text-xs border border-slate-700 transition cursor-pointer"
+                >
+                  Discard Draft
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleDeleteTask(editingTask.id)}
+                  className="px-3 py-2 bg-rose-950/80 hover:bg-rose-900 text-rose-300 font-bold rounded-xl text-xs border border-rose-800 transition cursor-pointer flex items-center gap-1.5"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete Task</span>
+                </button>
+              )}
 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => setEditingTask(null)}
+                  onClick={() => { setEditingTask(null); setIsNewTaskDraft(false); }}
                   className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-xl text-xs border border-slate-700 transition cursor-pointer"
                 >
                   Cancel
@@ -1695,7 +2381,7 @@ export default function GanttTimeline({
                   onClick={handleSaveEditModal}
                   className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs transition cursor-pointer shadow-md shadow-amber-500/20"
                 >
-                  Save Changes
+                  {isNewTaskDraft ? 'Create & Add to Schedule' : 'Save Changes'}
                 </button>
               </div>
             </div>

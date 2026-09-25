@@ -18,7 +18,7 @@ export default function LoadingScreen({ session, mode, onComplete }: LoadingScre
 
   const loginSteps = [
     { label: 'Verifying credentials & role privileges...', icon: Lock },
-    { label: 'Connecting to Neon Cloud PostgreSQL (SSL)...', icon: Database },
+    { label: 'Connecting to Secure Enterprise Cloud (SSL)...', icon: Database },
     { label: 'Loading Commercial Fit-Out Portfolio & 3Cs Workflows...', icon: HardHat },
     { label: `Launching ${session?.role || 'User'} Operations Workspace...`, icon: ShieldCheck },
   ];
@@ -149,7 +149,7 @@ export default function LoadingScreen({ session, mode, onComplete }: LoadingScre
           <div className={`flex justify-between text-[10px] font-mono ${
             isLight ? 'text-slate-500' : 'text-slate-500'
           }`}>
-            <span>CTVill PMS · Neon Cloud DB</span>
+            <span>CTVill ERP · Enterprise Cloud</span>
             <span className="font-bold">{progress}%</span>
           </div>
         </div>

@@ -106,17 +106,35 @@ engineeringRouter.post('/permits', async (req: Request, res: Response) => {
 engineeringRouter.patch('/permits/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { status, approvalDate, expiryDate, referenceNo, notes } = req.body;
+    const { 
+      permitName, 
+      projectName, 
+      permitType, 
+      issuingAgency, 
+      referenceNo, 
+      status, 
+      applicationDate, 
+      approvalDate, 
+      expiryDate, 
+      notes, 
+      documentUrl 
+    } = req.body;
 
     const updates: string[] = [];
     const values: any[] = [];
     let idx = 1;
 
+    if (permitName !== undefined) { updates.push(`permit_name = $${idx++}`); values.push(permitName); }
+    if (projectName !== undefined) { updates.push(`project_name = $${idx++}`); values.push(projectName); }
+    if (permitType !== undefined) { updates.push(`permit_type = $${idx++}`); values.push(permitType); }
+    if (issuingAgency !== undefined) { updates.push(`issuing_agency = $${idx++}`); values.push(issuingAgency); }
+    if (referenceNo !== undefined) { updates.push(`reference_no = $${idx++}`); values.push(referenceNo); }
     if (status !== undefined) { updates.push(`status = $${idx++}`); values.push(status); }
+    if (applicationDate !== undefined) { updates.push(`application_date = $${idx++}`); values.push(applicationDate || null); }
     if (approvalDate !== undefined) { updates.push(`approval_date = $${idx++}`); values.push(approvalDate || null); }
     if (expiryDate !== undefined) { updates.push(`expiry_date = $${idx++}`); values.push(expiryDate || null); }
-    if (referenceNo !== undefined) { updates.push(`reference_no = $${idx++}`); values.push(referenceNo); }
     if (notes !== undefined) { updates.push(`notes = $${idx++}`); values.push(notes); }
+    if (documentUrl !== undefined) { updates.push(`document_url = $${idx++}`); values.push(documentUrl); }
 
     if (updates.length > 0) {
       values.push(id);

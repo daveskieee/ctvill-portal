@@ -7,11 +7,13 @@ import React, { useState, useEffect } from 'react';
 import { 
   Building2, Users, CheckCircle2, TrendingUp, DollarSign, Calendar, 
   Layers, Plus, ExternalLink, ShieldCheck, Clock, FileText, ArrowRight, 
-  X, AlertCircle, Edit3, Trash2, Check, Sliders, HardHat, Search, Download, HelpCircle, FileSpreadsheet, Lock
+  X, AlertCircle, Edit3, Trash2, Check, Sliders, HardHat, Search, Download, HelpCircle, FileSpreadsheet, Lock,
+  MapPin, CloudSun, RefreshCw
 } from 'lucide-react';
 import { ProjectProfile, ProjectTask, Contractor, WorkforceReallocationRecommendation, ProjectRFI, ChangeOrder } from '../types';
 import { generateReallocationRecommendations } from '../services/WorkforceReallocationService';
 import { exportToCsv } from '../utils/exportUtils';
+import { resolveLocalGeocoding, resolveProjectCoordinatesAsync, resolveProjectCoordinatesSync, GeocodedLocation } from '../utils/geocoding';
 
 export const AVAILABLE_PMS = [
   { id: 'usr-pm-ricardo', name: 'Engr. Ricardo Ramos (Senior Project Manager)' },
@@ -85,6 +87,40 @@ export default function ProjectProfileHub({
   const [formPMId, setFormPMId] = useState<string>('');
   const [formPMName, setFormPMName] = useState<string>('');
   const [availablePMs, setAvailablePMs] = useState<{ id: string; name: string }[]>(AVAILABLE_PMS);
+
+  // Geocoding Coordinates State for Live Weather Station Sync
+  const [detectedCoords, setDetectedCoords] = useState<GeocodedLocation | null>(null);
+  const [isGeocoding, setIsGeocoding] = useState<boolean>(false);
+
+  // Auto-resolve geocoding whenever formLocation changes
+  useEffect(() => {
+    if (!formLocation || !formLocation.trim()) {
+      setDetectedCoords(null);
+      return;
+    }
+
+    // 1. Instant local dictionary check
+    const localMatch = resolveLocalGeocoding(formLocation);
+    if (localMatch) {
+      setDetectedCoords(localMatch);
+      return;
+    }
+
+    // 2. Debounced online geocoding check (350ms)
+    setIsGeocoding(true);
+    const timer = setTimeout(async () => {
+      try {
+        const asyncMatch = await resolveProjectCoordinatesAsync(formLocation, formName);
+        setDetectedCoords(asyncMatch);
+      } catch {
+        // Ignore network errors
+      } finally {
+        setIsGeocoding(false);
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [formLocation, formName]);
 
   // Worker assignment state (Workers tab in project profile)
   const [workerSearchQuery, setWorkerSearchQuery] = useState('');
@@ -172,6 +208,7 @@ export default function ProjectProfileHub({
     setFormClient('');
     setFormDescription('');
     setFormLocation('');
+    setDetectedCoords(null);
     setFormBudget(0);
     setFormCollected(0);
     setFormProgress(0);
@@ -194,6 +231,17 @@ export default function ProjectProfileHub({
     setFormClient(p.clientName);
     setFormDescription(p.description);
     setFormLocation(p.location);
+    if (p.latitude && p.longitude) {
+      setDetectedCoords({
+        name: p.location,
+        lat: Number(p.latitude),
+        lon: Number(p.longitude),
+        confidence: 'EXACT_COORDINATES'
+      });
+    } else {
+      const localMatch = resolveLocalGeocoding(p.location || p.name);
+      setDetectedCoords(localMatch);
+    }
     setFormBudget(p.budget);
     setFormCollected(p.fundsCollected);
     setFormProgress(p.progressPercentage);
@@ -264,12 +312,19 @@ export default function ProjectProfileHub({
     e.preventDefault();
     if (!formName.trim() || isTimelineInvalid) return;
 
+    // Resolve coordinates for project site weather synchronization
+    const syncCoords = resolveProjectCoordinatesSync(formLocation.trim(), formName.trim());
+    const finalLat = detectedCoords?.lat ?? syncCoords.lat;
+    const finalLon = detectedCoords?.lon ?? syncCoords.lon;
+
     const newProj: ProjectProfile = {
       id: `PRJ-${Date.now().toString().slice(-4)}`,
       name: formName.trim(),
       clientName: formClient.trim(),
       description: formDescription.trim(),
       location: formLocation.trim(),
+      latitude: finalLat,
+      longitude: finalLon,
       budget: Number(formBudget) || 0,
       fundsCollected: 0,
       progressPercentage: Number(formProgress) || 0,
@@ -316,12 +371,19 @@ export default function ProjectProfileHub({
     e.preventDefault();
     if (!selectedProject) return;
 
+    // Resolve coordinates for project site weather synchronization
+    const syncCoords = resolveProjectCoordinatesSync(formLocation.trim(), formName.trim(), selectedProject.latitude, selectedProject.longitude);
+    const finalLat = detectedCoords?.lat ?? syncCoords.lat;
+    const finalLon = detectedCoords?.lon ?? syncCoords.lon;
+
     const updated: ProjectProfile = {
       ...selectedProject,
       name: formName.trim(),
       clientName: formClient.trim(),
       description: formDescription.trim(),
       location: formLocation.trim(),
+      latitude: finalLat,
+      longitude: finalLon,
       budget: Number(formBudget),
       fundsCollected: selectedProject.fundsCollected ?? Number(formCollected) ?? 0,
       progressPercentage: Number(formProgress),
@@ -399,11 +461,11 @@ export default function ProjectProfileHub({
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full md:w-auto">
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500"
+            className="w-full sm:w-auto bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500"
           >
             <option value="ALL">All Project Statuses</option>
             <option value="IN_PROGRESS">In Progress</option>
@@ -412,22 +474,24 @@ export default function ProjectProfileHub({
             <option value="HANDED_OVER">Handed Over</option>
           </select>
 
-          <button
-            onClick={handleExportCsv}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-semibold px-3.5 py-2.5 rounded-xl transition cursor-pointer text-xs"
-            title="Export Commercial Sites to CSV"
-          >
-            <Download className="w-4 h-4 text-amber-400" />
-            <span>Export CSV</span>
-          </button>
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={handleExportCsv}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-semibold px-3.5 py-2.5 rounded-xl transition cursor-pointer text-xs"
+              title="Export Commercial Sites to CSV"
+            >
+              <Download className="w-4 h-4 text-amber-400" />
+              <span>Export CSV</span>
+            </button>
 
-          <button
-            onClick={openNewModal}
-            className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-amber-500/20 cursor-pointer text-xs"
-          >
-            <Plus className="w-4 h-4" />
-            <span>New Project</span>
-          </button>
+            <button
+              onClick={openNewModal}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-amber-500/20 cursor-pointer text-xs"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Project</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -635,10 +699,22 @@ export default function ProjectProfileHub({
                   {project.description}
                 </p>
 
-                {/* Location */}
-                <div className="flex items-center gap-1.5 text-xs text-slate-500 mt-3">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                  <span className="truncate">{project.location}</span>
+                {/* Location & Weather Station Coordinates */}
+                <div className="flex items-center justify-between gap-2 text-xs text-slate-400 mt-3 flex-wrap">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span className="truncate">{project.location || 'Location Unspecified'}</span>
+                  </div>
+                  {project.latitude && project.longitude ? (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0 flex items-center gap-1" title={`Weather station coordinates: ${project.latitude}, ${project.longitude}`}>
+                      <CloudSun className="w-3 h-3 text-emerald-400" />
+                      {Number(project.latitude).toFixed(2)}°, {Number(project.longitude).toFixed(2)}°
+                    </span>
+                  ) : (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 shrink-0">
+                      Auto-Geocoded
+                    </span>
+                  )}
                 </div>
 
                 {/* Progress Bar with Quick Interactive Slider */}
@@ -697,8 +773,8 @@ export default function ProjectProfileHub({
               </div>
 
               {/* Card Footer Metrics */}
-              <div className="mt-5 pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                <div className="flex items-center gap-3 font-mono">
+              <div className="mt-5 pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono">
                   <span className="flex items-center gap-1">
                     <Users className="w-3.5 h-3.5 text-purple-400" />
                     {project.assignedWorkersCount} Workers
@@ -715,7 +791,7 @@ export default function ProjectProfileHub({
 
                 <button
                   onClick={() => setSelectedProject(project)}
-                  className="flex items-center gap-1 text-amber-400 font-medium hover:translate-x-1 transition-transform cursor-pointer"
+                  className="flex items-center gap-1 text-amber-400 font-medium hover:translate-x-1 transition-transform cursor-pointer ml-auto sm:ml-0"
                 >
                   View Profile <ArrowRight className="w-3.5 h-3.5" />
                 </button>
@@ -728,17 +804,17 @@ export default function ProjectProfileHub({
 
       {/* Detailed Project Profile Modal */}
       {selectedProject && !showEditModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 sm:p-8 relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] overflow-y-auto shadow-2xl p-4 sm:p-8 relative my-auto">
             <button
               onClick={() => setSelectedProject(null)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              className="absolute top-3 right-3 sm:top-5 sm:right-5 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer z-10"
             >
               <X className="w-5 h-5" />
             </button>
 
             {/* Profile Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-800">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-800 pr-8 sm:pr-0">
               <div>
                 <div className="flex items-center gap-2 mb-1.5">
                   <span className="text-xs font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold">
@@ -760,7 +836,7 @@ export default function ProjectProfileHub({
                 </div>
               </div>
 
-              <div className="flex flex-col items-end gap-2">
+              <div className="flex flex-col sm:items-end items-start gap-2">
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => openEditModal(selectedProject)}
@@ -867,10 +943,26 @@ export default function ProjectProfileHub({
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
                 {[
-                  { title: '1. Demolition & MEP Roughing', pct: 100, done: true },
-                  { title: '2. Framing & Acoustic Walls', pct: selectedProject.progressPercentage >= 60 ? 100 : selectedProject.progressPercentage, done: selectedProject.progressPercentage >= 60 },
-                  { title: '3. Millwork & Finishes', pct: selectedProject.progressPercentage >= 85 ? 100 : Math.max(0, (selectedProject.progressPercentage - 50) * 2), done: selectedProject.progressPercentage >= 85 },
-                  { title: '4. Testing & QA Punch-List', pct: selectedProject.progressPercentage >= 95 ? 100 : 0, done: selectedProject.progressPercentage >= 95 },
+                  { 
+                    title: '1. Demolition & MEP Roughing', 
+                    pct: selectedProject.progressPercentage >= 25 ? 100 : Math.min(100, Math.round(selectedProject.progressPercentage * 4)), 
+                    done: selectedProject.progressPercentage >= 25 
+                  },
+                  { 
+                    title: '2. Framing & Acoustic Walls', 
+                    pct: selectedProject.progressPercentage >= 50 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 25) * 4))), 
+                    done: selectedProject.progressPercentage >= 50 
+                  },
+                  { 
+                    title: '3. Millwork & Finishes', 
+                    pct: selectedProject.progressPercentage >= 80 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 50) * (100 / 30)))), 
+                    done: selectedProject.progressPercentage >= 80 
+                  },
+                  { 
+                    title: '4. Testing & QA Punch-List', 
+                    pct: selectedProject.progressPercentage >= 100 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 80) * 5))), 
+                    done: selectedProject.progressPercentage >= 100 
+                  },
                 ].map((m, idx) => (
                   <div key={idx} className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
                     <div>
@@ -1012,7 +1104,7 @@ export default function ProjectProfileHub({
                                 }
                               } finally { setIsAssigningWorker(false); }
                             }}
-                            className="px-2.5 py-1 text-[10px] font-bold bg-purple-950/80 text-purple-400 border border-purple-800/60 rounded-lg hover:bg-purple-900/60 transition opacity-0 group-hover:opacity-100 cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+                            className="px-2.5 py-1 text-[10px] font-bold bg-purple-950/80 text-purple-400 border border-purple-800/60 rounded-lg hover:bg-purple-900/60 transition opacity-100 sm:opacity-0 sm:group-hover:opacity-100 cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                           >
                             + Assign
                           </button>
@@ -1033,24 +1125,24 @@ export default function ProjectProfileHub({
             </div>
 
             {/* Close / Action Footer */}
-            <div className="mt-8 pt-4 border-t border-slate-800 flex justify-between items-center">
+            <div className="mt-8 pt-4 border-t border-slate-800 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3">
               <button
                 onClick={() => handleDelete(selectedProject.id)}
-                className="px-4 py-2 rounded-xl text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 text-xs font-medium transition"
+                className="w-full sm:w-auto px-4 py-2 rounded-xl text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 text-xs font-medium transition text-center"
               >
                 Delete Project
               </button>
 
-              <div className="flex gap-3">
+              <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
                 <button
                   onClick={() => openEditModal(selectedProject)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium transition"
+                  className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium transition text-center"
                 >
                   Edit Parameters
                 </button>
                 <button
                   onClick={() => setSelectedProject(null)}
-                  className="px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm transition"
+                  className="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm transition text-center"
                 >
                   Done
                 </button>
@@ -1062,11 +1154,11 @@ export default function ProjectProfileHub({
 
       {/* New Project Modal */}
       {showNewModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] overflow-y-auto shadow-2xl p-4 sm:p-6 relative my-auto">
             <button
               onClick={() => setShowNewModal(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+              className="absolute top-3 right-3 sm:top-5 sm:right-5 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition z-10"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1108,14 +1200,47 @@ export default function ProjectProfileHub({
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Site Location / Address</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Site Location / Address</label>
+                  <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
+                    <CloudSun className="w-3 h-3" /> Auto-syncs Live Site Diary Weather
+                  </span>
+                </div>
                 <input
                   type="text"
-                  placeholder="e.g., Cabuyao Technopark, Laguna"
+                  placeholder="e.g., Cabuyao, Laguna (or BGC Taguig, Cebu City, Clark Pampanga, etc.)"
                   value={formLocation}
                   onChange={(e) => setFormLocation(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
                 />
+                
+                {/* Real-time Geocoded Coordinate Preview */}
+                {formLocation.trim() && (
+                  <div className={`mt-2 p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all ${
+                    detectedCoords 
+                      ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                      : 'bg-slate-900 border-slate-800 text-slate-400'
+                  }`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <MapPin className={`w-4 h-4 shrink-0 ${detectedCoords ? 'text-emerald-400' : 'text-slate-500'}`} />
+                      <div className="truncate">
+                        {detectedCoords ? (
+                          <span>
+                            <strong className="text-white">Weather Station: {detectedCoords.name}</strong>
+                            <span className="text-[11px] font-mono opacity-80 ml-1.5">
+                              ({detectedCoords.lat.toFixed(4)}° N, {detectedCoords.lon.toFixed(4)}° E)
+                            </span>
+                          </span>
+                        ) : (
+                          <span>{isGeocoding ? 'Detecting coordinates...' : 'Resolving site coordinates...'}</span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 font-bold ml-2">
+                      {detectedCoords?.confidence === 'EXACT_COORDINATES' ? 'GPS Coords' : 'Weather Synced'}
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1133,7 +1258,7 @@ export default function ProjectProfileHub({
                 </p>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Progress (%)</label>
                   <input
@@ -1189,7 +1314,7 @@ export default function ProjectProfileHub({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Start Date</label>
                   <input
@@ -1356,18 +1481,18 @@ export default function ProjectProfileHub({
                 />
               </div>
 
-              <div className="pt-3 flex justify-end gap-3">
+              <div className="pt-3 flex flex-wrap items-center justify-end gap-2 sm:gap-3">
                 <button
                   type="button"
                   onClick={() => setShowNewModal(false)}
-                  className="px-4 py-2 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-sm font-medium cursor-pointer"
+                  className="w-full sm:w-auto px-4 py-2 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-sm font-medium cursor-pointer text-center"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isTimelineInvalid || !formName.trim()}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/20 cursor-pointer"
+                  className="w-full sm:w-auto px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/20 cursor-pointer text-center"
                 >
                   Save Project Profile
                 </button>
@@ -1379,11 +1504,11 @@ export default function ProjectProfileHub({
 
       {/* Edit Project Modal */}
       {showEditModal && selectedProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] overflow-y-auto shadow-2xl p-4 sm:p-6 relative my-auto">
             <button
               onClick={() => setShowEditModal(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              className="absolute top-3 right-3 sm:top-5 sm:right-5 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer z-10"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1425,17 +1550,50 @@ export default function ProjectProfileHub({
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Site Location</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-mono text-slate-400 uppercase">Site Location</label>
+                  <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
+                    <CloudSun className="w-3 h-3" /> Auto-syncs Live Site Diary Weather
+                  </span>
+                </div>
                 <input
                   type="text"
-                  placeholder="e.g., Cabuyao Technopark, Laguna"
+                  placeholder="e.g., Cabuyao Technopark, Laguna (or BGC, Makati, Cebu, etc.)"
                   value={formLocation}
                   onChange={(e) => setFormLocation(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
                 />
+                
+                {/* Real-time Geocoded Coordinate Preview */}
+                {formLocation.trim() && (
+                  <div className={`mt-2 p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all ${
+                    detectedCoords 
+                      ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
+                      : 'bg-slate-900 border-slate-800 text-slate-400'
+                  }`}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <MapPin className={`w-4 h-4 shrink-0 ${detectedCoords ? 'text-emerald-400' : 'text-slate-500'}`} />
+                      <div className="truncate">
+                        {detectedCoords ? (
+                          <span>
+                            <strong className="text-white">Weather Station: {detectedCoords.name}</strong>
+                            <span className="text-[11px] font-mono opacity-80 ml-1.5">
+                              ({detectedCoords.lat.toFixed(4)}° N, {detectedCoords.lon.toFixed(4)}° E)
+                            </span>
+                          </span>
+                        ) : (
+                          <span>{isGeocoding ? 'Detecting coordinates...' : 'Resolving site coordinates...'}</span>
+                        )}
+                      </div>
+                    </div>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 font-bold ml-2">
+                      {detectedCoords?.confidence === 'EXACT_COORDINATES' ? 'GPS Coords' : 'Weather Synced'}
+                    </span>
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Total Budget (₱)</label>
                   <input
@@ -1465,7 +1623,7 @@ export default function ProjectProfileHub({
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Progress (%)</label>
                   <input
@@ -1519,7 +1677,7 @@ export default function ProjectProfileHub({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Start Date</label>
                   <input
@@ -1679,18 +1837,18 @@ export default function ProjectProfileHub({
                 />
               </div>
 
-              <div className="pt-3 flex justify-end gap-3">
+              <div className="pt-3 flex flex-wrap items-center justify-end gap-2 sm:gap-3">
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}
-                  className="px-4 py-2 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-sm font-medium cursor-pointer"
+                  className="w-full sm:w-auto px-4 py-2 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-sm font-medium cursor-pointer text-center"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isTimelineInvalid || !formName.trim()}
-                  className="px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/20 cursor-pointer"
+                  className="w-full sm:w-auto px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/20 cursor-pointer text-center"
                 >
                   Update Profile
                 </button>
@@ -1702,11 +1860,11 @@ export default function ProjectProfileHub({
 
       {/* Workforce Reallocation Modal */}
       {showReallocationModal && activeReallocProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl p-6 relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] overflow-y-auto shadow-2xl p-4 sm:p-6 relative my-auto">
             <button
               onClick={() => setShowReallocationModal(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
+              className="absolute top-3 right-3 sm:top-5 sm:right-5 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer z-10"
             >
               <X className="w-5 h-5" />
             </button>
@@ -1766,7 +1924,7 @@ export default function ProjectProfileHub({
                     </div>
 
                     {/* Transfer Details */}
-                    <div className="grid grid-cols-2 gap-2 text-xs bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs bg-slate-900/60 p-2.5 rounded-lg border border-slate-800/80">
                       <div>
                         <span className="text-[10px] font-mono text-slate-500 uppercase block">From Project</span>
                         <span className="font-semibold text-slate-300 truncate block">{rec.originProjectName} ({rec.originProgress}%)</span>

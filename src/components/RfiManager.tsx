@@ -168,7 +168,7 @@ export default function RfiManager({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 max-w-full min-w-0">
       {/* Header Banner */}
       <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -236,35 +236,35 @@ export default function RfiManager({
       </div>
 
       {/* Filter Controls */}
-      <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
-        <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap">
-          <div className="flex items-center gap-1.5">
+      <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 max-w-full">
+        <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap max-w-full">
+          <div className="flex items-center gap-1.5 flex-wrap max-w-full">
             <Filter className="w-4 h-4 text-slate-500 shrink-0" />
-            <span className="text-xs font-mono text-slate-500 uppercase">Status:</span>
+            <span className="text-xs font-mono text-slate-500 uppercase shrink-0">Status:</span>
             {['ALL', 'OPEN', 'UNDER_REVIEW', 'ANSWERED', 'CLOSED'].map((st) => (
               <button
                 key={st}
                 onClick={() => setStatusFilter(st)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer shrink-0 ${
                   statusFilter === st
-                    ? 'bg-blue-600 text-white'
+                    ? 'bg-blue-600 text-white shadow-sm'
                     : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
                 }`}
               >
-                {st}
+                {st === 'UNDER_REVIEW' ? 'UNDER REVIEW' : st}
               </button>
             ))}
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-mono text-slate-500 uppercase">Priority:</span>
+          <div className="flex items-center gap-1.5 flex-wrap max-w-full">
+            <span className="text-xs font-mono text-slate-500 uppercase shrink-0">Priority:</span>
             {['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((pr) => (
               <button
                 key={pr}
                 onClick={() => setPriorityFilter(pr)}
-                className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold transition-all cursor-pointer ${
+                className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold transition-all cursor-pointer shrink-0 ${
                   priorityFilter === pr
-                    ? 'bg-amber-500 text-slate-950'
+                    ? 'bg-amber-500 text-slate-950 font-black'
                     : 'text-slate-500 hover:text-slate-300'
                 }`}
               >
@@ -307,27 +307,29 @@ export default function RfiManager({
       </div>
 
       {/* RFI Table */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
-        <div className="overflow-x-auto">
+      <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-sm max-w-full">
+        <div className="overflow-x-auto overscroll-x-contain">
           <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-900/90 text-slate-400 font-mono text-[11px] uppercase border-b border-slate-800">
               <tr>
-                <th className="py-3.5 px-4">RFI Number</th>
-                <th className="py-3.5 px-4">Subject & Query</th>
-                <th className="py-3.5 px-4">Drawing Reference</th>
-                <th className="py-3.5 px-4">Assigned Architect/Engr</th>
-                <th className="py-3.5 px-4 text-center">Priority</th>
-                <th className="py-3.5 px-4 text-center">Status</th>
-                <th className="py-3.5 px-4 text-right">Actions</th>
+                <th className="py-3.5 px-4 whitespace-nowrap">RFI Number</th>
+                <th className="py-3.5 px-4 whitespace-nowrap">Subject & Query</th>
+                <th className="py-3.5 px-4 whitespace-nowrap">Drawing Reference</th>
+                <th className="py-3.5 px-4 whitespace-nowrap">Assigned Architect/Engr</th>
+                <th className="py-3.5 px-4 text-center whitespace-nowrap">Priority</th>
+                <th className="py-3.5 px-4 text-center whitespace-nowrap">Status</th>
+                <th className="py-3.5 px-4 text-right whitespace-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-sans">
               {filteredRfis.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-slate-500">
-                    <HelpCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                    <p className="text-sm font-medium">No RFIs found</p>
-                    <p className="text-xs text-slate-600 mt-0.5">Click "Raise New RFI" to log an engineering query.</p>
+                  <td colSpan={7} className="p-0">
+                    <div className="sticky left-0 w-full py-12 text-center text-slate-500 flex flex-col items-center justify-center">
+                      <HelpCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                      <p className="text-sm font-medium">No RFIs found</p>
+                      <p className="text-xs text-slate-600 mt-0.5">Click "Raise New RFI" to log an engineering query.</p>
+                    </div>
                   </td>
                 </tr>
               ) : (

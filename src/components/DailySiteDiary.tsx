@@ -14,6 +14,7 @@ import {
   Bell, Play, Pause, Megaphone, Smartphone, CheckCheck
 } from 'lucide-react';
 import { DailySiteLog, ProjectProfile, Contractor } from '../types';
+import { resolveProjectCoordinatesSync } from '../utils/geocoding';
 
 interface DailySiteDiaryProps {
   logs: DailySiteLog[];
@@ -273,24 +274,68 @@ export function getSmoothCurvePath(points: { x: number; y: number }[]): string {
 }
 
 export default function DailySiteDiary({ logs, projects = [], contractors = [], onAddLog, onToggleWeatherSuspension }: DailySiteDiaryProps) {
+  // Coordinate resolver for project sites (explicit lat/lon or comprehensive geocoding)
+  const resolveProjectCoordinates = useCallback((p: ProjectProfile): { lat: number; lon: number; name: string } => {
+    return resolveProjectCoordinatesSync(p.location, p.name, p.latitude, p.longitude);
+  }, []);
+
   // Initial site location based on active project coordinates or default
   const initialLocation = useMemo<SiteLocation>(() => {
     if (projects && projects.length > 0) {
       const p = projects[0];
+      const coords = resolveProjectCoordinates(p);
       return {
         id: p.id,
         name: p.name,
-        region: p.location || 'Laguna, Philippines',
-        lat: p.latitude || (p.name.toLowerCase().includes('bgc') ? 14.5547 : 14.2547),
-        lon: p.longitude || (p.name.toLowerCase().includes('bgc') ? 121.0509 : 121.5056),
+        region: p.location || coords.name,
+        lat: coords.lat,
+        lon: coords.lon,
         projectId: p.id,
       };
     }
     return DEFAULT_SITE_LOCATION;
-  }, [projects]);
+  }, [projects, resolveProjectCoordinates]);
 
   // Active dynamic location state
   const [selectedLocation, setSelectedLocation] = useState<SiteLocation>(initialLocation);
+
+  // Automatically keep selectedLocation aligned with project list when data arrives or changes
+  useEffect(() => {
+    if (projects && projects.length > 0) {
+      if (!selectedLocation.projectId || selectedLocation.id === 'ctvill-main') {
+        const p = projects[0];
+        const coords = resolveProjectCoordinates(p);
+        setSelectedLocation({
+          id: p.id,
+          name: p.name,
+          region: p.location || coords.name,
+          lat: coords.lat,
+          lon: coords.lon,
+          projectId: p.id,
+        });
+      } else {
+        const current = projects.find(p => p.id === selectedLocation.projectId);
+        if (current) {
+          const coords = resolveProjectCoordinates(current);
+          if (
+            Math.abs(coords.lat - selectedLocation.lat) > 0.0001 || 
+            Math.abs(coords.lon - selectedLocation.lon) > 0.0001 ||
+            current.name !== selectedLocation.name ||
+            (current.location && current.location !== selectedLocation.region)
+          ) {
+            setSelectedLocation({
+              id: current.id,
+              name: current.name,
+              region: current.location || coords.name,
+              lat: coords.lat,
+              lon: coords.lon,
+              projectId: current.id,
+            });
+          }
+        }
+      }
+    }
+  }, [projects, selectedLocation.projectId, selectedLocation.id, selectedLocation.lat, selectedLocation.lon, selectedLocation.name, selectedLocation.region, resolveProjectCoordinates]);
   
   // Custom Geocoding Search & Device GPS States
   const [searchQuery, setSearchQuery] = useState('');
@@ -367,7 +412,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
   // Modal State for Logging a Weather Observation
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [logNotes, setLogNotes] = useState<string>('');
-  const [observerName, setObserverName] = useState<string>('Engr. Ricardo Ramos (PM)');
+  const [observerName, setObserverName] = useState<string>('');
   const [notification, setNotification] = useState<string | null>(null);
 
   // Trade Safety Calculator & What-If Simulator State
@@ -576,7 +621,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
     try {
       // 1. First Priority: Call backend endpoint backed by PostgreSQL weather cache & hourly model
       try {
-        const query = `?lat=${selectedLocation.lat}&lon=${selectedLocation.lon}&siteKey=site_${selectedLocation.lat}_${selectedLocation.lon}${forceFresh ? '&fresh=true' : ''}`;
+        const siteKey = `proj_${selectedLocation.projectId || 'site'}_${selectedLocation.lat.toFixed(4)}_${selectedLocation.lon.toFixed(4)}`;
+        const query = `?lat=${selectedLocation.lat}&lon=${selectedLocation.lon}&siteKey=${siteKey}${forceFresh ? '&fresh=true' : ''}`;
         const backendRes = await fetch(`/api/weather/live${query}`);
         if (backendRes.ok) {
           const bData = await backendRes.json();
@@ -837,30 +883,48 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
 
   const tradeSafety = calculateTradeSafety();
 
+  // Open and Sync Weather Observation Modal with Live Sensor Readings
+  const handleOpenLogModal = () => {
+    if (liveWeather) {
+      setManualCondition(currentWeatherInfo.conditionType);
+      setManualTemp(Number(liveWeather.temperature.toFixed(1)));
+    }
+    setObserverName('');
+    setLogNotes('');
+    setIsModalOpen(true);
+  };
+
   // Handle Recording Current Live Weather Snapshot to System Logs
   const handleSaveObservation = (e: React.FormEvent) => {
     e.preventDefault();
     if (!liveWeather) return;
 
-    const finalWeatherType = isManualOverride ? manualCondition : currentWeatherInfo.conditionType;
-    const finalTemp = `${isManualOverride ? manualTemp : liveWeather.temperature.toFixed(1)}°C`;
-    const finalLabel = isManualOverride 
-      ? (manualCondition === 'SUNNY' ? 'Clear Sky' : manualCondition === 'OVERCAST' ? 'Overcast' : manualCondition === 'RAINY' ? 'Light Rain' : 'Heavy Rain / Suspended')
-      : currentWeatherInfo.label;
+    const finalWeatherType = manualCondition;
+    const finalTemp = `${manualTemp}°C`;
+    const finalLabel = manualCondition === currentWeatherInfo.conditionType
+      ? currentWeatherInfo.label
+      : manualCondition === 'SUNNY'
+      ? 'Clear Sky'
+      : manualCondition === 'OVERCAST'
+      ? 'Overcast'
+      : manualCondition === 'RAINY'
+      ? (liveWeather && liveWeather.weatherCode === 51 ? 'Light Drizzle' : 'Light Rain')
+      : 'Heavy Rain / Suspended';
 
     onAddLog({
       date: new Date().toISOString(),
       weather: finalWeatherType,
       temperature: finalTemp,
       activeHeadcount: 0,
-      equipmentOnSite: `Wind: ${liveWeather.windSpeed.toFixed(1)} km/h (${getWindDirection(liveWeather.windDirection)}) | Humidity: ${liveWeather.humidity}% | Mode: ${isManualOverride ? 'Manual Field Entry' : isCachedTelemetry ? 'PostgreSQL Cache' : 'Live Sensor'}`,
+      equipmentOnSite: `Wind: ${liveWeather.windSpeed.toFixed(1)} km/h (${getWindDirection(liveWeather.windDirection)}) | Humidity: ${liveWeather.humidity}% | Mode: ${isManualOverride ? 'Manual Field Entry' : isCachedTelemetry ? 'Telemetry Cache' : 'Live Sensor'}`,
       toolboxTopic: `Weather Condition: ${finalLabel}`,
       workCompleted: `Meteorological Snapshot for ${selectedLocation.name} (${selectedLocation.region}): ${finalLabel}. Ambient: ${finalTemp}, Humidity: ${liveWeather.humidity}%, Wind: ${liveWeather.windSpeed.toFixed(1)} km/h. ${logNotes.trim() ? `Field Note: ${logNotes.trim()}` : ''}`,
       delaysOrIssues: (liveWeather.precipitation > 0 || finalWeatherType === 'STORM') ? `Precipitation recorded: ${liveWeather.precipitation} mm` : undefined,
-      supervisorName: observerName.trim() || 'Site Weather Officer',
+      supervisorName: observerName.trim() || 'Site Supervisor',
     });
 
     setLogNotes('');
+    setObserverName('');
     setIsModalOpen(false);
     setNotification('Weather observation archived to project daily site log.');
     setTimeout(() => setNotification(null), 3500);
@@ -1051,159 +1115,175 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
     <div className="space-y-6">
       
       {/* Top Header & Location Hub Switcher */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
-            <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider">
-              LIVE METEOROLOGICAL TELEMETRY
-            </span>
+      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+        {/* Row 1: Title & Primary Actions */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
+              <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider">
+                LIVE METEOROLOGICAL TELEMETRY
+              </span>
+            </div>
+            <h2 className="text-xl font-black text-white flex items-center gap-2">
+              <CloudSun className="w-6 h-6 text-amber-400" />
+              Project Weather Report & Atmospheric Station
+            </h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              Real-time meteorological telemetry, automated trade safety calculators, and historical site diary archives.
+            </p>
           </div>
-          <h2 className="text-xl font-black text-white flex items-center gap-2">
-            <CloudSun className="w-6 h-6 text-amber-400" />
-            Project Weather Report & Atmospheric Station
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Real-time meteorological telemetry, automated trade safety calculators, and historical site diary archives.
-          </p>
+
+          {/* Primary Action Buttons */}
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={handleExportCSV}
+              className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer shadow-sm"
+              title="Export Site Diary as CSV"
+            >
+              <Download className="w-3.5 h-3.5 text-amber-400" />
+              <span>Export CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenLogModal}
+              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer transition-all"
+            >
+              <Plus className="w-4 h-4" />
+              <span>Log Weather Record</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
-          {/* Dynamic Active Project Selector */}
-          {projects && projects.length > 0 && (
-            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white">
-              <Building2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-              <select
-                value={selectedLocation.projectId || ''}
-                onChange={(e) => {
-                  const proj = projects.find(p => p.id === e.target.value);
-                  if (proj) {
-                    setSelectedLocation({
-                      id: proj.id,
-                      name: proj.name,
-                      region: proj.location || 'Laguna, Philippines',
-                      lat: proj.latitude || (proj.name.toLowerCase().includes('bgc') ? 14.5547 : 14.2547),
-                      lon: proj.longitude || (proj.name.toLowerCase().includes('bgc') ? 121.0509 : 121.5056),
-                      projectId: proj.id
-                    });
-                  }
-                }}
-                className="bg-transparent text-xs text-white focus:outline-none cursor-pointer pr-1 max-w-[150px] truncate"
-              >
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id} className="bg-slate-950 text-white">
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {/* Device GPS Auto-Detect Button */}
-          <button
-            type="button"
-            onClick={handleUseDeviceGPS}
-            disabled={isGpsLocating}
-            className="p-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer"
-            title="Auto-detect current coordinates using Device GPS"
-          >
-            <LocateFixed className={`w-3.5 h-3.5 ${isGpsLocating ? 'animate-spin text-amber-400' : 'text-emerald-400'}`} />
-            <span className="hidden sm:inline">{isGpsLocating ? 'Locating...' : 'Device GPS'}</span>
-          </button>
-
-          {/* Custom City / Municipality Geocoding Search */}
-          <div className="relative">
-            <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white w-40 sm:w-48">
-              <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <input
-                type="text"
-                placeholder="Search municipality..."
-                value={searchQuery}
-                onChange={(e) => handleSearchLocation(e.target.value)}
-                onFocus={() => { if (searchResults.length > 0) setShowSearchDropdown(true); }}
-                className="bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none w-full"
-              />
-              {isSearching && <RefreshCw className="w-3 h-3 animate-spin text-amber-400 shrink-0" />}
-            </div>
-
-            {/* Autocomplete Dropdown */}
-            {showSearchDropdown && searchResults.length > 0 && (
-              <div className="absolute top-full left-0 mt-1 w-60 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
-                {searchResults.map((item) => (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => handleSelectSearchResult(item)}
-                    className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-amber-500 hover:text-slate-950 transition flex flex-col cursor-pointer border-b border-slate-800 last:border-0"
-                  >
-                    <span className="font-bold">{item.name}</span>
-                    <span className="text-[10px] opacity-75">{[item.admin1, item.country].filter(Boolean).join(', ')} ({item.latitude?.toFixed(2)}°, {item.longitude?.toFixed(2)}°)</span>
-                  </button>
-                ))}
+        {/* Row 2: Clean Sub-Toolbar Divider & Grouped Controls */}
+        <div className="pt-3 border-t border-slate-800/80 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          {/* Left Group: Location & Station Selector */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Dynamic Active Project Selector */}
+            {projects && projects.length > 0 && (
+              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white">
+                <Building2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <select
+                  value={selectedLocation.projectId || ''}
+                  onChange={(e) => {
+                    const proj = projects.find(p => p.id === e.target.value);
+                    if (proj) {
+                      const coords = resolveProjectCoordinates(proj);
+                      setSelectedLocation({
+                        id: proj.id,
+                        name: proj.name,
+                        region: proj.location || coords.name || 'Laguna, Philippines',
+                        lat: coords.lat,
+                        lon: coords.lon,
+                        projectId: proj.id
+                      });
+                      setNotification(`📍 Synced weather station to: ${proj.name} • ${proj.location || coords.name} (${coords.lat.toFixed(4)}° N, ${coords.lon.toFixed(4)}° E)`);
+                      setTimeout(() => setNotification(null), 3500);
+                    }
+                  }}
+                  className="bg-transparent text-xs text-white focus:outline-none cursor-pointer pr-1 max-w-[190px] truncate font-semibold"
+                >
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id} className="bg-slate-950 text-white">
+                      {p.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             )}
+
+            {/* Custom City / Municipality Geocoding Search */}
+            <div className="relative">
+              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white w-44 sm:w-48">
+                <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                <input
+                  type="text"
+                  placeholder="Search municipality..."
+                  value={searchQuery}
+                  onChange={(e) => handleSearchLocation(e.target.value)}
+                  onFocus={() => { if (searchResults.length > 0) setShowSearchDropdown(true); }}
+                  className="bg-transparent text-xs text-white placeholder-slate-500 focus:outline-none w-full"
+                />
+                {isSearching && <RefreshCw className="w-3 h-3 animate-spin text-amber-400 shrink-0" />}
+              </div>
+
+              {/* Autocomplete Dropdown */}
+              {showSearchDropdown && searchResults.length > 0 && (
+                <div className="absolute top-full left-0 mt-1 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+                  {searchResults.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => handleSelectSearchResult(item)}
+                      className="w-full text-left px-3 py-2 text-xs text-slate-200 hover:bg-amber-500 hover:text-slate-950 transition flex flex-col cursor-pointer border-b border-slate-800 last:border-0"
+                    >
+                      <span className="font-bold">{item.name}</span>
+                      <span className="text-[10px] opacity-75">{[item.admin1, item.country].filter(Boolean).join(', ')} ({item.latitude?.toFixed(2)}°, {item.longitude?.toFixed(2)}°)</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Device GPS Auto-Detect Button */}
+            <button
+              type="button"
+              onClick={handleUseDeviceGPS}
+              disabled={isGpsLocating}
+              className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+              title="Auto-detect current coordinates using Device GPS"
+            >
+              <LocateFixed className={`w-3.5 h-3.5 ${isGpsLocating ? 'animate-spin text-amber-400' : 'text-emerald-400'}`} />
+              <span className="hidden sm:inline">{isGpsLocating ? 'Locating...' : 'Device GPS'}</span>
+            </button>
           </div>
 
-          {/* Work Suspended (Force Majeure) Toggle Button */}
-          <button
-            type="button"
-            onClick={handleToggleForceMajeure}
-            className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
-              isForceMajeureSuspended
-                ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400 shadow-lg shadow-rose-600/30'
-                : 'bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border-rose-800'
-            }`}
-            title="Toggle Work Stoppage due to Severe Weather (Force Majeure)"
-          >
-            <ShieldAlert className={`w-3.5 h-3.5 ${isForceMajeureSuspended ? 'animate-bounce text-amber-300' : 'text-rose-400'}`} />
-            <span className="truncate">{isForceMajeureSuspended ? 'Force Majeure: SUSPENDED' : 'Force Majeure Stop'}</span>
-          </button>
+          {/* Right Group: Operational & Safety Controls */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Work Suspended (Force Majeure) Toggle Button */}
+            <button
+              type="button"
+              onClick={handleToggleForceMajeure}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
+                isForceMajeureSuspended
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400 shadow-lg shadow-rose-600/30'
+                  : 'bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border-rose-800'
+              }`}
+              title="Toggle Work Stoppage due to Severe Weather (Force Majeure)"
+            >
+              <ShieldAlert className={`w-3.5 h-3.5 ${isForceMajeureSuspended ? 'animate-bounce text-amber-300' : 'text-rose-400'}`} />
+              <span className="truncate">{isForceMajeureSuspended ? 'Force Majeure: SUSPENDED' : 'Force Majeure Stop'}</span>
+            </button>
 
+            {/* Manual Fallback Mode Toggle */}
+            <button
+              type="button"
+              onClick={() => setIsManualOverride(prev => !prev)}
+              className={`px-2.5 py-1.5 rounded-xl text-xs transition-colors border flex items-center gap-1.5 cursor-pointer ${
+                isManualOverride
+                  ? 'bg-amber-500/20 border-amber-500 text-amber-300'
+                  : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
+              }`}
+              title="Toggle Manual Site Weather Fallback"
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span>{isManualOverride ? 'Manual ON' : 'Manual Fallback'}</span>
+            </button>
 
-
-          {/* Manual Fallback Mode Toggle */}
-          <button
-            onClick={() => setIsManualOverride(prev => !prev)}
-            className={`p-2 rounded-xl text-xs transition-colors border flex items-center gap-1.5 cursor-pointer ${
-              isManualOverride
-                ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                : 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-            }`}
-            title="Toggle Manual Site Weather Fallback"
-          >
-            <SlidersHorizontal className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">{isManualOverride ? 'Manual Override ON' : 'Manual Fallback'}</span>
-          </button>
-
-          {/* Refresh Button with fresh=true upstream sync */}
-          <button
-            onClick={() => fetchWeather(false, true)}
-            disabled={isLoading}
-            className="p-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-300 hover:text-white rounded-xl text-xs transition-colors border border-slate-700 flex items-center gap-1 cursor-pointer"
-            title="Fetch Fresh Sensor Data Upstream"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoading || isSilentSyncing ? 'animate-spin text-amber-400' : ''}`} />
-            <span className="hidden sm:inline">Refresh</span>
-          </button>
-
-          {/* Export CSV Button */}
-          <button
-            onClick={handleExportCSV}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-xl text-xs transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer"
-            title="Export Site Diary as CSV"
-          >
-            <Download className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden sm:inline">Export CSV</span>
-          </button>
-
-          {/* Log Weather Observation Modal Trigger */}
-          <button
-            onClick={() => setIsModalOpen(true)}
-            className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer transition-all"
-          >
-            <Plus className="w-4 h-4" />
-            <span>Log Weather Record</span>
-          </button>
+            {/* Refresh Button with fresh=true upstream sync */}
+            <button
+              type="button"
+              onClick={() => fetchWeather(false, true)}
+              disabled={isLoading}
+              className="p-1.5 px-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-slate-300 hover:text-white rounded-xl text-xs transition-colors border border-slate-700 flex items-center gap-1 cursor-pointer"
+              title="Fetch Fresh Sensor Data Upstream"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isLoading || isSilentSyncing ? 'animate-spin text-amber-400' : ''}`} />
+              <span className="hidden sm:inline">Refresh</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1431,29 +1511,22 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                       </span>
                     )}
                   </div>
-                </div>
-              </div>
 
-              {/* Right Side: Live PHT Clock & Streaming Telemetry Sync */}
-              <div className="text-left lg:text-right text-xs space-y-1">
-                <div className="flex items-center gap-1.5 lg:justify-end text-amber-400 font-mono font-bold text-sm">
-                  <Clock className="w-4 h-4 animate-pulse text-amber-400" />
-                  <span>{phtClock || 'PHT Live Clock'}</span>
-                  <span className="text-[10px] text-slate-500 font-normal">PHT (GMT+8)</span>
-                </div>
-
-                <div className="flex items-center gap-1.5 lg:justify-end text-[11px] font-mono">
-                  <span className={`w-2 h-2 rounded-full ${isSilentSyncing ? 'bg-amber-400 animate-spin' : isAutoSyncActive ? 'bg-emerald-400 animate-ping' : 'bg-slate-500'}`} />
-                  <span className={isAutoSyncActive ? 'text-emerald-400 font-semibold' : 'text-slate-400'}>
-                    {isSilentSyncing ? 'Streaming fresh sensors...' : isAutoSyncActive ? `Live Synced (${secondsAgo}s ago)` : 'Auto-Sync Paused'}
-                  </span>
-                  {isAutoSyncActive && (
-                    <span className="text-slate-500 text-[10px]">({syncCountdown}s)</span>
-                  )}
-                </div>
-
-                <div className="text-[10px] text-slate-500 font-mono">
-                  Station: {lastFetched ? lastFetched.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Syncing...'} • {selectedLocation.lat}°N, {selectedLocation.lon}°E
+                  {/* Project Site Location & Exact GPS Coordinates Badge */}
+                  <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-400 flex-wrap">
+                    <span className="flex items-center gap-1 font-medium text-emerald-400">
+                      <MapPin className="w-3.5 h-3.5 shrink-0" />
+                      <span className="truncate max-w-sm sm:max-w-md">{selectedLocation.region || selectedLocation.name}</span>
+                    </span>
+                    <span className="text-slate-600">•</span>
+                    <span className="font-mono text-[11px] text-slate-300">
+                      GPS: {selectedLocation.lat.toFixed(4)}° N, {selectedLocation.lon.toFixed(4)}° E
+                    </span>
+                    <span className="text-slate-600">•</span>
+                    <span className="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded font-mono font-semibold">
+                      Site Synced
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -2043,14 +2116,12 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                     onChange={(e) => {
                       const cond = e.target.value as any;
                       setManualCondition(cond);
-                      const code = cond === 'SUNNY' ? 0 : cond === 'OVERCAST' ? 3 : cond === 'RAINY' ? 61 : 95;
-                      setLiveWeather(prev => prev ? { ...prev, weatherCode: code } : null);
                     }}
                     className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
                   >
                     <option value="SUNNY">Clear Sky</option>
                     <option value="OVERCAST">Overcast</option>
-                    <option value="RAINY">Light Rain</option>
+                    <option value="RAINY">Light Rain / Drizzle</option>
                     <option value="STORM">Heavy Rain / Suspended</option>
                   </select>
                 </div>
@@ -2058,14 +2129,11 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                   <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Ambient Temp (°C)</label>
                   <input
                     type="number"
+                    step="0.1"
                     min={10}
                     max={45}
                     value={manualTemp}
-                    onChange={(e) => {
-                      const val = Number(e.target.value);
-                      setManualTemp(val);
-                      setLiveWeather(prev => prev ? { ...prev, temperature: val, apparentTemperature: val + 1 } : null);
-                    }}
+                    onChange={(e) => setManualTemp(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none font-mono"
                   />
                 </div>
@@ -2075,10 +2143,10 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                 <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Supervisor / Observer Name</label>
                 <input
                   type="text"
-                  required
+                  placeholder="Enter supervisor / observer name..."
                   value={observerName}
                   onChange={(e) => setObserverName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none placeholder:text-slate-500"
                 />
               </div>
 

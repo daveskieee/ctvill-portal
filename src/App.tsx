@@ -15,6 +15,14 @@ import LandingPage from './components/LandingPage';
 import LoginPortal from './components/LoginPortal';
 import AdminPortal from './components/AdminPortal';
 import LoadingScreen from './components/LoadingScreen';
+import { 
+  getStoredSession, 
+  saveStoredSession, 
+  updateStoredSession, 
+  clearStoredSession, 
+  SESSION_INACTIVITY_LIMIT_MS 
+} from './utils/session';
+import { useInactivityTimeout } from './hooks/useInactivityTimeout';
 
 export default function App() {
   // --- DATABASE STATE MODULES ---
@@ -53,6 +61,7 @@ export default function App() {
   // UserSession = Active logged-in role Dashboard
   const [session, setSession] = useState<UserSession | 'login' | null>(null);
   const [urlInviteToken, setUrlInviteToken] = useState<string | null>(null);
+  const [sessionExpiryNotice, setSessionExpiryNotice] = useState<string | null>(null);
 
   // Loading & Animation transition state
   const [loadingState, setLoadingState] = useState<{
@@ -65,9 +74,23 @@ export default function App() {
     pendingSession: null,
   });
 
+  // Global Initial Loading State for Skeleton Loaders
+  const [isInitialLoading, setIsInitialLoading] = useState<boolean>(true);
+
   // SSE reconnect ref
   const sseRef = useRef<EventSource | null>(null);
   const sseReconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Enterprise Inactivity Auto-Logout (30 min idle threshold)
+  useInactivityTimeout({
+    isLoggedIn: typeof session === 'object' && session !== null,
+    timeoutMs: SESSION_INACTIVITY_LIMIT_MS,
+    onTimeout: () => {
+      clearStoredSession();
+      setSession(null);
+      setSessionExpiryNotice('Your session has ended after 30 minutes of inactivity for security compliance. Please sign in again.');
+    },
+  });
 
   // --- URL TOKEN INSPECTOR & PERSISTENCE RESTORER ---
   useEffect(() => {
@@ -78,45 +101,64 @@ export default function App() {
         setUrlInviteToken(token);
         setSession('login');
       } else {
-        const saved = localStorage.getItem('xyz_pm_user_session') || localStorage.getItem('xyz_erp_user_session');
-        if (saved) {
-          try {
-            const parsed = JSON.parse(saved);
-            setSession(parsed);
+        const validatedSession = getStoredSession();
+        if (validatedSession) {
+          setSession(validatedSession);
 
-            // Re-sync with latest PostgreSQL database profile in background
-            const q = parsed.id ? `?userId=${encodeURIComponent(parsed.id)}` : parsed.email ? `?email=${encodeURIComponent(parsed.email)}` : '';
-            fetch(`/api/auth/profile${q}`)
-              .then(res => res.ok ? res.json() : null)
-              .then(data => {
-                if (data?.profile) {
-                  const p = data.profile;
-                  setSession(prev => {
-                    if (typeof prev === 'object' && prev !== null) {
-                      const updated = {
-                        ...prev,
-                        name: p.name || prev.name,
-                        email: p.email || prev.email,
-                        avatarUrl: p.avatarUrl !== undefined ? p.avatarUrl : prev.avatarUrl,
-                        title: p.title || prev.title,
-                        phone: p.contact || prev.phone,
-                        division: p.division || prev.division,
-                      };
-                      localStorage.setItem('xyz_pm_user_session', JSON.stringify(updated));
-                      return updated;
-                    }
-                    return prev;
-                  });
-                }
-              })
-              .catch(() => {});
-          } catch {
-            localStorage.removeItem('xyz_pm_user_session');
-            localStorage.removeItem('xyz_erp_user_session');
-          }
+          // Re-sync with latest PostgreSQL database profile in background
+          const q = validatedSession.id ? `?userId=${encodeURIComponent(validatedSession.id)}` : validatedSession.email ? `?email=${encodeURIComponent(validatedSession.email)}` : '';
+          fetch(`/api/auth/profile${q}`)
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+              if (data?.profile) {
+                const p = data.profile;
+                setSession(prev => {
+                  if (typeof prev === 'object' && prev !== null) {
+                    const updated = {
+                      ...prev,
+                      name: p.name || prev.name,
+                      email: p.email || prev.email,
+                      avatarUrl: p.avatarUrl !== undefined ? p.avatarUrl : prev.avatarUrl,
+                      title: p.title || prev.title,
+                      phone: p.contact || prev.phone,
+                      division: p.division || prev.division,
+                    };
+                    updateStoredSession(updated);
+                    return updated;
+                  }
+                  return prev;
+                });
+              }
+            })
+            .catch(() => {});
+        } else {
+          clearStoredSession();
         }
       }
     }
+  }, []);
+
+  // ============================================================================
+  // UNIFIED CLIENT-SIDE DELETION TOMBSTONE REGISTRY
+  // Prevents deleted items from flickering or reappearing due to in-flight queries,
+  // SSE broadcasts, or backend cache race conditions.
+  // ============================================================================
+  const recentlyDeletedIdsRef = useRef<Map<string, number>>(new Map());
+
+  const tombstoneId = useCallback((id: string, ttlMs = 15000) => {
+    if (!id) return;
+    recentlyDeletedIdsRef.current.set(String(id), Date.now() + ttlMs);
+  }, []);
+
+  const isTombstoned = useCallback((id: string) => {
+    if (!id) return false;
+    const exp = recentlyDeletedIdsRef.current.get(String(id));
+    if (!exp) return false;
+    if (Date.now() > exp) {
+      recentlyDeletedIdsRef.current.delete(String(id));
+      return false;
+    }
+    return true;
   }, []);
 
   // ============================================================================
@@ -127,30 +169,42 @@ export default function App() {
   const fetchClients = useCallback(async () => {
     try {
       const res = await fetch('/api/clients');
-      if (res.ok) setClients(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setClients(Array.isArray(data) ? data.filter((c: any) => !isTombstoned(c.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchSlots = useCallback(async () => {
     try {
       const res = await fetch('/api/slots');
-      if (res.ok) setSlots(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setSlots(Array.isArray(data) ? data.filter((s: any) => !isTombstoned(s.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchPunchLists = useCallback(async () => {
     try {
       const res = await fetch('/api/punch-lists');
-      if (res.ok) setPunchListDefects(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setPunchListDefects(Array.isArray(data) ? data.filter((d: any) => !isTombstoned(d.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchCivilMilestones = useCallback(async () => {
     try {
       const res = await fetch('/api/civil-milestones');
-      if (res.ok) setCivilWorksMilestones(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setCivilWorksMilestones(Array.isArray(data) ? data.filter((m: any) => !isTombstoned(m.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchAuditLogs = useCallback(async () => {
     try {
@@ -162,120 +216,160 @@ export default function App() {
   const fetchPayroll = useCallback(async () => {
     try {
       const res = await fetch('/api/payroll-records');
-      if (res.ok) setPayroll(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setPayroll(Array.isArray(data) ? data.filter((p: any) => !isTombstoned(p.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchTasks = useCallback(async () => {
     try {
       const res = await fetch('/api/tasks-list');
-      if (res.ok) setTasks(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setTasks(Array.isArray(data) ? data.filter((t: any) => !isTombstoned(t.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchContractors = useCallback(async () => {
     try {
       const res = await fetch('/api/contractors-list');
-      if (res.ok) setContractors(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setContractors(Array.isArray(data) ? data.filter((c: any) => !isTombstoned(c.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchDocuments = useCallback(async () => {
     try {
       const res = await fetch('/api/documents');
-      if (res.ok) setDocuments(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setDocuments(Array.isArray(data) ? data.filter((d: any) => !isTombstoned(d.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchSiteLogs = useCallback(async () => {
     try {
       const res = await fetch('/api/site-logs');
-      if (res.ok) setSiteLogs(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setSiteLogs(Array.isArray(data) ? data.filter((l: any) => !isTombstoned(l.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchPermits = useCallback(async () => {
     try {
       const res = await fetch('/api/permits');
-      if (res.ok) setPermits(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setPermits(Array.isArray(data) ? data.filter((p: any) => !isTombstoned(p.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchSchedule = useCallback(async () => {
     try {
       const res = await fetch('/api/schedule');
-      if (res.ok) setScheduleEvents(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setScheduleEvents(Array.isArray(data) ? data.filter((e: any) => !isTombstoned(e.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchProjects = useCallback(async () => {
     try {
       const res = await fetch('/api/projects');
-      if (res.ok) setProjects(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setProjects(Array.isArray(data) ? data.filter((p: any) => !isTombstoned(p.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchExtendedPayroll = useCallback(async () => {
     try {
       const res = await fetch('/api/extended-payroll');
-      if (res.ok) setExtendedPayroll(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setExtendedPayroll(Array.isArray(data) ? data.filter((ep: any) => !isTombstoned(ep.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchChangeOrders = useCallback(async () => {
     try {
       const res = await fetch('/api/change-orders');
-      if (res.ok) setChangeOrders(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setChangeOrders(Array.isArray(data) ? data.filter((co: any) => !isTombstoned(co.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchRfis = useCallback(async () => {
     try {
       const res = await fetch('/api/rfis');
-      if (res.ok) setRfis(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setRfis(Array.isArray(data) ? data.filter((r: any) => !isTombstoned(r.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   const fetchQuotations = useCallback(async () => {
     try {
       const res = await fetch('/api/quotations');
-      if (res.ok) setQuotations(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        setQuotations(Array.isArray(data) ? data.filter((q: any) => !isTombstoned(q.id)) : []);
+      }
     } catch { /* silent */ }
-  }, []);
+  }, [isTombstoned]);
 
   // --- PERSISTENCE STATE SYNCHRONIZER (FETCH FROM DB) ---
-  // Used for initial page load only. After that, SSE + granular fetches handle updates.
-  const reloadAllData = async () => {
+  // Used for initial page load and manual refreshes.
+  const reloadAllData = async (isManualRefresh = false) => {
+    if (isManualRefresh) setIsInitialLoading(true);
     try {
-      const res = await fetch('/api/all-data');
+      const url = isManualRefresh ? '/api/all-data?nocache=true' : '/api/all-data';
+      const res = await fetch(url);
       if (!res.ok) throw new Error('API fetch failed');
       const data = await res.json();
-      setParcels(data.parcels || []);
-      setSlots(data.slots || []);
-      setClients(data.clients || []);
-      setContractors(data.contractors || []);
+      setParcels((data.parcels || []).filter((p: any) => !isTombstoned(p.id)));
+      setSlots((data.slots || []).filter((s: any) => !isTombstoned(s.id)));
+      setClients((data.clients || []).filter((c: any) => !isTombstoned(c.id)));
+      setContractors((data.contractors || []).filter((c: any) => !isTombstoned(c.id)));
       setQaLogs(data.qaLogs || []);
-      setPunchListDefects(data.punchListDefects || []);
-      setCivilWorksMilestones(data.civilWorksMilestones || []);
+      setPunchListDefects((data.punchListDefects || []).filter((d: any) => !isTombstoned(d.id)));
+      setCivilWorksMilestones((data.civilWorksMilestones || []).filter((m: any) => !isTombstoned(m.id)));
       setAuditLogs(data.auditLogs || []);
-      setPayroll(data.payroll || []);
+      setPayroll((data.payroll || []).filter((p: any) => !isTombstoned(p.id)));
       setBudget(data.budget || null);
       setManpowerAudits(data.manpowerAudits || []);
       setLaborAllocations(data.laborAllocations || []);
       setAiRecommendations(data.aiRecommendations || []);
-      setTasks(data.tasks || []);
-      setSiteLogs(data.siteLogs || []);
-      setDocuments(data.documents || []);
-      setRisks(data.risks || []);
-      setChangeOrders(data.changeOrders || []);
-      setRfis(data.rfis || []);
-      setQuotations(data.quotations || []);
-      setPermits(data.permits || []);
-      setScheduleEvents(data.scheduleEvents || []);
-      setProjects(data.projects || []);
-      setExtendedPayroll(data.extendedPayroll || []);
+      setTasks((data.tasks || []).filter((t: any) => !isTombstoned(t.id)));
+      setSiteLogs((data.siteLogs || []).filter((l: any) => !isTombstoned(l.id)));
+      setDocuments((data.documents || []).filter((d: any) => !isTombstoned(d.id)));
+      setRisks((data.risks || []).filter((r: any) => !isTombstoned(r.id)));
+      setChangeOrders((data.changeOrders || []).filter((co: any) => !isTombstoned(co.id)));
+      setRfis((data.rfis || []).filter((r: any) => !isTombstoned(r.id)));
+      setQuotations((data.quotations || []).filter((q: any) => !isTombstoned(q.id)));
+      setPermits((data.permits || []).filter((p: any) => !isTombstoned(p.id)));
+      setScheduleEvents((data.scheduleEvents || []).filter((e: any) => !isTombstoned(e.id)));
+      setProjects((data.projects || []).filter((p: any) => !isTombstoned(p.id)));
+      setExtendedPayroll((data.extendedPayroll || []).filter((ep: any) => !isTombstoned(ep.id)));
     } catch (err) {
       console.error('Failed to load data from database:', err);
+    } finally {
+      setIsInitialLoading(false);
     }
   };
 
@@ -355,7 +449,8 @@ export default function App() {
 
   // --- SESSION AUTH TRANSITIONS WITH ANIMATION ---
   const handleInitiateLogin = (targetSession: UserSession) => {
-    localStorage.setItem('xyz_pm_user_session', JSON.stringify(targetSession));
+    saveStoredSession(targetSession);
+    setSessionExpiryNotice(null);
     setLoadingState({
       active: true,
       mode: 'login',
@@ -364,8 +459,8 @@ export default function App() {
   };
 
   const handleInitiateLogout = () => {
-    localStorage.removeItem('xyz_pm_user_session');
-    localStorage.removeItem('xyz_erp_user_session');
+    clearStoredSession();
+    setSessionExpiryNotice(null);
     const currentSession = typeof session === 'object' && session !== null ? session : null;
     setLoadingState({
       active: true,
@@ -378,7 +473,7 @@ export default function App() {
     setSession(prev => {
       if (typeof prev === 'object' && prev !== null) {
         const merged = { ...prev, ...updated };
-        localStorage.setItem('xyz_pm_user_session', JSON.stringify(merged));
+        updateStoredSession(merged);
         return merged;
       }
       return prev;
@@ -458,6 +553,7 @@ export default function App() {
 
   // 3.5. Delete Buyer Account
   const handleDeleteClient = async (clientId: string) => {
+    tombstoneId(clientId);
     // Optimistic: remove immediately
     const removedClient = clients.find(c => c.id === clientId);
     setClients(prev => prev.filter(c => c.id !== clientId));
@@ -780,6 +876,7 @@ export default function App() {
   };
 
   const handleDeleteContractor = useCallback(async (contractorId: string) => {
+    tombstoneId(contractorId);
     // Optimistic: remove immediately
     setContractors(prev => prev.filter(c => c.id !== contractorId));
     try {
@@ -795,7 +892,7 @@ export default function App() {
       fetchContractors();
       console.error('Error deleting contractor/worker:', err);
     }
-  }, [fetchContractors]);
+  }, [fetchContractors, tombstoneId]);
 
   const handleUpdateContractors = useCallback(async (updated: Contractor[]) => {
     // Optimistic: apply all changes immediately
@@ -881,7 +978,7 @@ export default function App() {
       });
       if (res.ok) {
         const newAudit = await res.json();
-        setManpowerAudits(prev => [newAudit, ...prev]);
+        setManpowerAudits(prev => [newAudit, ...prev.filter(a => a.id !== newAudit.id)]);
         setContractors(prev => prev.map(c => c.id === auditData.contractorId ? { ...c, activeManpower: Number(auditData.verifiedHeadcount) } : c));
       } else {
         // Fallback: add locally
@@ -896,7 +993,7 @@ export default function App() {
           verifiedHeadcount: Number(auditData.verifiedHeadcount || 0),
           discrepancy: Number(auditData.claimedHeadcount || 0) - Number(auditData.verifiedHeadcount || 0),
           assignedSectorOrLot: auditData.assignedSectorOrLot,
-          supervisorName: auditData.supervisorName || 'Engr. Ricardo Gomez',
+          supervisorName: auditData.supervisorName || 'Site Supervisor',
           gpsCoordinates: auditData.gpsCoordinates || '14.2789° N, 121.1245° E (NexBridge Commercial Site)',
           verificationStatus: (Number(auditData.claimedHeadcount || 0) - Number(auditData.verifiedHeadcount || 0)) === 0 ? 'VERIFIED_MATCH' : 'DISCREPANCY_FLAGGED',
           photoEvidenceVerified: true,
@@ -908,6 +1005,27 @@ export default function App() {
       }
     } catch (err) {
       console.error('Error logging manpower audit:', err);
+      // Fallback: add locally on exception
+      const newAudit: DailyManpowerAudit = {
+        id: `AUD-${Date.now()}`,
+        date: new Date().toISOString().split('T')[0],
+        contractorId: auditData.contractorId,
+        contractorName: auditData.contractorName,
+        specialty: auditData.specialty,
+        shift: auditData.shift || 'Morning',
+        claimedHeadcount: Number(auditData.claimedHeadcount || 0),
+        verifiedHeadcount: Number(auditData.verifiedHeadcount || 0),
+        discrepancy: Number(auditData.claimedHeadcount || 0) - Number(auditData.verifiedHeadcount || 0),
+        assignedSectorOrLot: auditData.assignedSectorOrLot,
+        supervisorName: auditData.supervisorName || 'Site Supervisor',
+        gpsCoordinates: auditData.gpsCoordinates || '14.2789° N, 121.1245° E (NexBridge Commercial Site)',
+        verificationStatus: (Number(auditData.claimedHeadcount || 0) - Number(auditData.verifiedHeadcount || 0)) === 0 ? 'VERIFIED_MATCH' : 'DISCREPANCY_FLAGGED',
+        photoEvidenceVerified: true,
+        remarks: auditData.remarks || '',
+        productivityIndex: Number(auditData.productivityIndex || 90)
+      };
+      setManpowerAudits(prev => [newAudit, ...prev]);
+      setContractors(prev => prev.map(c => c.id === auditData.contractorId ? { ...c, activeManpower: Number(auditData.verifiedHeadcount) } : c));
     }
   };
 
@@ -1059,6 +1177,18 @@ export default function App() {
   };
 
   const handleAddTask = async (taskData: Omit<ProjectTask, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const tempId = `task-opt-${Date.now()}`;
+    const optimisticTask: ProjectTask = {
+      id: tempId,
+      ...taskData,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      subtasks: taskData.subtasks || [],
+      tags: taskData.tags || []
+    } as ProjectTask;
+
+    setTasks(prev => [optimisticTask, ...prev]);
+
     try {
       const res = await fetch('/api/tasks', {
         method: 'POST',
@@ -1067,22 +1197,36 @@ export default function App() {
       });
       if (res.ok) {
         const newTask = await res.json();
-        setTasks(prev => [{ ...newTask, subtasks: newTask.subtasksJson ? JSON.parse(newTask.subtasksJson) : [], tags: newTask.tags ? newTask.tags.split(',') : [] }, ...prev]);
+        const parsedNewTask = {
+          ...newTask,
+          subtasks: newTask.subtasksJson ? JSON.parse(newTask.subtasksJson) : (newTask.subtasks || []),
+          tags: newTask.tags ? (typeof newTask.tags === 'string' ? newTask.tags.split(',') : newTask.tags) : []
+        };
+        setTasks(prev => prev.map(t => t.id === tempId ? parsedNewTask : t));
+      } else {
+        setTasks(prev => prev.filter(t => t.id !== tempId));
       }
     } catch (e) {
+      setTasks(prev => prev.filter(t => t.id !== tempId));
       console.error('Failed to create task:', e);
     }
   };
 
   const handleUpdateTaskStatus = async (taskId: string, status: TaskStatus) => {
-    // Optimistic: update immediately
+    // Optimistic: update immediately with synchronized progress
     const prevTask = tasks.find(t => t.id === taskId);
-    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status } : t)));
+    const newProgress = status === 'COMPLETED' 
+      ? 1.0 
+      : status === 'IN_PROGRESS' 
+      ? (prevTask?.progress && prevTask.progress > 0 ? prevTask.progress : 0.5) 
+      : (status === 'TODO' || status === 'BACKLOG' ? 0.0 : prevTask?.progress ?? 0);
+
+    setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status, progress: newProgress } : t)));
     try {
       const res = await fetch(`/api/tasks/${taskId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify({ status, progress: newProgress }),
       });
       if (!res.ok && prevTask) {
         setTasks(prev => prev.map(t => t.id === taskId ? prevTask : t));
@@ -1094,6 +1238,7 @@ export default function App() {
   };
 
   const handleDeleteTask = async (taskId: string) => {
+    tombstoneId(taskId);
     // Optimistic: remove immediately
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
     try {
@@ -1170,11 +1315,10 @@ export default function App() {
   };
 
   const handleDeleteDocument = async (id: string) => {
+    tombstoneId(id);
+    setDocuments(prev => prev.filter(d => d.id !== id));
     try {
-      const res = await fetch(`/api/documents/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setDocuments(prev => prev.filter(d => d.id !== id));
-      }
+      await fetch(`/api/documents/${id}`, { method: 'DELETE' });
     } catch (e) {
       console.error('Failed to delete document:', e);
     }
@@ -1197,6 +1341,7 @@ export default function App() {
   };
 
   const handleDeleteParcel = async (parcelId: string) => {
+    tombstoneId(parcelId);
     const prevParcel = parcels.find(p => p.id === parcelId);
     setParcels(prev => prev.filter(p => p.id !== parcelId));
     try {
@@ -1259,70 +1404,173 @@ export default function App() {
   };
 
   const handleAddPermit = async (permitData: Partial<GovernmentPermit>) => {
-    const res = await fetch('/api/permits', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(permitData)
-    });
-    if (!res.ok) throw new Error('Failed to file permit');
-    await fetchPermits();
-    await fetchAuditLogs();
+    const tempId = `permit-opt-${Date.now()}`;
+    const optimisticPermit: GovernmentPermit = {
+      id: tempId,
+      projectId: permitData.projectId || '',
+      projectName: permitData.projectName || 'Commercial Fit-Out',
+      permitName: permitData.permitName || 'Government Clearance',
+      permitType: permitData.permitType || 'Building Permit',
+      issuingAgency: permitData.issuingAgency || 'LGU City Engineering Office',
+      referenceNo: permitData.referenceNo || `REF-${Date.now()}`,
+      status: (permitData.status as any) || 'PENDING',
+      applicationDate: permitData.applicationDate || new Date().toISOString().split('T')[0],
+      approvalDate: permitData.approvalDate || null,
+      expiryDate: permitData.expiryDate || null,
+      notes: permitData.notes || '',
+      documentUrl: permitData.documentUrl || '',
+      createdAt: new Date().toISOString(),
+      ...permitData
+    };
+
+    // Instant optimistic update (0ms UI latency)
+    setPermits(prev => [optimisticPermit, ...prev]);
+
+    try {
+      const res = await fetch('/api/permits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(permitData)
+      });
+      if (res.ok) {
+        const created = await res.json();
+        if (created && created.id) {
+          setPermits(prev => prev.map(p => p.id === tempId ? created : p));
+        }
+      } else {
+        setPermits(prev => prev.filter(p => p.id !== tempId));
+      }
+    } catch (err) {
+      setPermits(prev => prev.filter(p => p.id !== tempId));
+      console.error('Failed to file permit:', err);
+    }
   };
 
   const handleUpdatePermitStatus = async (permitId: string, status: any, notes?: string) => {
-    const res = await fetch(`/api/permits/${permitId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, notes })
-    });
-    if (!res.ok) throw new Error('Failed to update permit');
-    await fetchPermits();
+    setPermits(prev => prev.map(p => p.id === permitId ? { ...p, status, notes: notes || p.notes } : p));
+    try {
+      await fetch(`/api/permits/${permitId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, notes })
+      });
+    } catch (err) {
+      console.error('Failed to update permit status:', err);
+    }
   };
 
   const handleDeletePermit = async (permitId: string) => {
-    const res = await fetch(`/api/permits/${permitId}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Failed to delete permit');
-    await fetchPermits();
+    tombstoneId(permitId);
+    setPermits(prev => prev.filter(p => p.id !== permitId));
+    try {
+      await fetch(`/api/permits/${permitId}`, { method: 'DELETE' });
+    } catch (err) {
+      console.error('Failed to delete permit:', err);
+    }
   };
 
   const handleAddScheduleEvent = async (eventData: Partial<ScheduleEvent>) => {
-    const res = await fetch('/api/schedule', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(eventData)
-    });
-    if (!res.ok) throw new Error('Failed to create schedule event');
-    await fetchSchedule();
-    await fetchAuditLogs();
+    const tempId = `event-opt-${Date.now()}`;
+    const optimisticEvent: ScheduleEvent = {
+      id: tempId,
+      title: eventData.title || 'Construction Milestone',
+      description: eventData.description || '',
+      eventType: eventData.eventType || 'MILESTONE',
+      eventDate: eventData.eventDate || new Date().toISOString().split('T')[0],
+      startTime: eventData.startTime || '08:00',
+      endTime: eventData.endTime || '17:00',
+      location: eventData.location || 'Commercial Site',
+      organizerName: eventData.organizerName || 'Engr. Ricardo Gomez',
+      participants: eventData.participants || 'Site Engineering Team',
+      status: eventData.status || 'SCHEDULED',
+      createdAt: new Date().toISOString(),
+      ...eventData
+    };
+
+    // Instant optimistic update (0ms UI latency)
+    setScheduleEvents(prev => [...prev, optimisticEvent]);
+
+    try {
+      const res = await fetch('/api/schedule', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(eventData)
+      });
+      if (res.ok) {
+        const created = await res.json();
+        if (created && created.id) {
+          setScheduleEvents(prev => prev.map(e => e.id === tempId ? created : e));
+        }
+      } else {
+        setScheduleEvents(prev => prev.filter(e => e.id !== tempId));
+      }
+    } catch (err) {
+      setScheduleEvents(prev => prev.filter(e => e.id !== tempId));
+      console.error('Failed to create schedule event:', err);
+    }
   };
 
   const handleUpdatePermit = async (permitId: string, updates: Partial<GovernmentPermit>) => {
-    const res = await fetch(`/api/permits/${permitId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
-    if (!res.ok) throw new Error('Failed to update permit');
-    await fetchPermits();
+    setPermits(prev => prev.map(p => p.id === permitId ? { ...p, ...updates } : p));
+    try {
+      await fetch(`/api/permits/${permitId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+    } catch (err) {
+      console.error('Failed to update permit:', err);
+    }
   };
 
   const handleUpdateScheduleEvent = async (eventId: string, updates: Partial<ScheduleEvent>) => {
-    const res = await fetch(`/api/schedule/${eventId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(updates)
-    });
-    if (!res.ok) throw new Error('Failed to update schedule event');
-    await fetchSchedule();
+    setScheduleEvents(prev => prev.map(e => e.id === eventId ? { ...e, ...updates } : e));
+    try {
+      await fetch(`/api/schedule/${eventId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates)
+      });
+    } catch (err) {
+      console.error('Failed to update schedule event:', err);
+    }
   };
 
   const handleDeleteScheduleEvent = async (eventId: string) => {
-    const res = await fetch(`/api/schedule/${eventId}`, { method: 'DELETE' });
-    if (!res.ok) throw new Error('Failed to delete schedule event');
-    await fetchSchedule();
+    tombstoneId(eventId);
+    setScheduleEvents(prev => prev.filter(e => e.id !== eventId));
+    try {
+      await fetch(`/api/schedule/${eventId}`, { method: 'DELETE' });
+    } catch (err) {
+      console.error('Failed to delete schedule event:', err);
+    }
   };
 
   const handleCreateProject = async (projectData: Partial<ProjectProfile>) => {
+    const tempId = projectData.id || `proj-opt-${Date.now()}`;
+    const optimisticProject: ProjectProfile = {
+      id: tempId,
+      name: projectData.name || 'New Commercial Project',
+      clientName: projectData.clientName || 'Fit-Out Client',
+      description: projectData.description || '',
+      location: projectData.location || 'Metro Manila',
+      budget: Number(projectData.budget || 0),
+      fundsCollected: Number(projectData.fundsCollected || 0),
+      progressPercentage: 0,
+      status: 'PLANNING',
+      targetHandoverDate: projectData.targetHandoverDate || new Date(Date.now() + 90 * 86400000).toISOString().split('T')[0],
+      startDate: projectData.startDate || new Date().toISOString().split('T')[0],
+      assignedWorkersCount: 0,
+      tasksCount: 0,
+      milestonesCount: 0,
+      isPrivateAccounting: false,
+      weatherSuspended: false,
+      ...projectData
+    };
+
+    // Instant optimistic update (0ms UI latency)
+    setProjects(prev => [optimisticProject, ...prev]);
+
     try {
       const res = await fetch('/api/projects', {
         method: 'POST',
@@ -1331,12 +1579,14 @@ export default function App() {
       });
       if (res.ok) {
         const created = await res.json();
-        if (created && created.name) {
-          setProjects(prev => [created, ...prev.filter(p => p.id !== created.id)]);
+        if (created && created.id) {
+          setProjects(prev => prev.map(p => p.id === tempId ? created : p));
         }
-        await reloadAllData();
+      } else {
+        setProjects(prev => prev.filter(p => p.id !== tempId));
       }
     } catch (err) {
+      setProjects(prev => prev.filter(p => p.id !== tempId));
       console.error('Failed to create project:', err);
     }
   };
@@ -1362,17 +1612,37 @@ export default function App() {
   };
 
   const handleDeleteProject = async (id: string) => {
+    tombstoneId(id);
+    setProjects(prev => prev.filter(p => p.id !== id));
     try {
-      const res = await fetch(`/api/projects/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setProjects(prev => prev.filter(p => p.id !== id));
-      }
+      await fetch(`/api/projects/${id}`, { method: 'DELETE' });
     } catch (err) {
       console.error('Failed to delete project:', err);
     }
   };
 
   const handleAddExtendedPayroll = async (item: Partial<ExtendedPayrollItem>) => {
+    const tempId = `ep-opt-${Date.now()}`;
+    const optimisticEp: any = {
+      id: tempId,
+      workerName: item.workerName || 'Worker',
+      contractorCompany: item.contractorCompany || 'Contractor',
+      projectName: item.projectName || 'Project',
+      role: item.role || 'Skilled Artisan',
+      hoursWorked: item.hoursWorked || 0,
+      daysWorked: item.daysWorked || 0,
+      dailyRate: item.dailyRate || 0,
+      overtimeHours: item.overtimeHours || 0,
+      grossPay: item.grossPay || 0,
+      deductions: item.deductions || 0,
+      netPay: item.netPay || 0,
+      status: 'Pending',
+      paymentMethod: item.paymentMethod || 'Bank Transfer',
+      createdAt: new Date().toISOString(),
+      ...item
+    };
+    setExtendedPayroll(prev => [optimisticEp, ...prev]);
+
     try {
       const res = await fetch('/api/extended-payroll', {
         method: 'POST',
@@ -1381,14 +1651,20 @@ export default function App() {
       });
       if (res.ok) {
         const created = await res.json();
-        setExtendedPayroll(prev => [created, ...prev]);
+        if (created && created.id) {
+          setExtendedPayroll(prev => prev.map(p => p.id === tempId ? created : p));
+        }
+      } else {
+        setExtendedPayroll(prev => prev.filter(p => p.id !== tempId));
       }
     } catch (err) {
+      setExtendedPayroll(prev => prev.filter(p => p.id !== tempId));
       console.error('Failed to add payroll entry:', err);
     }
   };
 
   const handleUpdateExtendedPayroll = async (id: string, updates: Partial<ExtendedPayrollItem>) => {
+    setExtendedPayroll(prev => prev.map(p => p.id === id ? { ...p, ...updates } : p));
     try {
       const res = await fetch(`/api/extended-payroll/${id}`, {
         method: 'PATCH',
@@ -1405,17 +1681,32 @@ export default function App() {
   };
 
   const handleDeleteExtendedPayroll = async (id: string) => {
+    tombstoneId(id);
+    setExtendedPayroll(prev => prev.filter(p => p.id !== id));
     try {
-      const res = await fetch(`/api/extended-payroll/${id}`, { method: 'DELETE' });
-      if (res.ok) {
-        setExtendedPayroll(prev => prev.filter(p => p.id !== id));
-      }
+      await fetch(`/api/extended-payroll/${id}`, { method: 'DELETE' });
     } catch (err) {
       console.error('Failed to delete payroll entry:', err);
     }
   };
 
   const handleSubmitChangeOrder = async (order: Partial<ChangeOrder>) => {
+    const tempId = `co-opt-${Date.now()}`;
+    const optimisticCo: any = {
+      id: tempId,
+      orderNumber: order.orderNumber || `CO-${Date.now().toString().slice(-4)}`,
+      title: order.title || 'Change Request',
+      contractorName: order.contractorName || 'CTVill Construction Crew',
+      requestedAmount: Number(order.requestedAmount || 0),
+      approvedAmount: null,
+      status: 'PENDING',
+      justification: order.justification || '',
+      approvedBy: null,
+      createdAt: new Date().toISOString(),
+      ...order
+    };
+    setChangeOrders(prev => [optimisticCo, ...prev]);
+
     try {
       const res = await fetch('/api/change-orders', {
         method: 'POST',
@@ -1423,16 +1714,23 @@ export default function App() {
         body: JSON.stringify(order)
       });
       if (res.ok) {
-        fetchChangeOrders();
+        const created = await res.json();
+        if (created && created.id) {
+          setChangeOrders(prev => prev.map(c => c.id === tempId ? created : c));
+        }
+      } else {
+        setChangeOrders(prev => prev.filter(c => c.id !== tempId));
       }
     } catch (err) {
+      setChangeOrders(prev => prev.filter(c => c.id !== tempId));
       console.error('Failed to submit change order:', err);
     }
   };
 
   const handleUpdateChangeOrderStatus = async (id: string, status: 'APPROVED' | 'REJECTED', approvedAmount?: number) => {
+    setChangeOrders(prev => prev.map(c => c.id === id ? { ...c, status, approvedAmount: approvedAmount !== undefined ? approvedAmount : c.approvedAmount } : c));
     try {
-      const res = await fetch(`/api/change-orders/${id}`, {
+      await fetch(`/api/change-orders/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -1441,15 +1739,37 @@ export default function App() {
           approvedBy: (typeof session === 'object' && session?.name) ? session.name : 'Operations Director'
         })
       });
-      if (res.ok) {
-        fetchChangeOrders();
-      }
     } catch (err) {
       console.error('Failed to update change order status:', err);
     }
   };
 
   const handleSubmitRfi = async (rfi: Partial<ProjectRFI>) => {
+    const tempId = `rfi-opt-${Date.now()}`;
+    const optimisticRfi: any = {
+      id: tempId,
+      projectId: rfi.projectId || '',
+      projectName: rfi.projectName || 'Active Site',
+      rfiNumber: rfi.rfiNumber || `RFI-${Date.now().toString().slice(-4)}`,
+      subject: rfi.subject || 'Design Clarification',
+      question: rfi.question || '',
+      suggestedSolution: rfi.suggestedSolution || '',
+      assignedTo: rfi.assignedTo || 'Lead Architect',
+      priority: rfi.priority || 'MEDIUM',
+      status: 'OPEN',
+      dateSubmitted: new Date().toISOString(),
+      dateRequired: rfi.dateRequired || new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0],
+      officialAnswer: '',
+      answeredBy: '',
+      answeredAt: null,
+      drawingsAffected: rfi.drawingsAffected || '',
+      costImpactEstimated: Number(rfi.costImpactEstimated || 0),
+      scheduleImpactDays: Number(rfi.scheduleImpactDays || 0),
+      createdAt: new Date().toISOString(),
+      ...rfi
+    };
+    setRfis(prev => [optimisticRfi, ...prev]);
+
     try {
       const res = await fetch('/api/rfis', {
         method: 'POST',
@@ -1457,9 +1777,15 @@ export default function App() {
         body: JSON.stringify(rfi)
       });
       if (res.ok) {
-        fetchRfis();
+        const created = await res.json();
+        if (created && created.id) {
+          setRfis(prev => prev.map(r => r.id === tempId ? created : r));
+        }
+      } else {
+        setRfis(prev => prev.filter(r => r.id !== tempId));
       }
     } catch (err) {
+      setRfis(prev => prev.filter(r => r.id !== tempId));
       console.error('Failed to submit RFI:', err);
     }
   };
@@ -1518,18 +1844,7 @@ export default function App() {
   };
 
   const handleLogManpowerAudit = async (auditData: any) => {
-    try {
-      const res = await fetch('/api/manpower-audits', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(auditData)
-      });
-      if (res.ok) {
-        reloadAllData();
-      }
-    } catch (err) {
-      console.error('Failed to log daily manpower audit:', err);
-    }
+    await handleCreateManpowerAudit(auditData);
   };
 
   // --- RENDERING ROUTER ---
@@ -1638,6 +1953,8 @@ export default function App() {
           onLogManpowerAudit={handleLogManpowerAudit}
           onLogout={handleInitiateLogout}
           onUpdateSession={handleUpdateSession}
+          isInitialLoading={isInitialLoading}
+          onRefreshAllData={() => reloadAllData(true)}
         />
       );
 
@@ -1645,8 +1962,31 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col justify-between overflow-x-hidden relative select-none bg-slate-950">
+    <div className={`w-full relative bg-slate-950 ${
+      session && session !== 'login' 
+        ? 'h-screen h-[100dvh] overflow-hidden flex flex-col' 
+        : 'min-h-screen flex flex-col justify-between overflow-x-hidden'
+    }`}>
       
+      {/* Session Expiry Security Audit Banner */}
+      {sessionExpiryNotice && !session && (
+        <div className="bg-amber-950/95 border-b border-amber-600/50 text-amber-200 px-4 py-2.5 text-xs flex items-center justify-between z-50 animate-fadeIn backdrop-blur-md sticky top-0 shadow-lg shrink-0">
+          <div className="flex items-center gap-2.5 max-w-5xl mx-auto">
+            <span className="font-semibold uppercase tracking-wider text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded font-mono">
+              SECURITY AUDIT
+            </span>
+            <span className="font-medium text-amber-100">{sessionExpiryNotice}</span>
+          </div>
+          <button
+            onClick={() => setSessionExpiryNotice(null)}
+            className="text-amber-400 hover:text-white text-xs font-bold px-2 py-1 cursor-pointer transition-colors"
+            title="Dismiss notice"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Fullscreen Animated Loading/Transition Layer */}
       {loadingState.active && (
         <LoadingScreen
@@ -1663,7 +2003,7 @@ export default function App() {
         />
       )}
 
-      <div className="flex-1 w-full">
+      <div className={`w-full ${session && session !== 'login' ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-1'}`}>
         {renderActiveWorkspace()}
       </div>
     </div>

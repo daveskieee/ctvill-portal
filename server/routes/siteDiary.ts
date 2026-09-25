@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { Role } from '@prisma/client';
 import { prisma, pool } from '../db';
-import { broadcastChange } from '../events';
+import { broadcastChange, invalidateAllDataCache } from '../events';
 
 export const siteDiaryRouter = Router();
 
@@ -56,6 +56,7 @@ siteDiaryRouter.post('/site-logs', async (req: Request, res: Response) => {
 
     broadcastChange('siteLogs');
     broadcastChange('auditLogs');
+    invalidateAllDataCache();
     res.json(siteLog);
   } catch (error) {
     console.error('Error creating site log:', error);
@@ -265,6 +266,7 @@ siteDiaryRouter.post('/punch-lists', async (req: Request, res: Response) => {
 
     broadcastChange('punchLists');
     broadcastChange('auditLogs');
+    invalidateAllDataCache();
     res.json({
       id: defect.id,
       slotId: defect.slotId,
@@ -317,6 +319,7 @@ siteDiaryRouter.patch('/punch-lists/:id', async (req: Request, res: Response) =>
 
     broadcastChange('punchLists');
     broadcastChange('auditLogs');
+    invalidateAllDataCache();
     res.json({
       id: updated.id,
       slotId: updated.slotId,
@@ -399,6 +402,7 @@ siteDiaryRouter.post('/civil-works/update-milestone', async (req: Request, res: 
 
     broadcastChange('civilMilestones');
     broadcastChange('auditLogs');
+    invalidateAllDataCache();
     res.json({
       id: updated.id,
       parcelId: updated.parcelId,
@@ -500,6 +504,7 @@ siteDiaryRouter.post('/civil-works/sync-schedule', async (req: Request, res: Res
 
     broadcastChange('civilMilestones');
     broadcastChange('auditLogs');
+    invalidateAllDataCache();
 
     const updatedMilestones = await prisma.civilWorksMilestone.findMany({
       where: { parcelId: parcel.id },
@@ -553,6 +558,7 @@ siteDiaryRouter.post('/qa-logs', async (req: Request, res: Response) => {
 
     broadcastChange('qaLogs');
     broadcastChange('auditLogs');
+    invalidateAllDataCache();
     res.json({
       id: log.id,
       date: log.date.toISOString().split('T')[0],

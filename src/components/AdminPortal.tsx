@@ -3,10 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { 
-  Building2, Users, FileText, Settings2, BarChart3, PieChart, Landmark, ShieldCheck, 
+  Building2, Users, FileText, Settings2, BarChart3, PieChart, Landmark, ShieldCheck, Shield, Laptop,
   Search, Plus, Hammer, DollarSign, Calendar, Sliders, ChevronRight, ChevronLeft, ChevronDown, UserCheck, Trash2, 
   CheckCircle, FileBadge, Radio, Layers, ArrowRight, AlertTriangle, Clock, CheckCircle2,
   FileSpreadsheet, ClipboardList, MapPin, HardHat, CloudSun, FileCheck2, UserPlus, Eye, BadgeAlert,
@@ -14,7 +14,7 @@ import {
   Ticket, Award, Bot, RefreshCw, CheckCheck, Zap, SlidersHorizontal, Edit3, X, Smartphone,
   Mail, ExternalLink, Check, Copy, Send, Compass, UserCog, User, KeyRound, Bell, Building, Save, CheckSquare,
   Camera, Upload, Image as ImageIcon, EyeOff, Lock, CalendarDays, FileCheck, Briefcase, Lightbulb, ChevronUp,
-  Volume2, VolumeX, HelpCircle, CloudRain
+  Volume2, VolumeX, HelpCircle, CloudRain, LogOut
 } from 'lucide-react';
 import { 
   ResponsiveContainer, PieChart as RePieChart, Pie, Cell, 
@@ -26,8 +26,10 @@ import {
   LaborAllocation, AIManpowerRecommendation, ProjectTask, DailySiteLog, ProjectDocument, ProjectRisk, 
   ChangeOrder, TaskStatus, CADParsedLot, GovernmentPermit, ScheduleEvent,
   ProjectProfile, ExtendedPayrollItem, CTVillDepartment, CTVillRole,
-  ProjectRFI, FitoutQuotationItem
+  ProjectRFI, FitoutQuotationItem, WorkforceClassification, RegistrationEntityType,
+  isOfficeOrExecutive, isIndividualStaffOrEngineer
 } from '../types';
+import { updateStoredSession } from '../utils/session';
 import { 
   CTVILL_ORGANIZATION_HIERARCHY, ALL_CTVILL_DEPARTMENTS, 
   getRolesForDepartment, getDefaultDailyRate, getDepartmentBadge 
@@ -47,8 +49,17 @@ import ChangeOrderManager from './ChangeOrderManager';
 import RfiManager from './RfiManager';
 import QuotationLeadsManager from './QuotationLeadsManager';
 import WorkforceMessengerRoster from './WorkforceMessengerRoster';
+import AccountsCentre from './AccountsCentre';
 import { useTheme } from '../context/ThemeContext';
 import { ThemeToggle } from './ThemeToggle';
+import {
+  DashboardSkeleton,
+  TableSkeleton,
+  CardGridSkeleton,
+  KanbanSkeleton,
+  GanttSkeleton,
+  SiteDiarySkeleton,
+} from './skeletons';
 
 interface AdminPortalProps {
   parcels: LandParcel[];
@@ -136,6 +147,8 @@ interface AdminPortalProps {
   onLogManpowerAudit?: (auditData: any) => Promise<void> | void;
   onLogout: () => void;
   onUpdateSession?: (updated: any) => void;
+  isInitialLoading?: boolean;
+  onRefreshAllData?: () => Promise<void> | void;
 }
 
 export default function AdminPortal({
@@ -159,7 +172,9 @@ export default function AdminPortal({
   onSubmitRfi, onAnswerRfi,
   onUpdateQuotationStatus, onConvertQuotationToProject,
   onTriggerAiLaborScan, onLogManpowerAudit,
-  onLogout, onUpdateSession, session
+  onLogout, onUpdateSession, session,
+  isInitialLoading = false,
+  onRefreshAllData
 }: AdminPortalProps) {
   
   // User Role Resolution (Separation of Duties Architecture)
@@ -169,8 +184,68 @@ export default function AdminPortal({
   const isOperationsDirector = !isFinance && !isProjectManager;
   const isAdmin = isOperationsDirector || isFinance;
 
-  // Navigation Tabs: Default to Site Execution Command Center for PM, and Executive Overview for Admin
+  // Navigation Tabs
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
+
+  const handleManualRefresh = async () => {
+    if (isRefreshing || isInitialLoading) return;
+    setIsRefreshing(true);
+    try {
+      if (onRefreshAllData) {
+        await onRefreshAllData();
+      }
+      await new Promise(r => setTimeout(r, 450));
+    } catch (err) {
+      console.error('Refresh error:', err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  // Skeleton Router for active tab
+  const renderActiveSkeleton = (tab: string) => {
+    switch (tab) {
+      case 'dashboard':
+        return <DashboardSkeleton />;
+      case 'projects':
+        return <CardGridSkeleton type="projects" title="Commercial Sites & Fit-Out Projects" cardsCount={6} />;
+      case 'gantt':
+        return <GanttSkeleton />;
+      case 'site-diary':
+        return <SiteDiarySkeleton />;
+      case 'kanban':
+        return <KanbanSkeleton />;
+      case 'contractors':
+        return <CardGridSkeleton type="workforce" title="Field Manpower & Workforce Center" cardsCount={6} />;
+      case 'rfis':
+        return <TableSkeleton title="Engineering RFIs Register (Requests for Information)" columns={6} rows={7} />;
+      case 'change-orders':
+        return <TableSkeleton title="Commercial Change Orders Register" columns={6} rows={7} />;
+      case 'permits':
+        return <TableSkeleton title="Government Permits & Statutory Clearances" columns={5} rows={6} />;
+      case 'payroll':
+        return <TableSkeleton title="Artisan Payroll & Wage Disbursal Ledger" columns={6} rows={7} />;
+      case 'payments':
+        return <TableSkeleton title="Installment Payments & Billing Tracker" columns={6} rows={6} />;
+      case 'documents':
+        return <TableSkeleton title="Centralized Project Document Register" columns={5} rows={6} />;
+      case 'quotation-leads':
+        return <TableSkeleton title="Commercial Fit-Out Quotation Leads CRM" columns={6} rows={6} />;
+      case 'audit-trail':
+        return <TableSkeleton title="Live Operational Audit Trail & Process Logs" columns={5} rows={7} />;
+      case 'schedule':
+        return <TableSkeleton title="Master Schedule & Milestone Events" columns={5} rows={6} />;
+      case 'account-settings':
+        return <TableSkeleton title="User Account Settings & Security" columns={4} rows={5} />;
+      case 'operations-settings':
+        return <TableSkeleton title="Operations & System Settings" columns={4} rows={5} />;
+      case 'risks':
+        return <TableSkeleton title="Risk Matrix & Engineering Contingency Controls" columns={6} rows={6} />;
+      default:
+        return <DashboardSkeleton />;
+    }
+  };
 
   // Interface Theme Hook (Light / Dark Mode)
   const { theme, setTheme } = useTheme();
@@ -222,7 +297,40 @@ export default function AdminPortal({
   };
 
   // Collapsible Left Navigation Sidebar State
-  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(true);
+  const [isMobile, setIsMobile] = useState<boolean>(() => typeof window !== 'undefined' && window.innerWidth < 768);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(() => typeof window !== 'undefined' ? window.innerWidth >= 768 : true);
+
+  // Track viewport width and auto-collapse sidebar on mobile
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) {
+        setIsSidebarOpen(false);
+      }
+    };
+    window.addEventListener('resize', handleResize);
+    handleResize();
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  const [collapsedSections, setCollapsedSections] = useState<Record<string, boolean>>(() => {
+    try {
+      const stored = localStorage.getItem('ctvill_collapsed_sidebar_sections');
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  const toggleSectionCollapse = (sectionId: string) => {
+    setCollapsedSections(prev => {
+      const updated = { ...prev, [sectionId]: !prev[sectionId] };
+      try {
+        localStorage.setItem('ctvill_collapsed_sidebar_sections', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+  };
 
   // Staff Account Management State
   const [staffList, setStaffList] = useState<any[]>([]);
@@ -315,6 +423,12 @@ export default function AdminPortal({
   const [showConfirmPass, setShowConfirmPass] = useState<boolean>(false);
   const [passError, setPassError] = useState<string | null>(null);
   const [passSuccess, setPassSuccess] = useState<string | null>(null);
+  const [newEmailInput, setNewEmailInput] = useState<string>('');
+  const [emailPasskeyVerify, setEmailPasskeyVerify] = useState<string>('');
+  const [showEmailPasskey, setShowEmailPasskey] = useState<boolean>(false);
+  const [emailChangeError, setEmailChangeError] = useState<string | null>(null);
+  const [emailChangeSuccess, setEmailChangeSuccess] = useState<string | null>(null);
+  const [isChangingEmail, setIsChangingEmail] = useState<boolean>(false);
   const [alertGantt, setAlertGantt] = useState<boolean>(savedSettings?.alertGantt ?? true);
   const [alertPunchlist, setAlertPunchlist] = useState<boolean>(savedSettings?.alertPunchlist ?? true);
   const [alertSiteDiary, setAlertSiteDiary] = useState<boolean>(savedSettings?.alertSiteDiary ?? true);
@@ -323,6 +437,14 @@ export default function AdminPortal({
   const [sessionTimeout, setSessionTimeout] = useState<string>(savedSettings?.sessionTimeout || '8h');
   const [isSavingProfile, setIsSavingProfile] = useState<boolean>(false);
   const [isUpdatingPass, setIsUpdatingPass] = useState<boolean>(false);
+
+  // Meta Accounts Centre Navigation & Modals
+  const [accountCentreTab, setAccountCentreTab] = useState<'security' | 'profile' | 'preferences' | 'sessions'>('security');
+  const [isChangePasswordModalOpen, setIsChangePasswordModalOpen] = useState<boolean>(false);
+  const [isChangeEmailModalOpen, setIsChangeEmailModalOpen] = useState<boolean>(false);
+  const [isWhereLoggedInModalOpen, setIsWhereLoggedInModalOpen] = useState<boolean>(false);
+  const [isSecurityCheckupModalOpen, setIsSecurityCheckupModalOpen] = useState<boolean>(false);
+  const [logoutOtherDevices, setLogoutOtherDevices] = useState<boolean>(false);
 
   // Sync authenticated session profile into settings state
   useEffect(() => {
@@ -635,23 +757,15 @@ export default function AdminPortal({
         localStorage.setItem(`ctvill_account_settings_${activeUserId}`, JSON.stringify(payload));
       }
 
-      // 2. Update xyz_pm_user_session in localStorage so App.tsx has latest on reload
-      const currentSavedSession = localStorage.getItem('xyz_pm_user_session') || localStorage.getItem('xyz_erp_user_session');
-      if (currentSavedSession) {
-        try {
-          const parsed = JSON.parse(currentSavedSession);
-          const updatedSession = {
-            ...parsed,
-            name: activeName,
-            email: activeEmail,
-            avatarUrl: activeAvatar,
-            title: activeTitle,
-            phone: activePhone,
-            division: activeDivision,
-          };
-          localStorage.setItem('xyz_pm_user_session', JSON.stringify(updatedSession));
-        } catch { /* silent */ }
-      }
+      // 2. Update session in secure storage so App.tsx has latest on reload
+      updateStoredSession({
+        name: activeName,
+        email: activeEmail,
+        avatarUrl: activeAvatar,
+        title: activeTitle,
+        phone: activePhone,
+        division: activeDivision,
+      });
 
       // 3. Update in App.tsx session state if prop provided
       if (onUpdateSession) {
@@ -673,7 +787,7 @@ export default function AdminPortal({
       });
 
       if (res.ok) {
-        notify('✅ Account profile & settings successfully saved to PostgreSQL database!');
+        notify('✅ Account profile & settings successfully saved.');
       } else {
         const errData = await res.json().catch(() => ({}));
         notify(`❌ Failed to save to database: ${errData.error || 'Server error'}`);
@@ -722,7 +836,7 @@ export default function AdminPortal({
           ctx.drawImage(img, 0, 0, width, height);
           const compressed = canvas.toDataURL('image/jpeg', 0.88);
           setAvatarUrl(compressed);
-          notify('Avatar updated & saved to PostgreSQL database!');
+          notify('Avatar updated & saved successfully!');
           persistSettingsToStorageAndDb({ avatarUrl: compressed });
         }
       };
@@ -740,6 +854,71 @@ export default function AdminPortal({
 
   const handleSaveProfileToDb = () => {
     persistSettingsToStorageAndDb();
+  };
+
+  const handleUpdateEmailWithAuth = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setEmailChangeError(null);
+    setEmailChangeSuccess(null);
+
+    const cleanEmail = newEmailInput.trim().toLowerCase();
+    const currentActiveEmail = ((session && typeof session === 'object' && session.email) || profileEmail || '').toLowerCase();
+
+    if (!cleanEmail) {
+      const msg = 'Please enter a valid new email address.';
+      setEmailChangeError(msg);
+      notify('⚠️ ' + msg);
+      return;
+    }
+    if (cleanEmail === currentActiveEmail) {
+      const msg = 'The new email address matches your current active email.';
+      setEmailChangeError(msg);
+      notify('⚠️ ' + msg);
+      return;
+    }
+    if (!emailPasskeyVerify) {
+      const msg = 'Please enter your current security passkey to authorize this email update.';
+      setEmailChangeError(msg);
+      notify('⚠️ ' + msg);
+      return;
+    }
+
+    setIsChangingEmail(true);
+    try {
+      const activeUserId = session && typeof session === 'object' ? session.id : undefined;
+      const res = await fetch('/api/auth/update-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: activeUserId,
+          email: cleanEmail,
+          currentPassword: emailPasskeyVerify,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const errMsg = data.error || 'Failed to update email address in database.';
+        setEmailChangeError(errMsg);
+        notify('❌ ' + errMsg);
+      } else {
+        setProfileEmail(cleanEmail);
+        setNewEmailInput('');
+        setEmailPasskeyVerify('');
+        setEmailChangeSuccess(`✅ Official login email updated to ${cleanEmail}. Re-authentication verified.`);
+        notify(`✅ Official login email updated to ${cleanEmail}`);
+
+        updateStoredSession({ email: cleanEmail });
+        if (onUpdateSession) {
+          onUpdateSession({ email: cleanEmail });
+        }
+      }
+    } catch (err) {
+      const errMsg = 'Network or server error while re-authenticating email change.';
+      setEmailChangeError(errMsg);
+      notify('❌ ' + errMsg);
+    } finally {
+      setIsChangingEmail(false);
+    }
   };
 
   const handleUpdatePasskey = async () => {
@@ -788,8 +967,8 @@ export default function AdminPortal({
         return;
       }
 
-      setPassSuccess('✅ Security passkey updated & synced to PostgreSQL database! You can now log in with your new passkey.');
-      notify('✅ Security passkey updated & synced to PostgreSQL database!');
+      setPassSuccess('✅ Security passkey updated successfully! You can now log in with your new passkey.');
+      notify('✅ Security passkey updated successfully!');
       setCurrentPass('');
       setNewPass('');
       setConfirmPass('');
@@ -1005,11 +1184,13 @@ export default function AdminPortal({
   };
 
   // Contractor & Workforce Form State
+  type RegistrationTrack = 'OFFICE_STAFF' | 'FIELD_SUPERVISION' | 'TRADE_CREW' | 'OUTSOURCED';
+  const [regTrack, setRegTrack] = useState<RegistrationTrack>('OFFICE_STAFF');
   const [contEmploymentType, setContEmploymentType] = useState<'INTERNAL' | 'OUTSOURCED'>('INTERNAL');
-  const [contDepartment, setContDepartment] = useState<CTVillDepartment>('Project Management & Construction ("CONSTRUCT" Phase)');
-  const [contRoleTitle, setContRoleTitle] = useState<CTVillRole>('Site Foremen');
-  const [contDailyRate, setContDailyRate] = useState<number>(1200);
-  const [contMonthlySalary, setContMonthlySalary] = useState<number>(26400);
+  const [contDepartment, setContDepartment] = useState<CTVillDepartment>('Executive Leadership');
+  const [contRoleTitle, setContRoleTitle] = useState<CTVillRole>('Chief Operating Officer (COO)');
+  const [contDailyRate, setContDailyRate] = useState<number>(3500);
+  const [contMonthlySalary, setContMonthlySalary] = useState<number>(77000);
   const [contName, setContName] = useState<string>('');
   const [contComp, setContComp] = useState<string>('');
   const [contSpec, setContSpec] = useState<any>('General Contractor');
@@ -1020,6 +1201,7 @@ export default function AdminPortal({
   const contAvatarInputRef = useRef<HTMLInputElement>(null);
   const [isContractorModalOpen, setIsContractorModalOpen] = useState<boolean>(false);
   const [workforceFilter, setWorkforceFilter] = useState<'ALL' | 'INTERNAL' | 'OUTSOURCED'>('ALL');
+  const [contSite, setContSite] = useState<string>('Unassigned');
 
   const handleContAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1058,24 +1240,42 @@ export default function AdminPortal({
   const handleRegisterContractorSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!contName.trim()) return;
-    const isInternal = contEmploymentType === 'INTERNAL';
+
+    const isOffice = regTrack === 'OFFICE_STAFF';
+    const isFieldSuper = regTrack === 'FIELD_SUPERVISION';
+    const isTradeCrew = regTrack === 'TRADE_CREW';
+    const isOutsourced = regTrack === 'OUTSOURCED';
+
+    const isAssignedToSite = contSite && contSite !== 'Unassigned' && contSite !== 'None';
+    
+    // Headcount: strictly 1 for individual personnel (Office & Field Supervision), actual crew count for Trade Gangs & Contractors
+    const effectiveManpower = (isOffice || isFieldSuper) 
+      ? (isAssignedToSite ? 1 : 0)
+      : (isAssignedToSite ? Math.max(1, contManpower || 1) : 0);
+
     const newContractor: Contractor = {
       id: `CONT-${Date.now()}`,
       name: contName.trim(),
-      company: isInternal ? 'CTVill Builders Corporation' : (contComp.trim() || contName.trim()),
-      specialty: isInternal ? contRoleTitle : contSpec,
-      activeManpower: isInternal ? 1 : (contManpower || 1),
+      company: isOutsourced 
+        ? (contComp.trim() || contName.trim()) 
+        : (isTradeCrew ? 'CTVill In-House Trade Gang' : 'CTVill Builders Corporation'),
+      specialty: isOutsourced ? contSpec : (isTradeCrew ? (contSpec || 'Skilled Craft') : contRoleTitle),
+      activeManpower: effectiveManpower,
       milestoneProgress: 0,
-      contractAmount: isInternal ? (contDailyRate * 22) : contAmt,
+      contractAmount: isOutsourced ? contAmt : (contDailyRate * 22 * (isTradeCrew ? Math.max(1, contManpower || 1) : 1)),
       paidAmount: 0,
       rating: 5.0,
-      employmentType: contEmploymentType,
-      department: isInternal ? contDepartment : null,
-      roleTitle: isInternal ? contRoleTitle : null,
-      dailyRate: isInternal && contDailyRate > 0 ? contDailyRate : null,
-      monthlySalary: isInternal && contMonthlySalary > 0 ? contMonthlySalary : (contDailyRate ? contDailyRate * 22 : null),
+      employmentType: isOutsourced ? 'OUTSOURCED' : 'INTERNAL',
+      entityType: (isOffice || isFieldSuper) ? 'INDIVIDUAL' : 'CREW',
+      workforceCategory: isOffice ? 'OFFICE_STAFF' : (isFieldSuper ? 'FIELD_SUPERVISION' : 'TRADE_CREW'),
+      department: (isOffice || isFieldSuper) ? contDepartment : 'Project Management & Construction ("CONSTRUCT" Phase)',
+      roleTitle: (isOffice || isFieldSuper) ? contRoleTitle : (isTradeCrew ? `Crew Lead (${contSpec || 'Trades'})` : 'Trade Subcontractor'),
+      dailyRate: !isOutsourced && contDailyRate > 0 ? contDailyRate : null,
+      monthlySalary: !isOutsourced && contMonthlySalary > 0 ? contMonthlySalary : (contDailyRate ? contDailyRate * 22 : null),
       contact: contContact.trim() || undefined,
       status: 'ACTIVE',
+      allocationStatus: isAssignedToSite ? 'ASSIGNED' : 'STANDBY',
+      activeProjectSite: isAssignedToSite ? contSite : 'Unassigned',
       avatar: contAvatar.trim() || undefined,
     };
     onRegisterContractor(newContractor);
@@ -1087,7 +1287,9 @@ export default function AdminPortal({
     setContDailyRate(1200);
     setContMonthlySalary(26400);
     setContManpower(1);
-    notify(`✅ ${isInternal ? 'CTVill In-House Staff' : 'Outsourced Contractor'} "${newContractor.name}" registered and saved to database!`);
+    setContSite('Unassigned');
+    const label = isOffice ? 'Corporate Office Staff' : (isFieldSuper ? 'Field Engineer/Supervisor' : (isTradeCrew ? 'In-House Trade Gang' : 'Outsourced Contractor'));
+    notify(`✅ ${label} "${newContractor.name}" registered and saved to database!`);
   };
 
   // AI Workforce Dispatch Assistant States
@@ -1107,10 +1309,48 @@ export default function AdminPortal({
     };
   }, [isContractorModalOpen, transitioningSlot, showDefectModal, showClientModal, showHandoverModal, isNewParcelModalOpen]);
 
+  // Helper to check if a contractor / worker is strictly office or executive staff
+  const isOfficeOrExecutive = (c: Contractor): boolean => {
+    const dept = (c.department || '').toLowerCase();
+    const role = (c.roleTitle || '').toLowerCase();
+    return (
+      dept.includes('executive') ||
+      dept.includes('corporate') ||
+      dept.includes('finance') ||
+      dept.includes('human resources') ||
+      dept.includes('admin') ||
+      role.includes('board') ||
+      role.includes('president') ||
+      role.includes('ceo') ||
+      role.includes('coo') ||
+      role.includes('director') ||
+      role.includes('finance') ||
+      role.includes('accounting') ||
+      role.includes('hr')
+    );
+  };
+
+  // Helper to determine if worker/crew is actively deployed on an actual job site
+  const isWorkerDeployedOnActualSite = (c: Contractor): boolean => {
+    if (isOfficeOrExecutive(c)) return false;
+    if (c.status && c.status !== 'ACTIVE') return false;
+    if (c.allocationStatus === 'DEMOBILIZED' || c.allocationStatus === 'STANDBY') return false;
+    
+    const site = (c.activeProjectSite || '').trim();
+    if (!site || site === 'Unassigned' || site === 'None' || site.toLowerCase() === 'office' || site.toLowerCase() === 'hq') {
+      return false;
+    }
+    return true;
+  };
+
+  // Deployed field workforce strictly on actual sites
+  const deployedFieldContractors = contractors.filter(isWorkerDeployedOnActualSite);
+  const totalDeployedFieldManpower = deployedFieldContractors.reduce((sum, c) => sum + (c.activeManpower || 1), 0);
+  const totalManpower = totalDeployedFieldManpower;
+
   // Aggregate Metrics for Header Badges
   const openDefectsCount = punchListDefects.filter(d => d.status !== 'CLOSED').length;
   const verifiedKycCount = clients.filter(c => c.buyerKyc?.kycStatus === 'VERIFIED').length;
-  const totalManpower = contractors.reduce((sum, c) => sum + (c.activeManpower || 0), 0);
 
   const statusCounts = {
     available: slots.filter((s) => s.status === 'Available').length,
@@ -1148,7 +1388,11 @@ export default function AdminPortal({
   // Manpower Roll-Call Audit Modal State
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
   const [auditContractorId, setAuditContractorId] = useState(contractors[0]?.id || 'CONT-001');
-  const [auditShift, setAuditShift] = useState('Morning Shift');
+  const [auditShift, setAuditShift] = useState('Morning Shift (07:00 - 16:00)');
+  const [isCustomShift, setIsCustomShift] = useState(false);
+  const [customShiftStart, setCustomShiftStart] = useState('07:00');
+  const [customShiftEnd, setCustomShiftEnd] = useState('16:00');
+  const [customShiftTag, setCustomShiftTag] = useState('');
   const [auditClaimed, setAuditClaimed] = useState<number>(14);
   const [auditVerified, setAuditVerified] = useState<number>(14);
   const [auditSector, setAuditSector] = useState(projects[0]?.name || 'NexBridge Software Hub');
@@ -1156,15 +1400,29 @@ export default function AdminPortal({
   const [auditRemarks, setAuditRemarks] = useState('');
   const [isSubmittingAudit, setIsSubmittingAudit] = useState(false);
 
+  const calculateCustomShiftHours = (start: string, end: string) => {
+    if (!start || !end) return 0;
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    let sMins = (sh || 0) * 60 + (sm || 0);
+    let eMins = (eh || 0) * 60 + (em || 0);
+    if (eMins < sMins) eMins += 24 * 60; // Crosses midnight
+    return Number(((eMins - sMins) / 60).toFixed(1));
+  };
+
   const handleSubmitAudit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmittingAudit(true);
     const selectedContractor = contractors.find(c => c.id === auditContractorId) || contractors[0];
+    const finalShift = isCustomShift
+      ? `${customShiftTag.trim() ? customShiftTag.trim() + ' ' : 'Flexible Shift '}(${customShiftStart} - ${customShiftEnd})`
+      : auditShift;
+
     const auditData = {
       contractorId: selectedContractor?.id || 'CONT-001',
       contractorName: selectedContractor?.name || 'SolidFoundations Engineering',
       specialty: selectedContractor?.specialty || 'General Construction',
-      shift: auditShift,
+      shift: finalShift,
       claimedHeadcount: Number(auditClaimed),
       verifiedHeadcount: Number(auditVerified),
       assignedSectorOrLot: auditSector,
@@ -1174,8 +1432,9 @@ export default function AdminPortal({
     };
 
     try {
-      if (onLogManpowerAudit) {
-        await onLogManpowerAudit(auditData);
+      const auditHandler = onLogManpowerAudit || onCreateManpowerAudit;
+      if (auditHandler) {
+        await auditHandler(auditData);
       } else {
         const res = await fetch('/api/manpower-audits', {
           method: 'POST',
@@ -1278,14 +1537,20 @@ export default function AdminPortal({
   }));
 
   // 3. Roll-Call Audit: Claimed vs Verified vs Discrepancy
-  const rollCallComparisonChartData = manpowerAudits.slice(0, 6).map(audit => ({
-    name: (audit.contractorName || 'Partner').split(' ')[0],
-    fullName: audit.contractorName,
-    shift: audit.shift,
-    claimed: audit.claimedHeadcount,
-    verified: audit.verifiedHeadcount,
-    discrepancy: Math.max(0, audit.claimedHeadcount - audit.verifiedHeadcount)
-  }));
+  const rollCallComparisonChartData = (manpowerAudits || []).slice(0, 8).map(audit => {
+    const rawContractor = audit.contractorName || (audit as any).contractor_name || 'Partner';
+    const claimed = Number(audit.claimedHeadcount ?? (audit as any).claimed_headcount ?? 0);
+    const verified = Number(audit.verifiedHeadcount ?? (audit as any).verified_headcount ?? 0);
+    const discrepancy = Math.max(0, claimed - verified);
+    return {
+      name: rawContractor.split(' ')[0] || 'Partner',
+      fullName: rawContractor,
+      shift: audit.shift || 'Morning',
+      claimed,
+      verified,
+      discrepancy
+    };
+  });
 
   // 4. Employment Type Distribution (In-House vs Outsourced)
   const inHouseCount = contractors.filter(c => c.employmentType !== 'OUTSOURCED').reduce((sum, c) => sum + (c.activeManpower || 0), 0);
@@ -1297,7 +1562,9 @@ export default function AdminPortal({
 
   const sidebarSections = isProjectManager ? [
     {
-      title: '1. CREATE: ENGINEERING & SPECS',
+      id: 'pm-engineering',
+      step: '01',
+      title: 'DESIGN & SPECS',
       items: [
         { id: 'documents', label: 'Blueprints & MEPFS Specs', icon: FileCode },
         { 
@@ -1309,11 +1576,21 @@ export default function AdminPortal({
       ]
     },
     {
-      title: '2. CONSTRUCT: SITE COMMAND',
+      id: 'pm-schedule',
+      step: '02',
+      title: 'SITE SCHEDULE & TASKS',
       items: [
         { id: 'dashboard', label: 'Site Command Center', icon: HardHat },
         { id: 'kanban', label: 'Field Kanban Tasks', icon: CheckSquare },
         { id: 'gantt', label: 'Site Gantt Schedule', icon: BarChart3 },
+        { id: 'schedule', label: 'Site Calendar & Visits', icon: CalendarDays },
+      ]
+    },
+    {
+      id: 'pm-operations',
+      step: '03',
+      title: 'JOBSITE OPERATIONS',
+      items: [
         { id: 'site-diary', label: 'Daily Diary & Weather', icon: CloudSun },
         { id: 'contractors', label: 'Artisans & Roll-Call', icon: Users },
         { 
@@ -1322,19 +1599,21 @@ export default function AdminPortal({
           icon: FileText,
           badge: changeOrders.filter(c => c.status === 'PENDING').length > 0 ? `${changeOrders.filter(c => c.status === 'PENDING').length}` : undefined 
         },
-        { id: 'schedule', label: 'Site Calendar & Visits', icon: CalendarDays },
         { id: 'risks', label: 'Jobsite Safety & Risks', icon: ShieldAlert },
       ]
     },
     {
+      id: 'pm-system',
       title: 'SYSTEM',
       items: [
-        { id: 'account-settings', label: 'Engineer Settings', icon: Settings2 },
+        { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
       ]
     }
   ] : isFinance ? [
     {
-      title: 'FINANCIAL COMMAND & TREASURY',
+      id: 'fin-treasury',
+      step: '01',
+      title: 'FINANCIAL COMMAND',
       items: [
         { id: 'dashboard', label: 'Financial Executive Overview', icon: TrendingUp },
         { id: 'payments', label: 'Progress Billings & Receipts', icon: DollarSign },
@@ -1349,7 +1628,9 @@ export default function AdminPortal({
       ]
     },
     {
-      title: 'COMMERCIAL SITES & ESTIMATES',
+      id: 'fin-sites',
+      step: '02',
+      title: 'COMMERCIAL SITES',
       items: [
         { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
         { 
@@ -1362,14 +1643,17 @@ export default function AdminPortal({
       ]
     },
     {
+      id: 'fin-system',
       title: 'SYSTEM',
       items: [
-        { id: 'account-settings', label: 'Controller Settings', icon: Settings2 },
+        { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
       ]
     }
   ] : [
     {
-      title: '1. CREATE: DESIGN & PRE-CON',
+      id: 'pre-con',
+      step: '01',
+      title: 'PRE-CON & DESIGN',
       items: [
         { 
           id: 'quotation-leads', 
@@ -1382,14 +1666,23 @@ export default function AdminPortal({
       ]
     },
     {
-      title: '2. CONSTRUCT: COMMERCIAL SITES',
+      id: 'project-controls',
+      step: '02',
+      title: 'PROJECT CONTROLS & SCHEDULE',
       items: [
         { id: 'dashboard', label: 'Executive Portfolio', icon: TrendingUp },
         { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
         { id: 'gantt', label: 'Master Gantt & Timeline', icon: BarChart3 },
         { id: 'kanban', label: 'Field Execution Kanban', icon: CheckSquare },
+        { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
+      ]
+    },
+    {
+      id: 'field-operations',
+      step: '03',
+      title: 'FIELD OPERATIONS & SAFETY',
+      items: [
         { id: 'site-diary', label: 'Site Diary & Weather', icon: CloudSun },
-        { id: 'contractors', label: 'Artisan Trades & Workforce', icon: Users },
         { 
           id: 'rfis', 
           label: 'Engineering RFIs Register', 
@@ -1402,64 +1695,72 @@ export default function AdminPortal({
           icon: FileText,
           badge: changeOrders.filter(c => c.status === 'PENDING').length > 0 ? `${changeOrders.filter(c => c.status === 'PENDING').length}` : undefined 
         },
-        { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
         { id: 'risks', label: 'Jobsite Safety & Risk Matrix', icon: ShieldAlert },
       ]
     },
     {
-      title: '3. AFTER CARE & HANDOVER',
+      id: 'workforce',
+      step: '04',
+      title: 'WORKFORCE & PAYROLL',
+      items: [
+        { id: 'contractors', label: 'Artisan Trades & Workforce', icon: Users },
+        ...(showStatutoryAndPayroll ? [
+          { id: 'payroll', label: 'Artisan Payroll & Labor', icon: Banknote }
+        ] : []),
+      ]
+    },
+    {
+      id: 'closeout',
+      step: '05',
+      title: 'QA & CLOSEOUT',
       items: [
         { id: 'audit-trail', label: 'Audit Trail & QA Logs', icon: History },
       ]
     },
-    ...(showStatutoryAndPayroll ? [{
-      title: 'TREASURY & COMPLIANCE',
-      items: [
-        { id: 'payroll', label: 'Artisan Payroll & Labor', icon: Banknote },
-      ]
-    }] : []),
     {
-      title: 'SYSTEM',
+      id: 'settings',
+      title: 'SETTINGS & CONTROLS',
       items: [
-        { id: 'account-settings', label: 'Operations Settings', icon: Settings2 },
+        { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
+        { id: 'operations-settings', label: 'Operations & System Settings', icon: Settings2 },
       ]
     }
   ];
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 flex flex-col font-sans">
+    <div className="h-screen h-[100dvh] bg-slate-900 text-slate-100 flex flex-col font-sans overflow-hidden">
       
       {/* Top Corporate Navigation Bar */}
-      <header className="bg-slate-950 border-b border-slate-800 px-4 sm:px-6 py-3 flex items-center justify-between gap-4 sticky top-0 z-30 shadow-md">
-        <div className="flex items-center gap-3">
+      <header className="bg-slate-950 border-b border-slate-800 px-3 sm:px-6 py-2.5 sm:py-3 flex items-center justify-between gap-2 sm:gap-4 sticky top-0 z-30 shadow-md shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           {/* Hideable Navigation Sidebar Toggle Button */}
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-400 border border-slate-800 transition-all cursor-pointer flex items-center justify-center shrink-0"
+            className="p-1.5 sm:p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-400 border border-slate-800 transition-all cursor-pointer flex items-center justify-center shrink-0"
             title={isSidebarOpen ? "Collapse Navigation Sidebar" : "Expand Navigation Sidebar"}
           >
             {isSidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
           </button>
 
           {/* Logo & Brand Identity */}
-          <div className="flex items-center gap-3">
-            <div className="h-9 w-9 rounded-xl bg-black border border-slate-800 flex items-center justify-center shadow-lg overflow-hidden shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl bg-black border border-slate-800 flex items-center justify-center shadow-lg overflow-hidden shrink-0">
               <img src={logoJpg} alt="CTVill Logo" className="w-full h-full object-cover" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-base font-black text-white tracking-tight">CTVILL</h1>
-                <span className={`text-[9px] font-mono px-2 py-0.5 rounded-full uppercase font-bold border ${
+            <div className="shrink-0">
+              <div className="flex items-center gap-1.5 sm:gap-2">
+                <h1 className="text-sm sm:text-base font-black text-white tracking-tight shrink-0 whitespace-nowrap">CTVILL</h1>
+                <span className={`hidden sm:inline-flex text-[8px] sm:text-[9px] font-mono px-1.5 sm:px-2 py-0.5 rounded-full uppercase font-bold border whitespace-nowrap shrink-0 ${
                   isProjectManager
                     ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300'
                     : isFinance
                     ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
                     : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
                 }`}>
-                  {isProjectManager ? 'SITE ENGINEER PM' : isFinance ? 'FINANCE CONTROLLER' : 'OPERATIONS DIRECTOR'}
+                  {isProjectManager ? 'SITE PM' : isFinance ? 'FINANCE' : 'OPERATIONS'}
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 font-mono hidden sm:block">
+              <p className="text-[10px] text-slate-400 font-mono hidden md:block truncate">
                 {isProjectManager
                   ? `Field Execution & Jobsite Command • ${pmScopedProjects[0]?.name || 'Assigned Site'}`
                   : isFinance
@@ -1471,29 +1772,7 @@ export default function AdminPortal({
         </div>
 
         {/* Global Action Bar */}
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* Civil Works vs Full PMS Milestone Scope Toggle (Admin only) */}
-          {isAdmin && (
-            <button
-              onClick={toggleStatutoryAndPayroll}
-              title={showStatutoryAndPayroll ? "Milestone: Full PMS Scope (Statutory Permits & Labor Active)" : "Milestone: Site Execution Only (Statutory Gated)"}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-mono transition-all cursor-pointer ${
-                showStatutoryAndPayroll
-                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
-                  : 'bg-slate-900 border-slate-800 text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span className="hidden xl:inline">Scope:</span>
-              <span className="font-bold">{showStatutoryAndPayroll ? 'Full PMS' : 'Site Execution'}</span>
-            </button>
-          )}
-
-          <div className="hidden lg:flex items-center gap-2 bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-xs text-slate-300">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>Live Sync: <strong>Neon DB Active</strong></span>
-          </div>
-
+        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
           <ThemeToggle />
 
           {/* Notification Center Bell Dropdown */}
@@ -1520,7 +1799,7 @@ export default function AdminPortal({
 
             {isNotificationOpen && (
               <div
-                className={`absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md animate-in fade-in zoom-in-95 duration-150 ${
+                className={`fixed sm:absolute top-14 sm:top-auto left-2 right-2 sm:left-auto sm:right-0 mt-0 sm:mt-2 sm:w-96 max-w-sm mx-auto sm:mx-0 rounded-2xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md animate-in fade-in zoom-in-95 duration-150 ${
                   isDark
                     ? 'bg-slate-950/95 border-slate-800 text-slate-200'
                     : 'bg-white/95 border-slate-200 text-slate-800'
@@ -1680,11 +1959,12 @@ export default function AdminPortal({
 
           <button
             onClick={() => setActiveTab('account-settings')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer ${
+            className={`flex items-center gap-2 p-1.5 sm:px-3 sm:py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer shrink-0 ${
               activeTab === 'account-settings'
                 ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
                 : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
             }`}
+            title="Account Settings"
           >
             <div className="w-6 h-6 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-black text-[10px] overflow-hidden border border-amber-500/40 shrink-0">
               {avatarUrl ? (
@@ -1698,9 +1978,11 @@ export default function AdminPortal({
 
           <button
             onClick={onLogout}
-            className="px-3.5 py-1.5 bg-slate-800 hover:bg-red-950/50 border border-slate-700 hover:border-red-600 text-slate-300 hover:text-red-300 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-xs"
+            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-800 hover:bg-red-950/50 border border-slate-700 hover:border-red-600 text-slate-300 hover:text-red-300 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-xs shrink-0"
+            title="Sign Out of Portal"
           >
-            Sign Out
+            <LogOut className="w-3.5 h-3.5 text-slate-400" />
+            <span>Sign Out</span>
           </button>
         </div>
       </header>
@@ -1721,62 +2003,132 @@ export default function AdminPortal({
       )}
 
       {/* Main Layout Container with Left Sidebar */}
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex-1 flex overflow-hidden relative min-h-0">
         
+        {/* Mobile Sidebar Backdrop Overlay */}
+        {isMobile && isSidebarOpen && (
+          <div
+            className="fixed inset-0 z-30 bg-slate-950/70 backdrop-blur-sm"
+            onClick={() => setIsSidebarOpen(false)}
+            aria-label="Close navigation"
+          />
+        )}
+
         {/* Left-Side Hideable Navigation Sidebar */}
         <aside 
-          className={`transition-all duration-300 ease-in-out bg-slate-950 border-r border-slate-800 flex flex-col justify-between shrink-0 select-none z-20 ${
-            isSidebarOpen ? 'w-64' : 'w-16'
-          }`}
+          className={`
+            bg-slate-950 border-r border-slate-800 flex flex-col justify-between shrink-0 select-none z-40
+            transition-all duration-300 ease-in-out
+            ${isMobile
+              ? `fixed inset-y-0 left-0 top-0 h-full ${isSidebarOpen ? 'translate-x-0 w-72 shadow-2xl' : '-translate-x-full w-72'}`
+              : `relative ${isSidebarOpen ? 'w-64' : 'w-16'}`
+            }
+          `}
+          style={isMobile ? { paddingTop: '60px' } : undefined}
         >
           {/* Sidebar Navigation Items */}
-          <div className="flex-1 overflow-y-auto py-3 px-2 space-y-4 scrollbar-thin scrollbar-thumb-slate-800">
-            {sidebarSections.map((section, sIdx) => (
-              <div key={sIdx} className="space-y-1">
-                {isSidebarOpen ? (
-                  <div className="px-3 py-1 text-[10px] font-mono font-bold text-slate-500 uppercase tracking-wider">
-                    {section.title}
-                  </div>
-                ) : (
-                  <div className="h-px bg-slate-800/80 my-2 mx-2" />
-                )}
+          <div className="flex-1 overflow-y-auto py-3 px-2 space-y-3 scrollbar-thin scrollbar-thumb-slate-800">
+            {sidebarSections.map((section) => {
+              const isSectionActive = section.items.some(it => it.id === activeTab);
+              // A section is collapsed only if user explicitly toggled it and it does not contain the active tab
+              const isCollapsed = !isSectionActive && !!collapsedSections[section.id];
+              let totalSectionBadges = 0;
+              (section.items as any[]).forEach((it: any) => {
+                if (it.badge) {
+                  totalSectionBadges += parseInt(String(it.badge), 10) || 1;
+                }
+              });
 
-                {section.items.map((item) => {
-                  const Icon = item.icon;
-                  const isActive = activeTab === item.id;
-                  return (
+              return (
+                <div key={section.id} className="space-y-1">
+                  {isSidebarOpen ? (
                     <button
-                      key={item.id}
-                      onClick={() => setActiveTab(item.id)}
-                      title={!isSidebarOpen ? item.label : undefined}
-                      className={`
-                        w-full flex items-center gap-3 rounded-xl transition-all cursor-pointer
-                        ${isSidebarOpen ? 'px-3 py-2 text-xs font-semibold' : 'px-0 py-2.5 justify-center'}
-                        ${isActive 
-                          ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/20' 
-                          : 'text-slate-400 hover:text-white hover:bg-slate-900'}
-                      `}
+                      type="button"
+                      onClick={() => toggleSectionCollapse(section.id)}
+                      className="w-full flex items-center justify-between px-2.5 py-1 text-[10px] font-mono font-bold text-slate-400 hover:text-slate-200 tracking-wider uppercase rounded-lg hover:bg-slate-900/60 transition-colors group cursor-pointer"
                     >
-                      <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-slate-950' : 'text-slate-400 group-hover:text-white'}`} />
-                      {isSidebarOpen && (
-                        <div className="flex-1 flex items-center justify-between min-w-0">
-                          <span className="truncate">{item.label}</span>
-                          {(item as any).badge && (
-                            <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono font-bold ml-1.5 ${
-                              isActive 
-                                ? 'bg-slate-950/30 text-slate-950' 
-                                : 'bg-slate-800 text-slate-300'
-                            }`}>
-                              {(item as any).badge}
-                            </span>
-                          )}
-                        </div>
-                      )}
+                      <div className="flex items-center gap-1.5 truncate">
+                        {(section as any).step && (
+                          <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-slate-800/90 text-amber-400/90 border border-slate-700/60">
+                            {(section as any).step}
+                          </span>
+                        )}
+                        <span className="truncate">{section.title}</span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isCollapsed && totalSectionBadges > 0 && (
+                          <span className="text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                            {totalSectionBadges}
+                          </span>
+                        )}
+                        <ChevronDown 
+                          className={`w-3.5 h-3.5 text-slate-500 group-hover:text-slate-300 transition-transform duration-200 ${
+                            isCollapsed ? '-rotate-90' : 'rotate-0'
+                          }`} 
+                        />
+                      </div>
                     </button>
-                  );
-                })}
-              </div>
-            ))}
+                  ) : (
+                    <div className="h-px bg-slate-800/80 my-2 mx-2" />
+                  )}
+
+                  {/* Section Items (hidden when collapsed) */}
+                  {!isCollapsed && (
+                    <div className="space-y-0.5">
+                      {section.items.map((item) => {
+                        const Icon = item.icon;
+                        const isActive = activeTab === item.id;
+                        return (
+                          <button
+                            key={item.id}
+                            onClick={() => {
+                              setActiveTab(item.id);
+                              if (isMobile) setIsSidebarOpen(false);
+                            }}
+                            title={!isSidebarOpen ? item.label : undefined}
+                            className={`
+                              relative w-full flex items-center gap-2.5 rounded-xl transition-all duration-150 cursor-pointer text-left
+                              ${isSidebarOpen ? 'px-3 py-2 text-xs' : 'px-0 py-2.5 justify-center'}
+                              ${isActive 
+                                ? 'bg-amber-500/12 text-amber-300 font-semibold border border-amber-500/30 shadow-xs' 
+                                : 'text-slate-400 hover:text-slate-100 hover:bg-slate-900/70 border border-transparent'}
+                            `}
+                          >
+                            {/* Sleek active accent indicator bar */}
+                            {isActive && isSidebarOpen && (
+                              <div className="absolute left-0 top-1.5 bottom-1.5 w-1 bg-amber-400 rounded-r-full shadow-sm shadow-amber-400" />
+                            )}
+
+                            <Icon 
+                              className={`w-4 h-4 shrink-0 transition-colors ${
+                                isActive 
+                                  ? 'text-amber-400' 
+                                  : 'text-slate-400 group-hover:text-slate-200'
+                              }`} 
+                            />
+
+                            {isSidebarOpen && (
+                              <div className="flex-1 flex items-center justify-between min-w-0">
+                                <span className="truncate">{item.label}</span>
+                                {(item as any).badge && (
+                                  <span className={`text-[9px] px-1.5 py-0.2 rounded-full font-mono font-bold ml-1.5 ${
+                                    isActive 
+                                      ? 'bg-amber-500/25 text-amber-200 border border-amber-500/40' 
+                                      : 'bg-slate-800 text-slate-300 border border-slate-700/60'
+                                  }`}>
+                                    {(item as any).badge}
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
 
           {/* Bottom Sidebar User Profile Card */}
@@ -1810,7 +2162,7 @@ export default function AdminPortal({
         </aside>
 
         {/* Main Content Workspace */}
-        <main className="flex-1 overflow-y-auto bg-slate-900 p-4 sm:p-6 lg:p-8 space-y-6">
+        <main className="flex-1 overflow-y-auto bg-slate-900 p-3 sm:p-5 lg:p-8 space-y-4 sm:space-y-6 min-w-0 min-h-0">
 
         {/* Global Emergency Force Majeure Stoppage Banner (Visible to all roles across all tabs) */}
         {hasWeatherSuspension && (
@@ -1844,11 +2196,19 @@ export default function AdminPortal({
           </div>
         )}
 
-
         {/* ------------------------------------------------------------- */}
-        {/* TAB 0.2: INSTALLMENT PAYMENTS & BILLING */}
+        {/* SKELETON LOADERS VIEW (INITIAL NETWORK LOAD / MANUAL SYNC) */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'payments' && (
+        {(isInitialLoading || isRefreshing) ? (
+          <div className="space-y-6">
+            {renderActiveSkeleton(activeTab)}
+          </div>
+        ) : (
+          <>
+            {/* ------------------------------------------------------------- */}
+            {/* TAB 0.2: INSTALLMENT PAYMENTS & BILLING */}
+            {/* ------------------------------------------------------------- */}
+            {activeTab === 'payments' && (
           <div className="space-y-6">
             {isProjectManager ? (
               <div className="bg-slate-950 border border-amber-500/30 rounded-2xl p-10 text-center space-y-4 shadow-xl">
@@ -2531,8 +2891,9 @@ export default function AdminPortal({
                       <div className="text-2xl font-black text-white mt-2 font-mono">
                         {totalManpower} Specialists
                       </div>
-                      <div className="text-xs text-blue-400 mt-2">
-                        {contractors.length > 0 ? `${contractors.length} Trade Teams Active` : 'No Trades Registered'}
+                      <div className="text-xs text-blue-400 mt-2 flex items-center justify-between">
+                        <span>{deployedFieldContractors.length > 0 ? `${deployedFieldContractors.length} Field Teams on Site` : '0 Field Teams on Site'}</span>
+                        <span className="text-[10px] text-slate-500 font-mono">On-site only</span>
                       </div>
                     </div>
 
@@ -2849,11 +3210,12 @@ export default function AdminPortal({
           <div className="space-y-6">
             <GanttTimeline
               projects={pmScopedProjects.length > 0 ? pmScopedProjects : projects}
-              contractors={pmContractors}
+              contractors={contractors && contractors.length > 0 ? contractors : pmContractors}
               siteLogs={pmSiteLogs}
               milestones={civilWorksMilestones}
               tasks={tasks}
               onUpdateProject={onUpdateProject}
+              onDeleteTask={onDeleteTask}
             />
           </div>
         )}
@@ -2902,6 +3264,7 @@ export default function AdminPortal({
           <div className="space-y-6">
             <ProjectKanban
               tasks={tasks}
+              projects={pmScopedProjects.length > 0 ? pmScopedProjects : (projects || [])}
               onAddTask={onAddTask || (() => {})}
               onUpdateTaskStatus={onUpdateTaskStatus || (() => {})}
               onDeleteTask={onDeleteTask}
@@ -3057,7 +3420,7 @@ export default function AdminPortal({
                   <HardHat className="w-4 h-4 text-teal-400" />
                 </div>
                 <div className="text-2xl font-bold font-mono text-white">{totalManpower} <span className="text-xs text-slate-400 font-normal">Active Laborers</span></div>
-                <span className="text-[10px] text-teal-400 block font-mono">{contractors.length} Registered Trade Partners</span>
+                <span className="text-[10px] text-teal-400 block font-mono">{deployedFieldContractors.length} Trade Teams on Actual Sites ({contractors.length} Total Registered)</span>
               </div>
 
               <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
@@ -3530,14 +3893,14 @@ export default function AdminPortal({
                                     </div>
                                   </div>
 
-                                  <div className="flex flex-col items-center shrink-0 px-2">
+                                  <div className="flex flex-col items-center shrink-0 px-3">
                                     <span className="text-[10px] font-mono font-bold text-amber-400">
-                                      +{crewDelta} Crew
+                                      +{crewDelta} Staff
                                     </span>
-                                    <div className="w-12 h-0.5 bg-gradient-to-r from-amber-500 to-teal-400 my-1 relative">
+                                    <div className="w-16 h-0.5 bg-gradient-to-r from-amber-500 to-teal-400 my-1 relative">
                                       <div className="w-1.5 h-1.5 rounded-full bg-teal-400 absolute -right-0.5 -top-0.5"></div>
                                     </div>
-                                    <span className="text-[8px] font-mono text-slate-500 uppercase max-w-[60px] truncate" title={rec.tradeType || workerDisplay}>
+                                    <span className="text-[9px] font-mono text-slate-400 uppercase max-w-[85px] truncate font-medium text-center" title={rec.tradeType || workerDisplay}>
                                       {rec.tradeType ? rec.tradeType.split(' ')[0] : workerDisplay.split(' ')[0]}
                                     </span>
                                   </div>
@@ -3564,9 +3927,16 @@ export default function AdminPortal({
 
                                 {/* AI Rationale & Learned Decision Basis */}
                                 {rec.rationale && (
-                                  <div className="bg-indigo-950/30 border border-indigo-900/50 rounded-xl p-2.5 flex items-start gap-2 text-[11px] text-indigo-200">
-                                    <Lightbulb className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                                    <p className="line-clamp-2 leading-relaxed text-slate-300">{rec.rationale}</p>
+                                  <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-xl p-3 flex items-start gap-2.5 text-xs text-indigo-100 shadow-xs">
+                                    <Lightbulb className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                                    <div className="space-y-0.5 flex-1">
+                                      <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-wider block">
+                                        AI Recommendation:
+                                      </span>
+                                      <p className="leading-relaxed text-slate-200 text-xs">
+                                        {rec.rationale}
+                                      </p>
+                                    </div>
                                   </div>
                                 )}
                               </div>
@@ -3867,72 +4237,49 @@ export default function AdminPortal({
         {/* TAB: ACCOUNT & OPERATIONS SETTINGS */}
         {/* ------------------------------------------------------------- */}
         {activeTab === 'account-settings' && (
+          <AccountsCentre
+            session={session}
+            profileName={profileName}
+            setProfileName={setProfileName}
+            profileEmail={profileEmail}
+            setProfileEmail={setProfileEmail}
+            profileTitle={profileTitle}
+            setProfileTitle={setProfileTitle}
+            profilePhone={profilePhone}
+            setProfilePhone={setProfilePhone}
+            profileDivision={profileDivision}
+            setProfileDivision={setProfileDivision}
+            avatarUrl={avatarUrl}
+            setAvatarUrl={setAvatarUrl}
+            theme={theme}
+            setTheme={setTheme}
+            onLogout={onLogout}
+            notify={notify}
+            onUpdateSession={onUpdateSession}
+          />
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB: OPERATIONS & SYSTEM SETTINGS */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'operations-settings' && (
           <div className="space-y-6 max-w-5xl">
-            {/* Header banner with Avatar Uploader */}
+            {/* Header banner */}
             <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                {/* Interactive Avatar Container */}
-                <div className="relative group shrink-0">
-                  <div className="w-16 h-16 rounded-2xl bg-amber-500 text-slate-950 flex items-center justify-center font-black text-xl shadow-lg shadow-amber-500/20 overflow-hidden border-2 border-amber-500/40">
-                    {avatarUrl ? (
-                      <img src={avatarUrl} alt={profileName} className="w-full h-full object-cover" />
-                    ) : (
-                      <span>{getInitials(profileName)}</span>
-                    )}
-                  </div>
-                  
-                  {/* Camera Quick Action Badge */}
-                  <button
-                    type="button"
-                    onClick={() => avatarInputRef.current?.click()}
-                    title="Change Avatar Photo"
-                    className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-slate-900 border border-amber-500/60 text-amber-400 hover:bg-amber-500 hover:text-slate-950 transition-all shadow-md cursor-pointer"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                  </button>
+              <div className="flex items-center gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-400 flex items-center justify-center font-bold text-xl shrink-0">
+                  <Building className="w-7 h-7 text-amber-400" />
                 </div>
-
-                {/* Hidden File Input for Avatar */}
-                <input
-                  type="file"
-                  ref={avatarInputRef}
-                  accept="image/png, image/jpeg, image/webp"
-                  className="hidden"
-                  onChange={handleAvatarFileChange}
-                />
-
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-bold text-white tracking-tight">{profileName}</h2>
-                    <span className="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-mono px-2 py-0.5 rounded-full uppercase font-bold">
-                      EXECUTIVE ADMIN
+                    <h2 className="text-xl font-bold text-white tracking-tight">Operations & System Settings</h2>
+                    <span className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono px-2 py-0.5 rounded-full uppercase font-bold">
+                      ENTERPRISE ENGINE
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 mt-1">
-                    {profileTitle} • {profileDivision}
+                    CTVill Enterprise credentials, operational alert automation, workspace defaults, and staff provisioning.
                   </p>
-                  
-                  {/* Avatar Upload & Remove Buttons */}
-                  <div className="flex items-center gap-2 mt-2">
-                    <button
-                      type="button"
-                      onClick={() => avatarInputRef.current?.click()}
-                      className="text-[11px] font-semibold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer transition-colors bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 rounded-lg border border-amber-500/30"
-                    >
-                      <Upload className="w-3 h-3" />
-                      <span>{avatarUrl ? 'Change Avatar' : 'Upload Avatar'}</span>
-                    </button>
-                    {avatarUrl && (
-                      <button
-                        type="button"
-                        onClick={handleRemoveAvatar}
-                        className="text-[11px] font-semibold text-red-400 hover:text-red-300 flex items-center gap-1 cursor-pointer transition-colors bg-red-950/40 hover:bg-red-950/70 px-2.5 py-1 rounded-lg border border-red-800/40"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                        <span>Remove</span>
-                      </button>
-                    )}
-                  </div>
                 </div>
               </div>
 
@@ -3941,302 +4288,16 @@ export default function AdminPortal({
                   type="button"
                   onClick={() => persistSettingsToStorageAndDb()}
                   disabled={isSavingProfile}
-                  className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all cursor-pointer"
+                  className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 shadow-md shadow-amber-500/20 transition-all cursor-pointer disabled:opacity-50"
                 >
                   <Save className="w-4 h-4" />
-                  <span>{isSavingProfile ? 'Saving All...' : 'Save All Changes'}</span>
+                  <span>{isSavingProfile ? 'Saving...' : 'Save Operational Defaults'}</span>
                 </button>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left 2 Cols: Profile Form & Security */}
-              <div className="lg:col-span-2 space-y-6">
-                
-                {/* 1. Operations Profile */}
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div className="flex items-center gap-2 text-white font-bold text-sm">
-                      <UserCog className="w-4 h-4 text-amber-400" />
-                      <span>Operations Manager Profile</span>
-                    </div>
-                    <span className="text-[10px] font-mono text-slate-500">USER ID: OPS-001</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
-                    <div>
-                      <label className="block text-slate-400 font-semibold mb-1">Full Legal Name</label>
-                      <input
-                        type="text"
-                        value={profileName}
-                        onChange={(e) => setProfileName(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-400 font-semibold mb-1">Official Job Title</label>
-                      <input
-                        type="text"
-                        value={profileTitle}
-                        onChange={(e) => setProfileTitle(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-400 font-semibold mb-1">Official Email Address</label>
-                      <input
-                        type="email"
-                        value={profileEmail}
-                        onChange={(e) => setProfileEmail(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-400 font-semibold mb-1">Direct Contact Number</label>
-                      <input
-                        type="text"
-                        value={profilePhone}
-                        onChange={(e) => setProfilePhone(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-
-                    <div className="sm:col-span-2">
-                      <label className="block text-slate-400 font-semibold mb-1">Department / Division</label>
-                      <input
-                        type="text"
-                        value={profileDivision}
-                        onChange={(e) => setProfileDivision(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-amber-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-3 border-t border-slate-800">
-                    <p className="text-[11px] text-slate-500">
-                      Profile changes are persisted directly to PostgreSQL and cached locally.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={handleSaveProfileToDb}
-                      disabled={isSavingProfile}
-                      className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-amber-500/20 cursor-pointer flex items-center justify-center gap-1.5 transition-all"
-                    >
-                      <Save className="w-3.5 h-3.5" />
-                      <span>{isSavingProfile ? 'Saving...' : 'Save Profile Changes'}</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* 2. Security & Passkey */}
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                    <div className="flex items-center gap-2 text-white font-bold text-sm">
-                      <KeyRound className="w-4 h-4 text-amber-400" />
-                      <span>Security & Passkey Credentials</span>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-[10px] font-mono text-slate-400">ACCOUNT:</span>
-                      <span className="text-[10px] font-mono font-bold text-amber-400 bg-amber-950/60 px-2 py-0.5 rounded border border-amber-800/60">
-                        {(session && typeof session === 'object' && session.email) || profileEmail}
-                      </span>
-                      <span className="text-[10px] font-mono text-emerald-400 flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                        POSTGRESQL SYNCED
-                      </span>
-                    </div>
-                  </div>
-
-                  {isProjectManager ? (
-                    <div className="p-4 bg-slate-900/70 border border-amber-500/30 rounded-xl text-xs text-slate-300 flex items-center gap-3">
-                      <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
-                        <Lock className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="font-bold text-white">Centralized Credentials Policy</div>
-                        <p className="text-[11px] text-slate-400 mt-0.5">
-                          Project Manager system passkeys and security permissions are centrally managed and rotated by Operations Administration. Direct modification is restricted.
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                      {/* Inline Error Alert */}
-                      {passError && (
-                        <div className="p-3 bg-red-950/60 border border-red-500/60 rounded-xl text-xs text-red-200 flex items-center gap-2.5 animate-fadeIn">
-                          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-                          <span className="font-medium">{passError}</span>
-                        </div>
-                      )}
-
-                      {/* Inline Success Alert */}
-                      {passSuccess && (
-                        <div className="p-3 bg-emerald-950/60 border border-emerald-500/60 rounded-xl text-xs text-emerald-200 flex items-center gap-2.5 animate-fadeIn">
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                          <span className="font-medium">{passSuccess}</span>
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Current Passkey</label>
-                          <div className="relative">
-                            <input
-                              type={showCurrentPass ? 'text' : 'password'}
-                              placeholder="••••••••"
-                              value={currentPass}
-                              onChange={(e) => { setCurrentPass(e.target.value); setPassError(null); }}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3.5 pr-10 py-2 text-white focus:outline-none focus:border-amber-500 font-mono"
-                            />
-                            <button
-                              type="button"
-                              tabIndex={-1}
-                              onClick={() => setShowCurrentPass(!showCurrentPass)}
-                              className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
-                            >
-                              {showCurrentPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                          </div>
-                          <p className="text-[10px] text-slate-500 mt-1">Default initial: <code className="text-amber-400/80">admin123</code></p>
-                        </div>
-
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">New Passkey</label>
-                          <div className="relative">
-                            <input
-                              type={showNewPass ? 'text' : 'password'}
-                              placeholder="Min. 6 characters"
-                              value={newPass}
-                              onChange={(e) => { setNewPass(e.target.value); setPassError(null); }}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3.5 pr-10 py-2 text-white focus:outline-none focus:border-amber-500 font-mono"
-                            />
-                            <button
-                              type="button"
-                              tabIndex={-1}
-                              onClick={() => setShowNewPass(!showNewPass)}
-                              className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
-                            >
-                              {showNewPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                          </div>
-                          <p className="text-[10px] text-slate-500 mt-1">At least 6 characters</p>
-                        </div>
-
-                        <div>
-                          <label className="block text-slate-400 font-semibold mb-1">Confirm New Passkey</label>
-                          <div className="relative">
-                            <input
-                              type={showConfirmPass ? 'text' : 'password'}
-                              placeholder="Confirm passkey"
-                              value={confirmPass}
-                              onChange={(e) => { setConfirmPass(e.target.value); setPassError(null); }}
-                              className="w-full bg-slate-900 border border-slate-700 rounded-xl pl-3.5 pr-10 py-2 text-white focus:outline-none focus:border-amber-500 font-mono"
-                            />
-                            <button
-                              type="button"
-                              tabIndex={-1}
-                              onClick={() => setShowConfirmPass(!showConfirmPass)}
-                              className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
-                            >
-                              {showConfirmPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                            </button>
-                          </div>
-                          <p className="text-[10px] text-slate-500 mt-1">Must match new passkey</p>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
-                        <p className="text-[11px] text-slate-500">
-                          Changes are hashed using <code className="text-amber-400/80">scrypt</code> and written directly to your live PostgreSQL database record.
-                        </p>
-                        <button
-                          type="button"
-                          onClick={handleUpdatePasskey}
-                          disabled={isUpdatingPass}
-                          className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-amber-500/20 cursor-pointer flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
-                        >
-                          <KeyRound className="w-3.5 h-3.5" />
-                          <span>{isUpdatingPass ? 'Updating in Database...' : 'Update & Sync Passkey'}</span>
-                        </button>
-                      </div>
-                    </>
-                  )}
-                </div>
-
-                {/* 3. Project Management Workspace Preferences */}
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div className="flex items-center gap-2 text-white font-bold text-sm">
-                      <Sliders className="w-4 h-4 text-amber-400" />
-                      <span>PMS Workspace Preferences</span>
-                    </div>
-                    <span className="text-[10px] font-mono text-slate-500">GLOBAL CONFIG</span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-xs">
-                    <div>
-                      <label className="block text-slate-400 font-semibold mb-1">Default View Upon Sign-In</label>
-                      <select
-                        value={defaultPmsView}
-                        onChange={(e) => setDefaultPmsView(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-amber-500"
-                      >
-                        <option value="dashboard">Operations Dashboard</option>
-                        <option value="projects">Commercial Sites Hub</option>
-                        <option value="gantt">Gantt Milestone Schedule</option>
-                        <option value="site-diary">Weather Report</option>
-                        <option value="documents">Document Management</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-400 font-semibold mb-1">Session Inactivity Timeout</label>
-                      <select
-                        value={sessionTimeout}
-                        onChange={(e) => setSessionTimeout(e.target.value)}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-amber-500"
-                      >
-                        <option value="2h">2 Hours (Strict)</option>
-                        <option value="4h">4 Hours</option>
-                        <option value="8h">8 Hours (Standard Shift)</option>
-                        <option value="24h">24 Hours (Extended)</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-slate-400 font-semibold mb-1">Interface Appearance Theme</label>
-                      <select
-                        value={theme}
-                        onChange={(e) => setTheme(e.target.value as 'dark' | 'light')}
-                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-amber-500 font-medium"
-                      >
-                        <option value="dark">🌙 Dark Executive (Default Sleek)</option>
-                        <option value="light">☀️ Light Corporate (Crisp High-Contrast)</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between pt-2 border-t border-slate-800">
-                    <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Automatically persisted to workspace profile
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => persistSettingsToStorageAndDb()}
-                      disabled={isSavingProfile}
-                      className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
-                    >
-                      {isSavingProfile ? 'Saving...' : 'Save Preferences'}
-                    </button>
-                  </div>
-                </div>
-
-              </div>
-
-              {/* Right Column: Company Credentials & Notification Triggers */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Left Column: Enterprise Profile & PMS Workspace Defaults */}
               <div className="space-y-6">
                 
                 {/* CTVill Company Accreditation */}
@@ -4275,6 +4336,67 @@ export default function AdminPortal({
                     </div>
                   </div>
                 </div>
+
+                {/* PMS Workspace Operational Defaults */}
+                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                    <div className="flex items-center gap-2 text-white font-bold text-sm">
+                      <Sliders className="w-4 h-4 text-amber-400" />
+                      <span>PMS Workspace Operational Defaults</span>
+                    </div>
+                    <span className="text-[10px] font-mono text-slate-500">GLOBAL CONFIG</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+                    <div>
+                      <label className="block text-slate-400 font-semibold mb-1">Default View Upon Sign-In</label>
+                      <select
+                        value={defaultPmsView}
+                        onChange={(e) => setDefaultPmsView(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
+                      >
+                        <option value="dashboard">Operations Dashboard</option>
+                        <option value="projects">Commercial Sites Hub</option>
+                        <option value="gantt">Gantt Milestone Schedule</option>
+                        <option value="site-diary">Weather Report</option>
+                        <option value="documents">Document Management</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-slate-400 font-semibold mb-1">Session Inactivity Timeout</label>
+                      <select
+                        value={sessionTimeout}
+                        onChange={(e) => setSessionTimeout(e.target.value)}
+                        className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-amber-500 cursor-pointer"
+                      >
+                        <option value="2h">2 Hours (Strict)</option>
+                        <option value="4h">4 Hours</option>
+                        <option value="8h">8 Hours (Standard Shift)</option>
+                        <option value="24h">24 Hours (Extended)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-800">
+                    <span className="text-[11px] text-emerald-400 font-mono flex items-center gap-1">
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Synchronized across enterprise clients
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => persistSettingsToStorageAndDb()}
+                      disabled={isSavingProfile}
+                      className="px-3.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold cursor-pointer transition-colors"
+                    >
+                      {isSavingProfile ? 'Saving...' : 'Save Defaults'}
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Right Column: Operational Alert Triggers */}
+              <div className="space-y-6">
 
                 {/* Real-Time Automated Alerts */}
                 <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
@@ -4498,6 +4620,9 @@ export default function AdminPortal({
 
           </div>
 
+        )}
+
+          </>
         )}
 
       </main>
@@ -4778,38 +4903,140 @@ export default function AdminPortal({
               </button>
             </div>
 
-            {/* In-House vs Outsourced Switcher */}
-            <div className="px-5 pt-4 pb-1">
-              <div className="grid grid-cols-2 gap-2 p-1 bg-slate-900 border border-slate-800 rounded-xl">
+            {/* 4-Track Enterprise Workforce Switcher */}
+            <div className="px-5 pt-3.5 pb-1 space-y-2">
+              <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider">
+                Select Workforce Track &amp; Entity Classification *
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 p-1 bg-slate-900 border border-slate-800 rounded-xl">
                 <button
                   type="button"
-                  onClick={() => setContEmploymentType('INTERNAL')}
-                  className={`py-2 px-3 rounded-lg text-xs font-bold font-mono transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                    contEmploymentType === 'INTERNAL'
+                  onClick={() => {
+                    setRegTrack('OFFICE_STAFF');
+                    setContEmploymentType('INTERNAL');
+                    setContDepartment('Executive Leadership');
+                    setContRoleTitle('Chief Operating Officer (COO)');
+                    setContDailyRate(3500);
+                    setContMonthlySalary(77000);
+                    setContSite('Unassigned');
+                    setContManpower(1);
+                  }}
+                  className={`py-2 px-2 rounded-lg text-[11px] font-bold font-mono transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    regTrack === 'OFFICE_STAFF'
+                      ? 'bg-purple-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  <Building className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Office Staff</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegTrack('FIELD_SUPERVISION');
+                    setContEmploymentType('INTERNAL');
+                    setContDepartment('Project Management & Construction ("CONSTRUCT" Phase)');
+                    setContRoleTitle('Site Foremen');
+                    setContDailyRate(1500);
+                    setContMonthlySalary(33000);
+                    setContManpower(1);
+                  }}
+                  className={`py-2 px-2 rounded-lg text-[11px] font-bold font-mono transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    regTrack === 'FIELD_SUPERVISION'
+                      ? 'bg-cyan-600 text-white shadow-md'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  <HardHat className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Field Engr</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRegTrack('TRADE_CREW');
+                    setContEmploymentType('INTERNAL');
+                    setContSpec('Carpentry & Formwork');
+                    setContDailyRate(900);
+                    setContMonthlySalary(19800);
+                    if (contManpower <= 1) setContManpower(8);
+                  }}
+                  className={`py-2 px-2 rounded-lg text-[11px] font-bold font-mono transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    regTrack === 'TRADE_CREW'
                       ? 'bg-emerald-600 text-white shadow-md'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                   }`}
                 >
-                  <Building className="w-3.5 h-3.5" />
-                  <span>CTVill In-House (Default)</span>
+                  <Users className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Trade Crew</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setContEmploymentType('OUTSOURCED')}
-                  className={`py-2 px-3 rounded-lg text-xs font-bold font-mono transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
-                    contEmploymentType === 'OUTSOURCED'
+                  onClick={() => {
+                    setRegTrack('OUTSOURCED');
+                    setContEmploymentType('OUTSOURCED');
+                    setContSpec('General Contractor');
+                    if (contManpower <= 1) setContManpower(12);
+                  }}
+                  className={`py-2 px-2 rounded-lg text-[11px] font-bold font-mono transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                    regTrack === 'OUTSOURCED'
                       ? 'bg-amber-600 text-white shadow-md'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                   }`}
                 >
-                  <Users className="w-3.5 h-3.5" />
-                  <span>Outsourced Contractor</span>
+                  <Briefcase className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">Outsourced</span>
                 </button>
               </div>
+
+              {/* Informative Track Banner */}
+              {regTrack === 'OFFICE_STAFF' && (
+                <div className="p-2.5 bg-purple-950/30 border border-purple-800/40 rounded-xl text-[11px] text-purple-200 flex items-start gap-2">
+                  <Building className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-bold text-white">Corporate Office Staff (Individual • Headcount: 1)</strong>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Executives, HR, Finance, and admin personnel. Headcount is strictly fixed at 1 and exempt from physical gate roll-call muster and construction labor reallocation scans.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {regTrack === 'FIELD_SUPERVISION' && (
+                <div className="p-2.5 bg-cyan-950/30 border border-cyan-800/40 rounded-xl text-[11px] text-cyan-200 flex items-start gap-2">
+                  <HardHat className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-bold text-white">Field Supervision &amp; Engineering (Individual • Headcount: 1)</strong>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Dedicated site professionals (Project Managers, Engineers, Safety Officers, Foremen) stationed for technical supervision and quality assurance.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {regTrack === 'TRADE_CREW' && (
+                <div className="p-2.5 bg-emerald-950/30 border border-emerald-800/40 rounded-xl text-[11px] text-emerald-200 flex items-start gap-2">
+                  <Users className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-bold text-white">In-House Trade Gang (Crew Gang Entity • Scalable Headcount)</strong>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Collective craft gang (e.g. Masonry, Carpentry, Rebar, MEP) under a designated Crew Lead. Registered headcount scales on-site labor charts and AI capacity.
+                    </p>
+                  </div>
+                </div>
+              )}
+              {regTrack === 'OUTSOURCED' && (
+                <div className="p-2.5 bg-amber-950/30 border border-amber-800/40 rounded-xl text-[11px] text-amber-200 flex items-start gap-2">
+                  <Briefcase className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-bold text-white">Outsourced Contractor Partner (Trade Partner Entity • Managed Headcount)</strong>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      External subcontracting firm. Headcount and contract amounts are tracked for invoice milestones and gate roll-call verification.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
 
-            <form id="contractorForm" onSubmit={handleRegisterContractorSubmit} className="flex-1 overflow-y-auto p-5 pt-3 space-y-3.5 text-xs font-sans">
-              {contEmploymentType === 'INTERNAL' ? (
+            <form id="contractorForm" onSubmit={handleRegisterContractorSubmit} className="flex-1 overflow-y-auto p-5 pt-2 space-y-3.5 text-xs font-sans">
+              {(regTrack === 'OFFICE_STAFF' || regTrack === 'FIELD_SUPERVISION') ? (
                 <>
                   {/* Department & Role Dynamic Selectors */}
                   <div className="bg-slate-900/90 border border-emerald-600/30 rounded-xl p-3.5 space-y-3">
@@ -4958,6 +5185,130 @@ export default function AdminPortal({
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-emerald-500"
                     />
                   </div>
+
+                  {/* Job Site Deployment */}
+                  <div>
+                    <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-1">
+                      🏗️ Active Job Site Deployment
+                    </label>
+                    <select
+                      value={contSite}
+                      onChange={(e) => setContSite(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      <option value="Unassigned">Unassigned / Standby (Office & Non-Site Staff)</option>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                    <span className="text-[10px] text-slate-500 block mt-1">
+                      Staff not assigned to an active construction site remain on Standby and are excluded from on-site field headcounts.
+                    </span>
+                  </div>
+                </>
+              ) : regTrack === 'TRADE_CREW' ? (
+                <>
+                  {/* In-House Trade Gang Registration Form */}
+                  <div>
+                    <label className="block text-[10px] font-mono text-emerald-400 uppercase font-bold tracking-wider mb-1">
+                      🛠️ Trade Craft Specialty *
+                    </label>
+                    <select
+                      value={contSpec}
+                      onChange={(e) => setContSpec(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-emerald-500"
+                    >
+                      <option>Carpentry &amp; Formwork</option>
+                      <option>Civil &amp; Concrete Masonry</option>
+                      <option>Steel &amp; Rebar Works</option>
+                      <option>Electrical Works</option>
+                      <option>Plumbing &amp; Sanitary</option>
+                      <option>Painting &amp; Finishing</option>
+                      <option>Tiling &amp; Flooring</option>
+                      <option>Interior Fit-Out &amp; Drywall</option>
+                      <option>Earthworks &amp; Site Grading</option>
+                      <option>General Labor Gang</option>
+                    </select>
+                  </div>
+
+                  {/* Crew Lead Name */}
+                  <div>
+                    <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-1">
+                      Crew Lead / Capataz Full Name *
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={contName}
+                      onChange={(e) => setContName(e.target.value)}
+                      placeholder="e.g. Danilo Santos (Capataz - Carpentry Gang)"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  {/* Registered Crew Headcount & Wage */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-emerald-950/20 border border-emerald-800/40 p-3 rounded-xl">
+                    <div>
+                      <label className="block text-[10px] font-mono text-emerald-400 uppercase font-bold tracking-wider mb-1">
+                        👥 Registered Gang Headcount *
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="200"
+                        required
+                        value={contManpower}
+                        onChange={(e) => setContManpower(Math.max(1, Number(e.target.value) || 1))}
+                        className="w-full bg-slate-950 border border-emerald-700/60 rounded-lg p-2.5 text-white font-mono text-xs focus:outline-none focus:border-emerald-500 font-bold"
+                      />
+                      <span className="text-[10px] text-slate-500 block mt-0.5">Assigned laborers in this gang</span>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-mono text-emerald-400 uppercase font-bold tracking-wider mb-1">
+                        Daily Wage per Laborer (₱)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        value={contDailyRate}
+                        onChange={(e) => setContDailyRate(Number(e.target.value))}
+                        className="w-full bg-slate-950 border border-emerald-700/60 rounded-lg p-2.5 text-white font-mono text-xs focus:outline-none focus:border-emerald-500 font-bold"
+                      />
+                      <span className="text-[10px] text-slate-500 block mt-0.5">Statutory daily craft rate</span>
+                    </div>
+                  </div>
+
+                  {/* Contact Number */}
+                  <div>
+                    <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-1">
+                      Crew Lead Contact Mobile (Optional)
+                    </label>
+                    <input
+                      type="text"
+                      value={contContact}
+                      onChange={(e) => setContContact(e.target.value)}
+                      placeholder="e.g. +63 918 222 3333"
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-emerald-500"
+                    />
+                  </div>
+
+                  {/* Active Job Site Deployment */}
+                  <div>
+                    <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-1">
+                      🏗️ Active Job Site Deployment
+                    </label>
+                    <select
+                      value={contSite}
+                      onChange={(e) => setContSite(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-emerald-500 cursor-pointer"
+                    >
+                      <option value="Unassigned">Unassigned / Standby (Depot Pool)</option>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
                 </>
               ) : (
                 <>
@@ -5061,6 +5412,23 @@ export default function AdminPortal({
                       <option>Manpower Supply</option>
                       <option>Interior Design &amp; Fit-Out</option>
                       <option>Other</option>
+                    </select>
+                  </div>
+
+                  {/* Job Site Deployment for Outsourced */}
+                  <div>
+                    <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-1">
+                      🏗️ Assigned Commercial Site
+                    </label>
+                    <select
+                      value={contSite}
+                      onChange={(e) => setContSite(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-amber-500 cursor-pointer"
+                    >
+                      <option value="Unassigned">Unassigned / Standby (Not Currently Deployed)</option>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.name}>{p.name}</option>
+                      ))}
                     </select>
                   </div>
 
@@ -5168,29 +5536,123 @@ export default function AdminPortal({
                   }}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-blue-500"
                 >
-                  {contractors.map(c => (
+                  {contractors.filter(c => !isOfficeOrExecutive(c)).map(c => (
                     <option key={c.id} value={c.id}>
-                      {c.name} ({c.specialty || c.company || 'Crew'}) — Roster: {c.activeManpower || 10} men
+                      {c.name} ({c.specialty || c.company || 'Crew'}) — Roster: {c.activeManpower || 1} {c.activeManpower === 1 ? 'person' : 'men'}
                     </option>
                   ))}
+                  {contractors.filter(c => !isOfficeOrExecutive(c)).length === 0 && (
+                    <option disabled value="">No active field crews or trade partners registered</option>
+                  )}
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-1">
-                    Work Shift *
-                  </label>
-                  <select
-                    value={auditShift}
-                    onChange={(e) => setAuditShift(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="Morning Shift">Morning Shift (07:00 - 16:00)</option>
-                    <option value="Afternoon Shift">Afternoon Shift (13:00 - 21:00)</option>
-                    <option value="Night Overtime">Night Shift / Overtime</option>
-                    <option value="Full Day">Full Day Audit</option>
-                  </select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider">
+                      Work Shift *
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsCustomShift(!isCustomShift)}
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded transition cursor-pointer flex items-center gap-1 ${
+                        isCustomShift
+                          ? 'bg-blue-600/30 text-blue-300 border border-blue-500/40 font-bold'
+                          : 'text-slate-400 hover:text-white bg-slate-900 border border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <Clock className="w-3 h-3" />
+                      {isCustomShift ? 'Standard Shifts' : '⚡ Custom / Flexible'}
+                    </button>
+                  </div>
+
+                  {!isCustomShift ? (
+                    <select
+                      value={auditShift}
+                      onChange={(e) => {
+                        if (e.target.value === '__CUSTOM__') {
+                          setIsCustomShift(true);
+                        } else {
+                          setAuditShift(e.target.value);
+                        }
+                      }}
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="Morning Shift (07:00 - 16:00)">Morning Shift (07:00 - 16:00)</option>
+                      <option value="Regular Day Shift (08:00 - 17:00)">Regular Day Shift (08:00 - 17:00)</option>
+                      <option value="Early Morning Pour (05:00 - 14:00)">Early Morning Pour (05:00 - 14:00)</option>
+                      <option value="Afternoon Shift (13:00 - 21:00)">Afternoon Shift (13:00 - 21:00)</option>
+                      <option value="Night Shift / Graveyard (22:00 - 06:00)">Night Shift / Graveyard (22:00 - 06:00)</option>
+                      <option value="Overtime Extension (17:00 - 22:00)">Overtime Extension (17:00 - 22:00)</option>
+                      <option value="Continuous 24-Hour Roster">Continuous 24-Hour Roster</option>
+                      <option value="__CUSTOM__">⚡ Custom / Flexible Hours (Pick Times)...</option>
+                    </select>
+                  ) : (
+                    <div className="bg-slate-900/90 border border-blue-500/40 rounded-lg p-2.5 space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[9px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-0.5">
+                            Start Time
+                          </label>
+                          <input
+                            type="time"
+                            value={customShiftStart}
+                            onChange={(e) => setCustomShiftStart(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-[9px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-0.5">
+                            End Time
+                          </label>
+                          <input
+                            type="time"
+                            value={customShiftEnd}
+                            onChange={(e) => setCustomShiftEnd(e.target.value)}
+                            className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1.5 text-white font-mono text-xs focus:outline-none focus:border-blue-500"
+                          />
+                        </div>
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-[9px] font-mono text-slate-400 uppercase font-bold tracking-wider">
+                            Shift Tag / Activity (Optional)
+                          </label>
+                          <span className="text-[10px] font-mono text-emerald-400 font-bold flex items-center gap-1">
+                            <span>⏱️ {calculateCustomShiftHours(customShiftStart, customShiftEnd)} hrs</span>
+                            {customShiftEnd < customShiftStart && (
+                              <span className="text-blue-300 text-[9px]">🌙 Overnight</span>
+                            )}
+                          </span>
+                        </div>
+                        <input
+                          type="text"
+                          value={customShiftTag}
+                          onChange={(e) => setCustomShiftTag(e.target.value)}
+                          placeholder="e.g. Concrete Pouring, Split Shift, Overtime"
+                          className="w-full bg-slate-950 border border-slate-700 rounded-md px-2 py-1 text-white text-xs placeholder:text-slate-600 focus:outline-none focus:border-blue-500"
+                        />
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {['Day Overtime', 'Night Pour', 'Split Shift', 'Half Day', 'Weekend'].map(tag => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => setCustomShiftTag(tag)}
+                              className={`text-[9px] font-mono px-1.5 py-0.5 rounded border transition cursor-pointer ${
+                                customShiftTag === tag
+                                  ? 'bg-blue-600 text-white border-blue-500 font-bold'
+                                  : 'bg-slate-950 text-slate-400 border-slate-800 hover:text-slate-200'
+                              }`}
+                            >
+                              +{tag}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -5205,6 +5667,14 @@ export default function AdminPortal({
                     placeholder="e.g. NexBridge Floor 4 Quadrant A"
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-blue-500"
                   />
+                  <div className="mt-2 p-2 bg-slate-900/60 border border-slate-800/80 rounded-lg text-[10px] text-slate-400 font-mono flex items-center justify-between">
+                    <span className="flex items-center gap-1"><Clock className="w-3 h-3 text-blue-400" /> Active Shift:</span>
+                    <span className="text-white font-bold truncate max-w-[150px]">
+                      {isCustomShift 
+                        ? `${customShiftTag ? `${customShiftTag} ` : ''}(${customShiftStart} - ${customShiftEnd})` 
+                        : auditShift}
+                    </span>
+                  </div>
                 </div>
               </div>
 

@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { broadcastChange, invalidateAllDataCache } from '../events';
 
 export function createGanttRouter(prisma: PrismaClient) {
   const router = Router();
@@ -150,6 +151,7 @@ export function createGanttRouter(prisma: PrismaClient) {
               const duration = Math.max(0, parseInt(String(effectiveData?.duration ?? 1), 10));
               const endDate = endRaw ? new Date(endRaw) : addWorkingDays(startDate, duration);
               const progress = Math.max(0, Math.min(1, parseFloat(String(effectiveData?.progress ?? 0))));
+              const status = effectiveData?.status || (progress >= 1.0 ? 'COMPLETED' : progress > 0 ? 'IN_PROGRESS' : 'TODO');
               const parentId = effectiveData?.parent && effectiveData.parent !== 0 && effectiveData.parent !== '0' 
                 ? String(effectiveData.parent) 
                 : (effectiveData?.parentTaskId ? String(effectiveData.parentTaskId) : null);
@@ -160,10 +162,12 @@ export function createGanttRouter(prisma: PrismaClient) {
                   id,
                   projectId,
                   text: effectiveData?.text || 'New Construction Task',
+                  title: effectiveData?.text || 'New Construction Task',
                   startDate,
                   endDate,
                   duration,
                   progress,
+                  status,
                   type,
                   parentTaskId: parentId,
                   wbsCode: effectiveData?.wbsCode || null,
@@ -194,7 +198,9 @@ export function createGanttRouter(prisma: PrismaClient) {
                 const startDate = startRaw ? new Date(startRaw) : new Date();
                 const duration = effectiveData?.duration !== undefined ? Math.max(0, parseInt(String(effectiveData.duration), 10)) : 1;
                 const endDate = endRaw ? new Date(endRaw) : addWorkingDays(startDate, duration);
-                const progress = effectiveData?.progress !== undefined ? Math.max(0, Math.min(1, parseFloat(String(effectiveData.progress)))) : 0;
+                const hasExplicitProgress = effectiveData?.progress !== undefined;
+                const progress = hasExplicitProgress ? Math.max(0, Math.min(1, parseFloat(String(effectiveData.progress)))) : undefined;
+                const derivedStatus = effectiveData?.status || (hasExplicitProgress && progress !== undefined ? (progress >= 1.0 ? 'COMPLETED' : progress > 0 ? 'IN_PROGRESS' : 'TODO') : undefined);
                 const parentId = effectiveData?.parent !== undefined 
                   ? (effectiveData.parent && effectiveData.parent !== 0 && effectiveData.parent !== '0' ? String(effectiveData.parent) : null) 
                   : (effectiveData?.parentTaskId !== undefined ? effectiveData.parentTaskId : undefined);
@@ -203,11 +209,12 @@ export function createGanttRouter(prisma: PrismaClient) {
                 await tx.projectTask.upsert({
                   where: { id: taskId },
                   update: {
-                    ...(effectiveData?.text !== undefined ? { text: effectiveData.text } : {}),
+                    ...(effectiveData?.text !== undefined ? { text: effectiveData.text, title: effectiveData.text } : {}),
                     ...(startRaw ? { startDate } : {}),
                     ...(endRaw ? { endDate } : {}),
                     ...(effectiveData?.duration !== undefined ? { duration } : {}),
-                    ...(effectiveData?.progress !== undefined ? { progress } : {}),
+                    ...(progress !== undefined ? { progress } : {}),
+                    ...(derivedStatus !== undefined ? { status: derivedStatus } : {}),
                     ...(effectiveData?.type !== undefined ? { type } : {}),
                     ...(parentId !== undefined ? { parentTaskId: parentId } : {}),
                     ...(effectiveData?.wbsCode !== undefined ? { wbsCode: effectiveData.wbsCode } : {}),
@@ -219,10 +226,12 @@ export function createGanttRouter(prisma: PrismaClient) {
                     id: taskId,
                     projectId,
                     text: effectiveData?.text || 'New Construction Task',
+                    title: effectiveData?.text || 'New Construction Task',
                     startDate,
                     endDate,
                     duration,
-                    progress,
+                    progress: progress ?? 0,
+                    status: derivedStatus || (progress !== undefined && progress >= 1.0 ? 'COMPLETED' : progress !== undefined && progress > 0 ? 'IN_PROGRESS' : 'TODO'),
                     type,
                     parentTaskId: parentId || null,
                     wbsCode: effectiveData?.wbsCode || null,
@@ -322,6 +331,10 @@ export function createGanttRouter(prisma: PrismaClient) {
           };
         });
 
+        broadcastChange('tasks');
+        broadcastChange('projects');
+        invalidateAllDataCache();
+
         return res.json({
           success: true,
           message: `Successfully processed ${action} on ${effectiveEntityType}.`,
@@ -360,16 +373,19 @@ export function createGanttRouter(prisma: PrismaClient) {
           const endDate = t.end_date ? new Date(t.end_date) : addWorkingDays(startDate, duration || 1);
           const parentId = t.parent && t.parent !== 0 && t.parent !== '0' ? String(t.parent) : null;
           const progress = Math.max(0, Math.min(1, parseFloat(String(t.progress || 0))));
+          const status = t.status || (progress >= 1.0 ? 'COMPLETED' : progress > 0 ? 'IN_PROGRESS' : 'TODO');
           const type = (duration === 0 || t.type === 'milestone') ? 'milestone' : (t.type || 'task');
 
           await tx.projectTask.upsert({
             where: { id: String(t.id) },
             update: {
               text: t.text || 'Untitled Construction Task',
+              title: t.text || 'Untitled Construction Task',
               startDate,
               endDate,
               duration,
               progress,
+              status,
               type,
               parentTaskId: parentId,
               wbsCode: t.wbsCode || null,
@@ -381,10 +397,12 @@ export function createGanttRouter(prisma: PrismaClient) {
               id: String(t.id),
               projectId,
               text: t.text || 'Untitled Construction Task',
+              title: t.text || 'Untitled Construction Task',
               startDate,
               endDate,
               duration,
               progress,
+              status,
               type,
               parentTaskId: parentId,
               wbsCode: t.wbsCode || null,
@@ -438,6 +456,10 @@ export function createGanttRouter(prisma: PrismaClient) {
 
         return { tasksCount: tasks.length, linksCount: links.length, projectProgress: avgProgress };
       });
+
+      broadcastChange('tasks');
+      broadcastChange('projects');
+      invalidateAllDataCache();
 
       res.json({
         success: true,

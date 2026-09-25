@@ -115,17 +115,94 @@ export default function PaymentsTracker({
     return Array.from(names);
   }, [projects, installments]);
 
+  // Helper to resolve client name from project name
+  const resolveClientForProject = (projName: string): string => {
+    const matchedProject = (projects || []).find(p => p.name.trim().toLowerCase() === projName.trim().toLowerCase());
+    if (matchedProject && matchedProject.clientName?.trim()) {
+      return matchedProject.clientName.trim();
+    }
+    const matchedClient = (clients || []).find(c => c.packageName?.trim().toLowerCase() === projName.trim().toLowerCase());
+    if (matchedClient && matchedClient.name?.trim()) {
+      return matchedClient.name.trim();
+    }
+    const matchedInst = installments.find(i => i.projectName?.trim().toLowerCase() === projName.trim().toLowerCase());
+    if (matchedInst && matchedInst.clientName?.trim()) {
+      return matchedInst.clientName.trim();
+    }
+    return '';
+  };
+
+  // Dynamically aggregate payable entities (both Clients and Commercial Projects)
+  const payableAccounts = useMemo(() => {
+    const list: Array<{ id: string; name: string; subtitle: string; balanceText: string; isProject: boolean; clientName?: string; projectId?: string }> = [];
+    
+    // 1. Commercial Projects
+    (projects || []).forEach(p => {
+      const balance = Math.max(0, (p.budget || 0) - (p.fundsCollected || 0));
+      list.push({
+        id: p.id,
+        name: p.name,
+        subtitle: p.clientName ? `Client: ${p.clientName}` : 'Commercial Fit-Out',
+        balanceText: `Outstanding: ₱${balance.toLocaleString()}`,
+        isProject: true,
+        clientName: p.clientName,
+        projectId: p.id
+      });
+    });
+
+    // 2. Subdivision Clients
+    (clients || []).forEach(c => {
+      list.push({
+        id: c.id,
+        name: c.name,
+        subtitle: c.packageName || 'Client Account',
+        balanceText: `Bal: ₱${(c.balance || 0).toLocaleString()}`,
+        isProject: false,
+        clientName: c.name
+      });
+    });
+
+    // 3. Fallback from active installments if empty
+    if (list.length === 0) {
+      installments.forEach(inst => {
+        if (!list.some(item => item.name === inst.clientName)) {
+          list.push({
+            id: inst.clientId || inst.clientName,
+            name: inst.clientName,
+            subtitle: inst.projectName,
+            balanceText: `Installment: ₱${inst.amount.toLocaleString()}`,
+            isProject: false,
+            clientName: inst.clientName
+          });
+        }
+      });
+    }
+
+    return list;
+  }, [projects, clients, installments]);
+
+  // Sync default recordClientId
+  useEffect(() => {
+    if (payableAccounts.length > 0 && (!recordClientId || !payableAccounts.some(a => a.id === recordClientId))) {
+      setRecordClientId(payableAccounts[0].id);
+    }
+  }, [payableAccounts, recordClientId]);
+
   // New Invoice Form state
-  const [invoiceClientName, setInvoiceClientName] = useState<string>('NexBridge Corp');
-  const [invoiceProjectName, setInvoiceProjectName] = useState<string>(availableProjectNames[0] || 'Commercial Fit-Out Site 1');
+  const initialProj = availableProjectNames[0] || 'Commercial Fit-Out Site 1';
+  const [invoiceProjectName, setInvoiceProjectName] = useState<string>(initialProj);
+  const [invoiceClientName, setInvoiceClientName] = useState<string>(() => resolveClientForProject(initialProj) || 'NexBridge Corp');
   const [invoiceDueDate, setInvoiceDueDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [invoiceAmount, setInvoiceAmount] = useState<number>(350000);
   const [invoiceMethod, setInvoiceMethod] = useState<string>('Progress Billing Installment');
 
-  // Sync default project name when projects change
+  // Sync default project name and auto-select client when projects change
   useEffect(() => {
     if (availableProjectNames.length > 0 && (!invoiceProjectName || !availableProjectNames.includes(invoiceProjectName))) {
-      setInvoiceProjectName(availableProjectNames[0]);
+      const nextProj = availableProjectNames[0];
+      setInvoiceProjectName(nextProj);
+      const autoClient = resolveClientForProject(nextProj);
+      if (autoClient) setInvoiceClientName(autoClient);
     }
   }, [availableProjectNames]);
 
@@ -275,7 +352,7 @@ export default function PaymentsTracker({
         });
       });
 
-      setFeedbackMsg('Payment successfully recorded and synced with PostgreSQL ledger!');
+      setFeedbackMsg('Payment successfully recorded and synced with the ledger!');
       setTimeout(() => {
         setShowRecordModal(false);
         setFeedbackMsg(null);
@@ -696,7 +773,28 @@ export default function PaymentsTracker({
 
             <form onSubmit={handleCreateInvoiceSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Client / Corporate Account</label>
+                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Commercial Fit-Out Project</label>
+                <select
+                  value={invoiceProjectName}
+                  onChange={(e) => {
+                    const proj = e.target.value;
+                    setInvoiceProjectName(proj);
+                    const autoClient = resolveClientForProject(proj);
+                    if (autoClient) setInvoiceClientName(autoClient);
+                  }}
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none cursor-pointer"
+                >
+                  {availableProjectNames.map((projName) => (
+                    <option key={projName} value={projName}>{projName}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-mono text-slate-400 uppercase">Client / Corporate Account</label>
+                  <span className="text-[10px] text-emerald-400 font-mono">Auto-populated from Project</span>
+                </div>
                 <input
                   type="text"
                   required
@@ -705,19 +803,6 @@ export default function PaymentsTracker({
                   onChange={(e) => setInvoiceClientName(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
                 />
-              </div>
-
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Commercial Fit-Out Project</label>
-                <select
-                  value={invoiceProjectName}
-                  onChange={(e) => setInvoiceProjectName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
-                >
-                  {availableProjectNames.map((projName) => (
-                    <option key={projName} value={projName}>{projName}</option>
-                  ))}
-                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -734,13 +819,29 @@ export default function PaymentsTracker({
                 </div>
                 <div>
                   <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Due Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={invoiceDueDate}
-                    onChange={(e) => setInvoiceDueDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono focus:border-emerald-500 focus:outline-none"
-                  />
+                  <div className="relative">
+                    <input
+                      type="date"
+                      required
+                      value={invoiceDueDate}
+                      onChange={(e) => setInvoiceDueDate(e.target.value)}
+                      onClick={(e) => {
+                        try { (e.target as any).showPicker?.(); } catch {}
+                      }}
+                      className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono focus:border-emerald-500 focus:outline-none cursor-pointer [color-scheme:dark]"
+                    />
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        const input = (e.currentTarget.previousElementSibling as HTMLInputElement);
+                        try { input?.showPicker?.(); } catch { input?.focus(); }
+                      }}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-emerald-400 cursor-pointer"
+                      title="Open Calendar Dropdown"
+                    >
+                      <Calendar className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -763,7 +864,7 @@ export default function PaymentsTracker({
                 <button
                   type="button"
                   onClick={() => setShowCreateInvoiceModal(false)}
-                  className="px-4 py-2 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-xs font-medium"
+                  className="px-4 py-2 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-xs font-medium cursor-pointer"
                 >
                   Cancel
                 </button>
@@ -785,7 +886,7 @@ export default function PaymentsTracker({
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-lg shadow-2xl p-6 relative">
             <button
               onClick={() => setShowRecordModal(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+              className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -813,13 +914,18 @@ export default function PaymentsTracker({
                   required
                   value={recordClientId}
                   onChange={(e) => setRecordClientId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none cursor-pointer"
                 >
-                  {clients.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} — {c.packageName} (Bal: ₱{c.balance.toLocaleString()})
-                    </option>
-                  ))}
+                  {payableAccounts.length === 0 ? (
+                    <option value="" disabled>No active projects or clients registered</option>
+                  ) : (
+                    payableAccounts.map(acc => (
+                      <option key={acc.id} value={acc.id}>
+                        {acc.isProject ? '🏢 [Project] ' : '👤 [Client] '}
+                        {acc.name} — {acc.subtitle} ({acc.balanceText})
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 

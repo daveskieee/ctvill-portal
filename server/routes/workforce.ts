@@ -6,13 +6,42 @@
 import { Router, Request, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { prisma, pool } from '../db';
-import { broadcastChange } from '../events';
+import { broadcastChange, invalidateAllDataCache } from '../events';
 
 export const workforceRouter = Router();
 
 // ============================================================================
 // CONTRACTORS & ARTISAN WORKFORCE DIRECTORY
 // ============================================================================
+
+// Helper to determine if worker/personnel is office, executive, or corporate support
+export function isOfficeOrExecutiveWorker(c: any): boolean {
+  if (c.workforceCategory === 'OFFICE_STAFF') return true;
+  const dept = (c.department || '').toLowerCase();
+  const role = (c.roleTitle || c.specialty || '').toLowerCase();
+  return (
+    dept.includes('executive') ||
+    dept.includes('corporate') ||
+    dept.includes('finance') ||
+    dept.includes('accounting') ||
+    dept.includes('human resources') ||
+    dept.includes('admin') ||
+    dept.includes('legal') ||
+    dept.includes('procurement') ||
+    role.includes('board') ||
+    role.includes('president') ||
+    role.includes('ceo') ||
+    role.includes('coo') ||
+    role.includes('director') ||
+    role.includes('finance') ||
+    role.includes('accounting') ||
+    role.includes('accountant') ||
+    role.includes('hr') ||
+    role.includes('recruiter') ||
+    role.includes('legal') ||
+    role.includes('buyer')
+  );
+}
 
 // GET /api/contractors-list
 workforceRouter.get('/contractors-list', async (req: Request, res: Response) => {
@@ -120,6 +149,7 @@ workforceRouter.post('/contractors', async (req: Request, res: Response) => {
     }
 
     broadcastChange('contractors');
+    invalidateAllDataCache();
     res.status(201).json({
       ...newContractor,
       contractAmount: Number(newContractor.contractAmount || 0),
@@ -160,6 +190,7 @@ workforceRouter.post('/contractors/update-progress', async (req: Request, res: R
         }
       }
       broadcastChange('contractors');
+      invalidateAllDataCache();
     }
     res.json({ success: true });
   } catch (error) {
@@ -203,6 +234,7 @@ workforceRouter.put('/contractors/:id', async (req: Request, res: Response) => {
     }
 
     broadcastChange('contractors');
+    invalidateAllDataCache();
     res.json(updated);
   } catch (error) {
     console.error('Error updating contractor:', error);
@@ -225,6 +257,7 @@ workforceRouter.delete('/contractors/:id', async (req: Request, res: Response) =
     await pool.query('DELETE FROM labor_allocations WHERE contractor_id = $1', [id]);
     await prisma.contractor.delete({ where: { id } });
     broadcastChange('contractors');
+    invalidateAllDataCache();
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting contractor:', error);
@@ -496,7 +529,7 @@ Return a strict JSON array of objects with fields:
 - priority: "HIGH" | "MEDIUM"
 `;
         const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
+          model: 'gemini-3.6-flash',
           contents: prompt,
           config: { responseMimeType: 'application/json' }
         });
@@ -542,6 +575,8 @@ Return a strict JSON array of objects with fields:
       const targetProj = recipientProjects[0] || projects[0];
 
       const donorCandidates = dbContractors.filter((c: any) => {
+        // Strictly exclude corporate office staff, executives, finance, HR, legal
+        if (isOfficeOrExecutiveWorker(c)) return false;
         if (c.activeProjectSite && targetProj.name && c.activeProjectSite.toLowerCase().trim() === targetProj.name.toLowerCase().trim()) {
           return false;
         }
@@ -572,12 +607,19 @@ Return a strict JSON array of objects with fields:
 
         let rationale = '';
         if (isStandby) {
-          rationale = `Artisan ${worker.name} (${trade}) is currently on Standby. Assigning to "${targetProj.name}" (${targetProgress}% progress) accelerates critical fit-out execution.`;
+          rationale = `${worker.name} (${trade}) is currently on Standby. Assigning to "${targetProj.name}" (${targetProgress}% progress) accelerates critical fit-out execution.`;
         } else if (donorProj && Number(donorProj.progress_percentage || 0) >= 80) {
           rationale = `Donor project "${donorProj.name}" is near completion (${donorProj.progress_percentage}% progress). Transferring ${worker.name} (${trade}) to "${targetProj.name}" recovers scheduled velocity.`;
         } else {
           rationale = `Cross-project labor balance: Reallocating ${worker.name} (${trade}) from "${donorName}" reinforces "${targetProj.name}" on-site trade capacity.`;
         }
+
+        const isCrew = (worker.activeManpower || 1) > 1 || 
+          worker.workforceCategory === 'TRADE_CREW' || 
+          worker.entityType === 'CREW' ||
+          (worker.specialty || '').toLowerCase().includes('crew') || 
+          (worker.specialty || '').toLowerCase().includes('gang') ||
+          (worker.specialty || '').toLowerCase().includes('supply');
 
         newRecommendations.push({
           id: recId,
@@ -592,7 +634,7 @@ Return a strict JSON array of objects with fields:
           contractorId: worker.id,
           contractorName: worker.company || worker.name,
           currentHeadcount: worker.activeManpower || 1,
-          recommendedHeadcount: Math.max(2, (worker.activeManpower || 1) + 2),
+          recommendedHeadcount: isCrew ? Math.max(2, (worker.activeManpower || 1) + 2) : 1,
           rationale,
           priority
         });
@@ -675,6 +717,23 @@ Return a strict JSON array of objects with fields:
   }
 });
 
+// GET /api/manpower-audits
+workforceRouter.get('/manpower-audits', async (req: Request, res: Response) => {
+  try {
+    const audits = await prisma.dailyManpowerAudit.findMany({
+      orderBy: { date: 'desc' },
+      take: 50
+    });
+    res.json(audits.map(a => ({
+      ...a,
+      date: a.date ? (a.date instanceof Date ? a.date.toISOString().split('T')[0] : String(a.date).split('T')[0]) : new Date().toISOString().split('T')[0]
+    })));
+  } catch (error) {
+    console.error('Error fetching manpower audits:', error);
+    res.status(500).json({ error: 'Failed to fetch manpower audits' });
+  }
+});
+
 // POST /api/manpower-audits
 workforceRouter.post('/manpower-audits', async (req: Request, res: Response) => {
   try {
@@ -693,29 +752,44 @@ workforceRouter.post('/manpower-audits', async (req: Request, res: Response) => 
       productivityIndex
     } = req.body;
 
+    const claimed = Number(claimedHeadcount) || 0;
+    const verified = Number(verifiedHeadcount) || 0;
+    const discrepancy = claimed - verified;
     const id = `AUD-${Date.now()}`;
-    await pool.query(`
-      INSERT INTO manpower_audits 
-      (id, contractor_id, contractor_name, specialty, shift, claimed_headcount, verified_headcount, assigned_sector_or_lot, supervisor_name, gps_coordinates, photo_evidence_verified, remarks, productivity_index, audit_date)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_DATE)
-    `, [
-      id,
-      contractorId,
-      contractorName,
-      specialty,
-      shift || 'DAY',
-      claimedHeadcount || 1,
-      verifiedHeadcount || 1,
-      assignedSectorOrLot || 'Active Site',
-      supervisorName || 'Engr. Ricardo Gomez',
-      gpsCoordinates || '14.2547, 121.5056',
-      photoEvidenceVerified || false,
-      remarks || 'Daily roll-call audit verified.',
-      productivityIndex || 1.0
-    ]);
 
+    const newAudit = await prisma.dailyManpowerAudit.create({
+      data: {
+        id,
+        contractorId: contractorId || 'CONT-001',
+        contractorName: contractorName || 'SolidFoundations Engineering',
+        specialty: specialty || 'General Construction',
+        shift: shift || 'Morning',
+        claimedHeadcount: claimed,
+        verifiedHeadcount: verified,
+        discrepancy,
+        assignedSectorOrLot: assignedSectorOrLot || 'Active Site',
+        supervisorName: supervisorName || 'Site Supervisor',
+        gpsCoordinates: gpsCoordinates || '14.2789° N, 121.1245° E (Site Geofence)',
+        verificationStatus: discrepancy === 0 ? 'VERIFIED_MATCH' : 'DISCREPANCY_FLAGGED',
+        photoEvidenceVerified: photoEvidenceVerified !== undefined ? Boolean(photoEvidenceVerified) : true,
+        remarks: remarks || 'Roll-call muster audit verified.',
+        productivityIndex: Number(productivityIndex) || 95.0
+      }
+    });
+
+    if (contractorId) {
+      await prisma.contractor.update({
+        where: { id: contractorId },
+        data: { activeManpower: verified }
+      }).catch(() => null);
+    }
+
+    invalidateAllDataCache();
     broadcastChange('manpowerAudits');
-    res.json({ success: true, id });
+    res.json({
+      ...newAudit,
+      date: newAudit.date ? (newAudit.date instanceof Date ? newAudit.date.toISOString().split('T')[0] : String(newAudit.date).split('T')[0]) : new Date().toISOString().split('T')[0]
+    });
   } catch (error) {
     console.error('Error recording manpower audit:', error);
     res.status(500).json({ error: 'Failed to record manpower audit' });
@@ -753,11 +827,14 @@ workforceRouter.get('/workforce/reallocation-suggestions', async (req: Request, 
     if (donorProjects.length > 0 && recipientProjects.length > 0) {
       donorProjects.forEach(donor => {
         const assignedWorkers = contractors.filter(c => 
-          (c.activeProjectSite && donor.name && c.activeProjectSite.toLowerCase().includes(donor.name.toLowerCase())) ||
-          (c as any).allocationStatus === 'STANDBY'
+          !isOfficeOrExecutiveWorker(c) && (
+            (c.activeProjectSite && donor.name && c.activeProjectSite.toLowerCase().includes(donor.name.toLowerCase())) ||
+            (c as any).allocationStatus === 'STANDBY'
+          )
         );
 
-        const candidates = assignedWorkers.length > 0 ? assignedWorkers : contractors.slice(0, 3);
+        const tradePool = contractors.filter(c => !isOfficeOrExecutiveWorker(c));
+        const candidates = assignedWorkers.length > 0 ? assignedWorkers : tradePool.slice(0, 3);
         candidates.forEach((worker, idx) => {
           const target = recipientProjects[idx % recipientProjects.length];
           if (!target || target.id === donor.id) return;

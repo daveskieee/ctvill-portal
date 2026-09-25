@@ -486,7 +486,55 @@ financeRouter.post('/payments/record', async (req: Request, res: Response) => {
       });
     }
 
+    // Check if clientId corresponds to a project ID, project name, or project client
+    let targetProject = null;
+    try {
+      const targetProjectRes = await pool.query(
+        'SELECT * FROM commercial_projects WHERE id = $1 OR name = $1 OR client_name = $1 LIMIT 1',
+        [clientId]
+      );
+      targetProject = targetProjectRes.rows?.[0] || null;
+      if (targetProject) {
+        await pool.query(
+          'UPDATE commercial_projects SET funds_collected = COALESCE(funds_collected, 0) + $1 WHERE id = $2',
+          [Number(amount), targetProject.id]
+        );
+        broadcastChange('projects');
+      }
+    } catch (e) {
+      console.warn('Error checking commercial_projects for payment:', e);
+    }
+
     if (!clientUser) {
+      const clientName = targetProject?.client_name || clientId;
+      try {
+        clientUser = await prisma.user.create({
+          data: {
+            name: clientName,
+            email: `${clientName.toLowerCase().replace(/[^a-z0-9]/g, '') || 'client'}_${Date.now()}@client.ctvill.internal`,
+            role: 'CLIENT',
+            passwordHash: 'CLIENT_NOPASS'
+          },
+          include: {
+            clientPackage: {
+              include: {
+                installmentLedgers: { orderBy: { dueDate: 'asc' } }
+              }
+            }
+          }
+        });
+      } catch (userErr) {
+        console.warn('Fallback client creation notice:', userErr);
+      }
+    }
+
+    if (!clientUser) {
+      // If still unable to create User, return success if project was updated
+      if (targetProject) {
+        broadcastChange('projects');
+        broadcastChange('auditLogs');
+        return res.json({ success: true, amount: Number(amount), projectId: targetProject.id });
+      }
       return res.status(404).json({ error: 'Client user not found' });
     }
 

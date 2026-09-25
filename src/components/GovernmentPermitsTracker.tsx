@@ -50,6 +50,46 @@ export default function GovernmentPermitsTracker({
     return Array.from(names);
   }, [projects, permits]);
 
+  // System-recorded permit names with industry presets
+  const defaultSuggestedNames = useMemo(() => [
+    'Permit to construct',
+    'LGU Building Permit',
+    'BFP Fire Safety Evaluation Clearance (FSEC)',
+    'Fire Safety Inspection Certificate (FSIC)',
+    'DOLE Construction Safety & Health Program (CSHP)',
+    'Occupancy Permit',
+    'Barangay Construction Clearance',
+    'Sanitary & Plumbing Clearance',
+    'Electrical & Mechanical Installation Permit',
+    'PEZA Environmental & Fit-Out Clearances',
+    'Excavation & Shoring Permit',
+    'Architectural Fit-Out Clearances'
+  ], []);
+
+  const [suggestedPermitNames, setSuggestedPermitNames] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem('ctvill_saved_permit_names');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return Array.from(new Set([...parsed, ...defaultSuggestedNames]));
+        }
+      }
+    } catch {}
+    return defaultSuggestedNames;
+  });
+
+  const recordPermitName = (name: string) => {
+    if (!name.trim()) return;
+    setSuggestedPermitNames(prev => {
+      const updated = Array.from(new Set([name.trim(), ...prev]));
+      try {
+        localStorage.setItem('ctvill_saved_permit_names', JSON.stringify(updated.slice(0, 50)));
+      } catch {}
+      return updated;
+    });
+  };
+
   // Add Form State
   const [newProject, setNewProject] = useState(availableProjectNames[0] || 'Commercial Fit-Out Site 1');
   const [newName, setNewName] = useState('');
@@ -108,12 +148,13 @@ export default function GovernmentPermitsTracker({
     e.preventDefault();
     if (!newName.trim() || !newAgency.trim()) return;
 
+    recordPermitName(newName.trim());
     setIsSubmitting(true);
     try {
       const payload: Partial<GovernmentPermit> = {
         projectName: newProject,
         permitName: newName.trim(),
-        permitType: newType,
+        permitType: newType || 'LGU_BUILDING_PERMIT',
         issuingAgency: newAgency.trim(),
         referenceNo: newRef.trim() || `REF-${Date.now().toString().slice(-5)}`,
         status: 'PENDING',
@@ -160,12 +201,13 @@ export default function GovernmentPermitsTracker({
     e.preventDefault();
     if (!editingPermit) return;
 
+    recordPermitName(editName.trim());
     setIsSubmitting(true);
     try {
       const updates: Partial<GovernmentPermit> = {
         permitName: editName.trim(),
         projectName: editProject,
-        permitType: editType,
+        permitType: editType || 'LGU_BUILDING_PERMIT',
         issuingAgency: editAgency.trim(),
         referenceNo: editRef.trim(),
         applicationDate: editAppDate || null,
@@ -436,11 +478,17 @@ export default function GovernmentPermitsTracker({
           <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
           <input
             type="text"
+            list="permit-search-suggestions"
             placeholder="Search agency, permit, reference..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full bg-slate-950 border border-slate-700 text-xs text-white rounded-lg pl-9 pr-3 py-2 focus:outline-none focus:border-amber-500"
           />
+          <datalist id="permit-search-suggestions">
+            {suggestedPermitNames.map((sName, i) => (
+              <option key={`search-sug-${i}`} value={sName} />
+            ))}
+          </datalist>
         </div>
       </div>
 
@@ -590,44 +638,49 @@ export default function GovernmentPermitsTracker({
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Permit Name / Classification</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-mono text-slate-400 uppercase">Permit Name / Classification</label>
+                  <span className="text-[10px] text-amber-400 font-mono">System-remembered</span>
+                </div>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Sanitary & Plumbing Final Clearance"
+                  list="permit-names-list"
+                  placeholder="e.g. Permit to construct, Fire Safety Inspection..."
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
                 />
+                <datalist id="permit-names-list">
+                  {suggestedPermitNames.map((sug, i) => (
+                    <option key={`p-sug-${i}`} value={sug} />
+                  ))}
+                </datalist>
+
+                {/* Quick Suggestion Chips */}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {suggestedPermitNames.slice(0, 5).map((sug, i) => (
+                    <button
+                      key={`chip-${i}`}
+                      type="button"
+                      onClick={() => setNewName(sug)}
+                      className="px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-800 hover:bg-amber-950/80 text-slate-300 hover:text-amber-300 border border-slate-700 hover:border-amber-700 transition cursor-pointer"
+                    >
+                      + {sug}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Permit Type</label>
-                  <select
-                    value={newType}
-                    onChange={(e) => setNewType(e.target.value as PermitType)}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="LGU_BUILDING_PERMIT">LGU Building Permit</option>
-                    <option value="PEZA_FITOUT_PERMIT">PEZA Fit-Out Permit</option>
-                    <option value="FSIC_FIRE_SAFETY">BFP Fire Safety (FSIC)</option>
-                    <option value="DOLE_CSHP">DOLE Safety (CSHP)</option>
-                    <option value="OCCUPANCY_PERMIT">Occupancy Permit</option>
-                    <option value="BARANGAY_CLEARANCE">Barangay Clearance</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Reference / Docket No.</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. BFP-R4A-2026-991"
-                    value={newRef}
-                    onChange={(e) => setNewRef(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Reference / Docket No.</label>
+                <input
+                  type="text"
+                  placeholder="e.g. BFP-R4A-2026-991"
+                  value={newRef}
+                  onChange={(e) => setNewRef(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono focus:border-amber-500 focus:outline-none"
+                />
               </div>
 
               <div>
@@ -730,42 +783,33 @@ export default function GovernmentPermitsTracker({
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Permit Name / Classification</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-mono text-slate-400 uppercase">Permit Name / Classification</label>
+                  <span className="text-[10px] text-amber-400 font-mono">Suggested names enabled</span>
+                </div>
                 <input
                   type="text"
                   required
+                  list="permit-names-list-edit"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
                 />
+                <datalist id="permit-names-list-edit">
+                  {suggestedPermitNames.map((sug, i) => (
+                    <option key={`edit-sug-${i}`} value={sug} />
+                  ))}
+                </datalist>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Permit Type</label>
-                  <select
-                    value={editType}
-                    onChange={(e) => setEditType(e.target.value as PermitType)}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="LGU_BUILDING_PERMIT">LGU Building Permit</option>
-                    <option value="PEZA_FITOUT_PERMIT">PEZA Fit-Out Permit</option>
-                    <option value="FSIC_FIRE_SAFETY">BFP Fire Safety (FSIC)</option>
-                    <option value="DOLE_CSHP">DOLE Safety (CSHP)</option>
-                    <option value="OCCUPANCY_PERMIT">Occupancy Permit</option>
-                    <option value="BARANGAY_CLEARANCE">Barangay Clearance</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Reference / Docket No.</label>
-                  <input
-                    type="text"
-                    value={editRef}
-                    onChange={(e) => setEditRef(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
+              <div>
+                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Reference / Docket No.</label>
+                <input
+                  type="text"
+                  value={editRef}
+                  onChange={(e) => setEditRef(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono focus:border-amber-500 focus:outline-none"
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-3">

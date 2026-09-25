@@ -6,6 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { prisma, pool } from '../db';
 import { broadcastChange, invalidateAllDataCache } from '../events';
+import { resolveProjectCoordinates, resolveLocalGeocoding } from '../services/geocoding';
 
 export const projectsRouter = Router();
 
@@ -13,33 +14,59 @@ export const projectsRouter = Router();
 // COMMERCIAL PROJECTS REST API
 // ============================================================================
 
+// GET /api/geocoding/lookup
+projectsRouter.get('/geocoding/lookup', async (req: Request, res: Response) => {
+  try {
+    const q = (req.query.q as string) || '';
+    const resolved = await resolveProjectCoordinates(q);
+    res.json(resolved);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to geocode location' });
+  }
+});
+
 // GET /api/projects
 projectsRouter.get('/projects', async (req: Request, res: Response) => {
   try {
     const dbProjects = await pool.query('SELECT * FROM commercial_projects ORDER BY created_at ASC');
-    const projects = (dbProjects.rows || []).map(p => ({
-      id: p.id,
-      name: p.name,
-      clientName: p.client_name || '',
-      description: p.description || '',
-      location: p.location || '',
-      budget: Number(p.budget || 0),
-      fundsCollected: Number(p.funds_collected || 0),
-      progressPercentage: Number(p.progress_percentage || 0),
-      status: p.status || 'IN_PROGRESS',
-      targetHandoverDate: p.target_handover_date ? (p.target_handover_date instanceof Date ? p.target_handover_date.toISOString().split('T')[0] : String(p.target_handover_date).split('T')[0]) : '2026-12-31',
-      startDate: p.start_date ? (p.start_date instanceof Date ? p.start_date.toISOString().split('T')[0] : String(p.start_date).split('T')[0]) : '2026-01-01',
-      assignedWorkersCount: Number(p.assigned_workers_count || 0),
-      assignedContractorIds: Array.isArray(p.assigned_contractor_ids) ? p.assigned_contractor_ids : [],
-      tasksCount: Number(p.tasks_count || 0),
-      milestonesCount: Number(p.milestones_count || 0),
-      isPrivateAccounting: Boolean(p.is_private_accounting),
-      assignedProjectManagerId: p.assigned_project_manager_id || '',
-      assignedProjectManagerName: p.assigned_project_manager_name || '',
-      latitude: p.latitude !== null && p.latitude !== undefined ? Number(p.latitude) : undefined,
-      longitude: p.longitude !== null && p.longitude !== undefined ? Number(p.longitude) : undefined,
-      weatherSuspended: Boolean(p.weather_suspended),
-      createdAt: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at)) : new Date().toISOString()
+    const projects = await Promise.all((dbProjects.rows || []).map(async (p) => {
+      let lat = p.latitude !== null && p.latitude !== undefined ? Number(p.latitude) : undefined;
+      let lon = p.longitude !== null && p.longitude !== undefined ? Number(p.longitude) : undefined;
+
+      // Auto-backfill coordinates if missing
+      if (lat === undefined || lon === undefined || isNaN(lat) || isNaN(lon)) {
+        const resolved = await resolveProjectCoordinates(p.location || '', p.name || '');
+        lat = resolved.lat;
+        lon = resolved.lon;
+        // Asynchronously persist resolved coordinates to DB
+        pool.query('UPDATE commercial_projects SET latitude = $1, longitude = $2 WHERE id = $3', [lat, lon, p.id])
+          .catch(err => console.warn(`Failed to backfill coords for project ${p.id}:`, err));
+      }
+
+      return {
+        id: p.id,
+        name: p.name,
+        clientName: p.client_name || '',
+        description: p.description || '',
+        location: p.location || '',
+        budget: Number(p.budget || 0),
+        fundsCollected: Number(p.funds_collected || 0),
+        progressPercentage: Number(p.progress_percentage || 0),
+        status: p.status || 'IN_PROGRESS',
+        targetHandoverDate: p.target_handover_date ? (p.target_handover_date instanceof Date ? p.target_handover_date.toISOString().split('T')[0] : String(p.target_handover_date).split('T')[0]) : '2026-12-31',
+        startDate: p.start_date ? (p.start_date instanceof Date ? p.start_date.toISOString().split('T')[0] : String(p.start_date).split('T')[0]) : '2026-01-01',
+        assignedWorkersCount: Number(p.assigned_workers_count || 0),
+        assignedContractorIds: Array.isArray(p.assigned_contractor_ids) ? p.assigned_contractor_ids : [],
+        tasksCount: Number(p.tasks_count || 0),
+        milestonesCount: Number(p.milestones_count || 0),
+        isPrivateAccounting: Boolean(p.is_private_accounting),
+        assignedProjectManagerId: p.assigned_project_manager_id || '',
+        assignedProjectManagerName: p.assigned_project_manager_name || '',
+        latitude: lat,
+        longitude: lon,
+        weatherSuspended: Boolean(p.weather_suspended),
+        createdAt: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at)) : new Date().toISOString()
+      };
     }));
     res.json(projects);
   } catch (error) {
@@ -83,6 +110,15 @@ projectsRouter.post('/projects', async (req: Request, res: Response) => {
       });
     }
 
+    // Auto-resolve coordinates if not explicitly provided or invalid
+    let finalLat = latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : null;
+    let finalLon = longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : null;
+    if (finalLat === null || finalLon === null || isNaN(finalLat) || isNaN(finalLon)) {
+      const resolved = await resolveProjectCoordinates(location, name);
+      finalLat = resolved.lat;
+      finalLon = resolved.lon;
+    }
+
     const id = req.body.id || `PRJ-${Date.now().toString().slice(-4)}`;
     const contractorIds = Array.isArray(req.body.assignedContractorIds) ? req.body.assignedContractorIds : [];
     await pool.query(
@@ -108,8 +144,8 @@ projectsRouter.post('/projects', async (req: Request, res: Response) => {
         Boolean(isPrivateAccounting),
         assignedProjectManagerId || null,
         assignedProjectManagerName || null,
-        latitude !== undefined && latitude !== null && latitude !== '' ? Number(latitude) : null,
-        longitude !== undefined && longitude !== null && longitude !== '' ? Number(longitude) : null,
+        finalLat,
+        finalLon,
         Boolean(weatherSuspended)
       ]
     );
@@ -201,7 +237,19 @@ projectsRouter.patch('/projects/:id', async (req: Request, res: Response) => {
     if (name !== undefined) { updates.push(`name = $${idx++}`); values.push(name.trim()); }
     if (clientName !== undefined) { updates.push(`client_name = $${idx++}`); values.push(clientName.trim()); }
     if (description !== undefined) { updates.push(`description = $${idx++}`); values.push(description.trim()); }
-    if (location !== undefined) { updates.push(`location = $${idx++}`); values.push(location.trim()); }
+    if (location !== undefined) { 
+      updates.push(`location = $${idx++}`); 
+      values.push(location.trim()); 
+
+      // If latitude and longitude are not explicitly provided during location update, re-resolve them
+      if (latitude === undefined && longitude === undefined && location.trim()) {
+        const resolved = await resolveProjectCoordinates(location, name);
+        updates.push(`latitude = $${idx++}`);
+        values.push(resolved.lat);
+        updates.push(`longitude = $${idx++}`);
+        values.push(resolved.lon);
+      }
+    }
     if (budget !== undefined) { updates.push(`budget = $${idx++}`); values.push(Number(budget) || 0); }
     if (fundsCollected !== undefined) { updates.push(`funds_collected = $${idx++}`); values.push(Number(fundsCollected) || 0); }
     if (progressPercentage !== undefined) { updates.push(`progress_percentage = $${idx++}`); values.push(Number(progressPercentage) || 0); }
@@ -389,24 +437,36 @@ projectsRouter.get('/tasks-list', async (req: Request, res: Response) => {
       include: { assignedContractor: true },
       orderBy: { createdAt: 'desc' } 
     });
-    const tasks = dbTasks.map(t => ({
-      id: t.id,
-      title: t.title || t.text,
-      description: t.description || t.text,
-      assigneeName: t.assigneeName || t.assignedContractor?.name || '',
-      assigneeRole: t.assigneeRole || t.assignedContractor?.roleTitle || '',
-      priority: t.priority || 'MEDIUM',
-      status: t.status || ((t.progress || 0) >= 1 ? 'COMPLETED' : (t.progress || 0) > 0 ? 'IN_PROGRESS' : 'TODO'),
-      dueDate: t.dueDate ? t.dueDate.toISOString().split('T')[0] : (t.endDate ? t.endDate.toISOString().split('T')[0] : ''),
-      startDate: t.startDate ? t.startDate.toISOString().split('T')[0] : '',
-      estimatedHours: (t.duration || 1) * 8,
-      actualHours: Math.round((t.progress || 0) * 100),
-      category: t.category || (t.type === 'milestone' ? 'QA' : 'CIVIL_WORKS'),
-      milestonePhase: t.milestonePhase || t.wbsCode || '',
-      subtasks: t.subtasksJson ? JSON.parse(t.subtasksJson) : [],
-      tags: t.tags ? (typeof t.tags === 'string' ? t.tags.split(',') : t.tags) : [t.wbsCode || '', t.type || 'task'],
-      createdAt: t.createdAt.toISOString(),
-    }));
+    const tasks = dbTasks.map(t => {
+      const p = typeof t.progress === 'number' ? t.progress : 0;
+      let taskStatus = t.status || 'TODO';
+      if (p >= 1.0) {
+        taskStatus = 'COMPLETED';
+      } else if (p > 0 && (taskStatus === 'TODO' || taskStatus === 'BACKLOG')) {
+        taskStatus = 'IN_PROGRESS';
+      }
+
+      return {
+        id: t.id,
+        projectId: t.projectId,
+        title: t.title || t.text,
+        description: t.description || t.text,
+        assigneeName: t.assigneeName || t.assignedContractor?.name || '',
+        assigneeRole: t.assigneeRole || t.assignedContractor?.roleTitle || '',
+        priority: t.priority || 'MEDIUM',
+        status: taskStatus,
+        progress: p,
+        dueDate: t.dueDate ? t.dueDate.toISOString().split('T')[0] : (t.endDate ? t.endDate.toISOString().split('T')[0] : ''),
+        startDate: t.startDate ? t.startDate.toISOString().split('T')[0] : '',
+        estimatedHours: (t.duration || 1) * 8,
+        actualHours: Math.round(p * 100),
+        category: t.category || (t.type === 'milestone' ? 'QA' : 'CIVIL_WORKS'),
+        milestonePhase: t.milestonePhase || t.wbsCode || '',
+        subtasks: t.subtasksJson ? JSON.parse(t.subtasksJson) : [],
+        tags: t.tags ? (typeof t.tags === 'string' ? t.tags.split(',') : t.tags) : [t.wbsCode || '', t.type || 'task'],
+        createdAt: t.createdAt.toISOString(),
+      };
+    });
     res.json(tasks);
   } catch (error) {
     console.error('Error fetching tasks:', error);
@@ -440,6 +500,9 @@ projectsRouter.post('/tasks', async (req: Request, res: Response) => {
     const dDate = dueDate ? new Date(dueDate) : eDate;
     const taskName = title || text || 'New Construction Task';
 
+    const p = progress !== undefined ? Number(progress) : (status === 'COMPLETED' ? 1.0 : status === 'IN_PROGRESS' ? 0.5 : 0);
+    const resolvedStatus = status || (p >= 1.0 ? 'COMPLETED' : p > 0 ? 'IN_PROGRESS' : 'TODO');
+
     const task = await prisma.projectTask.create({
       data: {
         projectId: targetProjectId,
@@ -448,7 +511,7 @@ projectsRouter.post('/tasks', async (req: Request, res: Response) => {
         description: description || '',
         assigneeName: assigneeName || '',
         priority: priority || 'MEDIUM',
-        status: status || 'TODO',
+        status: resolvedStatus,
         category: category || 'CIVIL_WORKS',
         subtasksJson: subtasks ? JSON.stringify(subtasks) : '[]',
         tags: tags ? (Array.isArray(tags) ? tags.join(',') : String(tags)) : '',
@@ -456,7 +519,7 @@ projectsRouter.post('/tasks', async (req: Request, res: Response) => {
         endDate: eDate,
         dueDate: dDate,
         duration: dur,
-        progress: progress !== undefined ? Number(progress) : (status === 'COMPLETED' ? 1.0 : status === 'IN_PROGRESS' ? 0.5 : 0),
+        progress: p,
         type: category === 'QA' ? 'milestone' : 'task',
         wbsCode: wbsCode || null
       }
@@ -498,8 +561,17 @@ projectsRouter.patch('/tasks/:id', async (req: Request, res: Response) => {
     if (startDate !== undefined) data.startDate = new Date(startDate);
     if (endDate !== undefined) data.endDate = new Date(endDate);
     if (duration !== undefined) data.duration = Number(duration);
-    if (progress !== undefined) data.progress = Number(progress);
     if (wbsCode !== undefined) data.wbsCode = wbsCode;
+
+    if (progress !== undefined) {
+      const p = Number(progress);
+      data.progress = p;
+      if (status === undefined) {
+        if (p >= 1.0) data.status = 'COMPLETED';
+        else if (p > 0) data.status = 'IN_PROGRESS';
+        else data.status = 'TODO';
+      }
+    }
     if (status !== undefined) {
       data.status = status;
       if (progress === undefined) {
@@ -513,6 +585,24 @@ projectsRouter.patch('/tasks/:id', async (req: Request, res: Response) => {
       where: { id },
       data,
     });
+
+    if (task.projectId) {
+      const allTasks = await prisma.projectTask.findMany({ where: { projectId: task.projectId } });
+      if (allTasks.length > 0) {
+        const totalDuration = allTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
+        const weightedProgress = allTasks.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, curr.duration || 1), 0);
+        const avgProgress = totalDuration > 0 ? Math.round((weightedProgress / totalDuration) * 100) : 0;
+        await prisma.commercialProject.update({
+          where: { id: task.projectId },
+          data: {
+            progressPercentage: avgProgress,
+            tasksCount: allTasks.length
+          }
+        }).catch(() => {});
+        broadcastChange('projects');
+      }
+    }
+
     broadcastChange('tasks');
     res.json(task);
   } catch (error) {

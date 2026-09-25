@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Contractor, ProjectProfile, WorkforceReallocationRecommendation } from '../types';
+import { Contractor, ProjectProfile, WorkforceReallocationRecommendation, isOfficeOrExecutive } from '../types';
 import { getWorkforceCategory } from '../data/ctvillWorkforce';
 
 /**
@@ -20,6 +20,10 @@ export function generateReallocationRecommendations(
   if (!projects || projects.length === 0 || !contractors || contractors.length === 0) {
     return recommendations;
   }
+
+  // Filter out office/executive personnel who are never mobilized as site construction trade labor
+  const fieldContractors = contractors.filter(c => !isOfficeOrExecutive(c));
+  if (fieldContractors.length === 0) return recommendations;
 
   // 1. Identify donor projects: >= 90% progress or in turnover/completed stages
   const donorProjects = projects.filter(p => 
@@ -56,8 +60,8 @@ export function generateReallocationRecommendations(
 
   // 3. For each donor project, identify assigned or available workforce
   donorProjects.forEach(donor => {
-    // Match contractors assigned to this project site
-    const assignedWorkers = contractors.filter(c => {
+    // Match field contractors assigned to this project site (excluding office personnel)
+    const assignedWorkers = fieldContractors.filter(c => {
       const siteMatch = c.activeProjectSite && (
         c.activeProjectSite.toLowerCase().includes(donor.name.toLowerCase()) ||
         donor.name.toLowerCase().includes(c.activeProjectSite.toLowerCase())
@@ -67,14 +71,18 @@ export function generateReallocationRecommendations(
 
     const candidateWorkers = assignedWorkers.length > 0 
       ? assignedWorkers 
-      : contractors.slice(0, 3); // Fallback to candidate crew members if no explicit name match
+      : fieldContractors.slice(0, 3); // Fallback to candidate field crew members if no explicit name match
 
     candidateWorkers.forEach((worker, wIdx) => {
       // Pick best target project based on role category and project needs
       const target = recipientProjects[wIdx % recipientProjects.length];
       if (!target || target.id === donor.id) return;
 
-      const category = worker.workforceCategory || getWorkforceCategory(worker.roleTitle || worker.specialty);
+      const rawCat = worker.workforceCategory || getWorkforceCategory(worker.roleTitle || worker.specialty);
+      const category: 'SKILLED' | 'PROFESSIONAL' | 'GENERAL_LABOR' = 
+        (rawCat === 'SKILLED' || rawCat === 'PROFESSIONAL' || rawCat === 'GENERAL_LABOR')
+          ? rawCat
+          : (rawCat === 'TRADE_CREW' ? 'SKILLED' : 'PROFESSIONAL');
       const isTargetBehind = (target.status as string) === 'BEHIND_SCHEDULE' || target.weatherSuspended;
       const isEarlyPhase = isEarlyCivilPhase(target);
       

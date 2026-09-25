@@ -189,6 +189,9 @@ export type CTVillRole =
   | 'Human Resources & Admin Department'
   | 'Procurement & Logistics Department';
 
+export type WorkforceClassification = 'OFFICE_STAFF' | 'FIELD_SUPERVISION' | 'TRADE_CREW' | 'INDIVIDUAL_ARTISAN';
+export type RegistrationEntityType = 'INDIVIDUAL' | 'CREW';
+
 export interface Contractor {
   id: string;
   name: string;
@@ -196,12 +199,13 @@ export interface Contractor {
   specialty?: string;
   tradeType?: string;
   employmentType?: 'INTERNAL' | 'OUTSOURCED';
+  entityType?: RegistrationEntityType;
   department?: CTVillDepartment | string;
   roleTitle?: CTVillRole | string;
   dailyRate?: number;
   monthlySalary?: number;
   status?: 'ACTIVE' | 'ON_LEAVE' | 'INACTIVE' | 'BREAK' | 'OFFLINE';
-  workforceCategory?: 'PROFESSIONAL' | 'SKILLED' | 'GENERAL_LABOR';
+  workforceCategory?: 'OFFICE_STAFF' | 'FIELD_SUPERVISION' | 'TRADE_CREW' | 'INDIVIDUAL_ARTISAN' | 'PROFESSIONAL' | 'SKILLED' | 'GENERAL_LABOR';
   allocationStatus?: 'ASSIGNED' | 'STANDBY' | 'REALLOCATED' | 'DEMOBILIZED';
   contractAmount: number;
   paidAmount: number;
@@ -221,6 +225,62 @@ export interface Contractor {
   certifications?: string[];
   dispatchNotes?: { id: string; sender: string; text: string; timestamp: string; isSelf?: boolean }[];
 }
+
+export function isOfficeOrExecutive(c: Partial<Contractor>): boolean {
+  if (c.workforceCategory === 'OFFICE_STAFF') return true;
+  const dept = (c.department || '').toLowerCase();
+  const role = (c.roleTitle || c.specialty || '').toLowerCase();
+  
+  if (
+    dept.includes('executive') || 
+    dept.includes('corporate') || 
+    dept.includes('office') || 
+    dept.includes('finance') || 
+    dept.includes('accounting') || 
+    dept.includes('human resources') || 
+    dept.includes('legal') || 
+    dept.includes('procurement') || 
+    dept.includes('sales') || 
+    dept.includes('marketing')
+  ) {
+    return true;
+  }
+  if (
+    role.includes('coo') || 
+    role.includes('ceo') || 
+    role.includes('chief') || 
+    role.includes('director') || 
+    role.includes('officer') || 
+    role.includes('finance') || 
+    role.includes('hr') || 
+    role.includes('accounting') || 
+    role.includes('clerk') || 
+    role.includes('admin')
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function isIndividualStaffOrEngineer(c: Partial<Contractor>): boolean {
+  if (c.entityType === 'INDIVIDUAL') return true;
+  if (c.workforceCategory === 'OFFICE_STAFF' || c.workforceCategory === 'FIELD_SUPERVISION' || c.workforceCategory === 'INDIVIDUAL_ARTISAN') return true;
+  if (isOfficeOrExecutive(c)) return true;
+  const role = (c.roleTitle || c.specialty || '').toLowerCase();
+  if (
+    role.includes('engineer') || 
+    role.includes('architect') || 
+    role.includes('project manager') || 
+    role.includes('safety officer') || 
+    role.includes('surveyor') || 
+    role.includes('qa/qc') || 
+    role.includes('inspector')
+  ) {
+    return true;
+  }
+  return false;
+}
+
 
 export interface PayrollRecord {
   id: string;
@@ -249,7 +309,7 @@ export interface DailyManpowerAudit {
   contractorId: string;
   contractorName: string;
   specialty: string;
-  shift: 'Morning' | 'Afternoon' | 'Full Day';
+  shift: string;
   claimedHeadcount: number;
   verifiedHeadcount: number;
   discrepancy: number; // claimedHeadcount - verifiedHeadcount
@@ -311,6 +371,7 @@ export interface UserSession {
   title?: string;
   phone?: string;
   division?: string;
+  rememberMe?: boolean;
 }
 
 // --- PROJECT MANAGEMENT SYSTEM (PMS) INTERFACES ---
@@ -326,12 +387,14 @@ export interface TaskSubItem {
 
 export interface ProjectTask {
   id: string;
+  projectId?: string;
   title: string;
   description?: string;
   assigneeName?: string;
   assigneeRole?: string;
   priority: TaskPriority;
   status: TaskStatus;
+  progress?: number;
   dueDate?: string;
   startDate?: string;
   estimatedHours?: number;

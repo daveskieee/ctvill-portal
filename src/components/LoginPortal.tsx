@@ -22,6 +22,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
   // Login State
   const [email, setEmail] = useState<string>('');
   const [password, setPassword] = useState<string>('');
+  const [rememberMe, setRememberMe] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
@@ -48,7 +49,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
       if (!res.ok) {
         setErrorMsg(data.error || 'Authentication failed. Please verify your credentials.');
       } else if (data.session) {
-        onLoginSuccess(data.session);
+        onLoginSuccess({ ...data.session, rememberMe });
       }
     } catch (err) {
       setErrorMsg('Connection error. Could not reach authentication server.');
@@ -176,7 +177,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
             <span>CTVILL DESIGN & CONSTRUCTION PMS</span>
             <span className="text-emerald-400 font-bold flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              LIVE DATABASE ACTIVE
+              SYSTEM OPERATIONAL
             </span>
           </div>
         </div>
@@ -234,6 +235,23 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
                   />
                 </div>
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-slate-400 py-0.5">
+                <label className="flex items-center gap-2 cursor-pointer select-none group">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="w-4 h-4 rounded border-slate-700 bg-slate-950 text-amber-500 focus:ring-amber-500/30 accent-amber-500 cursor-pointer"
+                  />
+                  <span className="text-slate-300 group-hover:text-amber-400 transition-colors text-[11px] font-medium">
+                    Remember workstation (24h)
+                  </span>
+                </label>
+                <span className="text-[10px] font-mono text-slate-500">
+                  {rememberMe ? 'Persistent Device' : 'Single Session'}
+                </span>
               </div>
 
               <button
