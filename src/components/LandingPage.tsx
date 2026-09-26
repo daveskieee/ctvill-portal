@@ -510,6 +510,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
   const [selectedProject, setSelectedProject] = useState<ProjectData | null>(null);
   const [modalActivePhotoIndex, setModalActivePhotoIndex] = useState<number>(0);
   const [showStoryModal, setShowStoryModal] = useState<boolean>(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState<boolean>(false);
   const [activeCategory, setActiveCategory] = useState<string>('all');
 
   const handleOpenProject = (project: ProjectData) => {
@@ -1587,13 +1588,20 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                     <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-amber-400 shrink-0">
                       <Phone className="w-4 h-4" />
                     </div>
-                    <span>(049) 544 7724 • 0933-827-8885 • 0916-297-4604</span>
+                    <span>
+                      <a href="tel:0495447724" className="hover:text-amber-400 transition-colors" title="Call Laguna Landline">(049) 544 7724</a> •{' '}
+                      <a href="tel:09338278885" className="hover:text-amber-400 transition-colors" title="Call Mobile 1">0933-827-8885</a> •{' '}
+                      <a href="tel:09162974604" className="hover:text-amber-400 transition-colors" title="Call Mobile 2">0916-297-4604</a>
+                    </span>
                   </div>
                   <div className="flex items-center gap-3 text-slate-300">
                     <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-amber-400 shrink-0">
                       <Mail className="w-4 h-4" />
                     </div>
-                    <span>concierge@ctvill.com (queries) • estimate@ctvill.com (quotations)</span>
+                    <span>
+                      <a href="mailto:concierge@ctvill.com?subject=General%20Inquiry%20-%20CTVill" className="hover:text-amber-400 transition-colors underline decoration-slate-700 hover:decoration-amber-400" title="Email Concierge Desk">concierge@ctvill.com</a> (queries) •{' '}
+                      <a href="mailto:estimate@ctvill.com?subject=Fit-Out%20Quotation%20Request%20-%20CTVill" className="hover:text-amber-400 transition-colors underline decoration-slate-700 hover:decoration-amber-400" title="Email Estimator Desk">estimate@ctvill.com</a> (quotations)
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1790,12 +1798,31 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
             <p>
               &copy; {new Date().getFullYear()} CTVill Design & Construction. All rights reserved.
             </p>
-            <div className="flex items-center gap-3 font-mono">
-              <span className="hover:text-amber-400 transition-colors cursor-pointer">concierge@ctvill.com</span>
+            <div className="flex flex-wrap items-center justify-center md:justify-end gap-3 font-mono">
+              <a 
+                href="mailto:concierge@ctvill.com?subject=General%20Inquiry%20-%20CTVill%20Design%20%26%20Construction"
+                className="hover:text-amber-400 transition-colors cursor-pointer"
+                title="Send inquiry to concierge@ctvill.com"
+              >
+                concierge@ctvill.com
+              </a>
               <span>•</span>
-              <span className="hover:text-amber-400 transition-colors cursor-pointer">estimate@ctvill.com</span>
+              <a 
+                href="mailto:estimate@ctvill.com?subject=Fit-Out%20Quotation%20Request%20-%20CTVill%20Design%20%26%20Construction"
+                className="hover:text-amber-400 transition-colors cursor-pointer"
+                title="Send quotation request to estimate@ctvill.com"
+              >
+                estimate@ctvill.com
+              </a>
               <span>•</span>
-              <span className="hover:text-amber-400 transition-colors cursor-pointer">Privacy Policy</span>
+              <button 
+                type="button"
+                onClick={() => setShowPrivacyModal(true)}
+                className="hover:text-amber-400 transition-colors cursor-pointer text-slate-400 underline underline-offset-2 decoration-slate-700 hover:decoration-amber-400 bg-transparent border-0 p-0 text-[10px] font-mono"
+                title="View Privacy Policy & Data Protection Terms"
+              >
+                Privacy Policy
+              </button>
             </div>
           </div>
 
@@ -2221,6 +2248,133 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                 </button>
               </form>
             )}
+
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: ENTERPRISE PRIVACY POLICY & DATA PROTECTION */}
+      {showPrivacyModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 z-50 animate-fadeIn overscroll-contain">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-5 sm:p-7 space-y-5 shadow-2xl animate-slideUp max-h-[90vh] flex flex-col">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white tracking-tight">
+                    Corporate Data Privacy Policy
+                  </h3>
+                  <p className="text-[11px] font-mono text-slate-400">
+                    Republic Act No. 10173 (Data Privacy Act of 2012 Compliance)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPrivacyModal(false)}
+                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                title="Close Privacy Policy"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Scrollable Body */}
+            <div className="flex-1 overflow-y-auto pr-2 space-y-4 text-xs text-slate-300 leading-relaxed font-sans scrollbar-thin scrollbar-thumb-slate-800">
+              
+              <div className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-xl space-y-1.5">
+                <p className="font-semibold text-white">
+                  Commitment to Confidentiality & Data Integrity
+                </p>
+                <p className="text-slate-400 text-[11px]">
+                  CTVill Design & Construction is fully dedicated to safeguarding personal and proprietary project information entrustment by clients, corporate partners, and site contractors in accordance with Republic Act No. 10173 (Data Privacy Act of 2012) and its Implementing Rules and Regulations.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <h4 className="font-bold text-slate-100 flex items-center gap-1.5 text-xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  1. Information We Collect
+                </h4>
+                <p className="text-slate-400">
+                  When you submit a fit-out estimation request, upload CAD plans, or engage our turnkey contracting services, we collect:
+                </p>
+                <ul className="list-disc pl-5 space-y-1 text-slate-400 text-[11px]">
+                  <li><strong>Client Identification:</strong> Name, corporate business name, designated contact person, official email address, and phone numbers.</li>
+                  <li><strong>Engineering & Technical Data:</strong> Building location, floor plans, CAD drawings, Bill of Quantities (BOQ), and fit-out architectural specifications.</li>
+                  <li><strong>Statutory & Jobsite Records:</strong> LGU/PEZA building permits, contractor workforce deployment rosters, daily safety logs, and QA defect punchlists.</li>
+                </ul>
+              </div>
+
+              <div className="space-y-1.5">
+                <h4 className="font-bold text-slate-100 flex items-center gap-1.5 text-xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  2. Purpose and Utilization of Data
+                </h4>
+                <p className="text-slate-400">
+                  Collected information is utilized exclusively for genuine operational requirements:
+                </p>
+                <ul className="list-disc pl-5 space-y-1 text-slate-400 text-[11px]">
+                  <li>Calibrating accurate commercial fit-out proposals, cost estimates, and timelines.</li>
+                  <li>Processing statutory building clearances with the City Building Official, PEZA, Bureau of Fire Protection (BFP), and building property managers.</li>
+                  <li>Managing trade craft dispatch, material procurement logistics, and QA punchlist closeout.</li>
+                </ul>
+              </div>
+
+              <div className="space-y-1.5">
+                <h4 className="font-bold text-slate-100 flex items-center gap-1.5 text-xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  3. Non-Disclosure & Blueprint Intellectual Property
+                </h4>
+                <p className="text-slate-400">
+                  All submitted architectural blueprints, interior designs, and corporate fit-out concepts remain the intellectual property of the client or designer. CTVill enforces strict Non-Disclosure Agreement (NDA) protocols. We never sell, lease, or monetize client data to third parties.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <h4 className="font-bold text-slate-100 flex items-center gap-1.5 text-xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  4. Data Security & Storage Controls
+                </h4>
+                <p className="text-slate-400">
+                  Technical and operational safeguards include SSL/TLS 256-bit encryption in transit, isolated cloud database infrastructure (Neon PostgreSQL), and restricted role-based administrative access (Operations Directorate, Field PM, and Finance).
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <h4 className="font-bold text-slate-100 flex items-center gap-1.5 text-xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  5. Inquiries & Data Protection Officer (DPO)
+                </h4>
+                <p className="text-slate-400">
+                  To request data access, correction, or inquire regarding our compliance standards, contact our compliance desk:
+                </p>
+                <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl font-mono text-[11px] text-slate-300 space-y-1">
+                  <div><strong>Email:</strong> <a href="mailto:concierge@ctvill.com" className="text-amber-400 hover:underline">concierge@ctvill.com</a></div>
+                  <div><strong>Phone:</strong> (049) 544 7724 • 0933-827-8885</div>
+                  <div><strong>Headquarters:</strong> CTVill Laguna Design & Construction Directorate, Philippines</div>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between shrink-0">
+              <span className="text-[10px] text-slate-500 font-mono">
+                SEC & PCAB Registered Commercial General Contractor
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowPrivacyModal(false)}
+                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs transition-colors cursor-pointer"
+              >
+                Close & Return
+              </button>
+            </div>
 
           </div>
         </div>

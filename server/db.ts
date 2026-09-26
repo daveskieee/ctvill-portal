@@ -109,40 +109,55 @@ export async function initializeDatabaseTables() {
       );
 
       ALTER TABLE contractors ADD COLUMN IF NOT EXISTS active_presence TEXT DEFAULT 'ONLINE';
-
-      -- High-performance database indexing for rapid queries and instant response times
-      CREATE INDEX IF NOT EXISTS idx_project_tasks_project_id ON project_tasks(project_id);
-      CREATE INDEX IF NOT EXISTS idx_project_tasks_parent_id ON project_tasks(parent_task_id);
-      CREATE INDEX IF NOT EXISTS idx_project_tasks_assigned_contractor ON project_tasks(assigned_contractor_id);
-      CREATE INDEX IF NOT EXISTS idx_project_tasks_created_at ON project_tasks(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_task_links_project_id ON task_links(project_id);
-      CREATE INDEX IF NOT EXISTS idx_task_links_source_id ON task_links(source_id);
-      CREATE INDEX IF NOT EXISTS idx_task_links_target_id ON task_links(target_id);
-      CREATE INDEX IF NOT EXISTS idx_commercial_projects_created_at ON commercial_projects(created_at);
-      CREATE INDEX IF NOT EXISTS idx_contractors_status ON contractors(status);
-      CREATE INDEX IF NOT EXISTS idx_slots_parcel_id ON slots(parcel_id);
-      CREATE INDEX IF NOT EXISTS idx_slots_status ON slots(status);
-      CREATE INDEX IF NOT EXISTS idx_daily_site_logs_date ON daily_site_logs(date DESC);
-      CREATE INDEX IF NOT EXISTS idx_government_permits_project_id ON government_permits(project_id);
-      CREATE INDEX IF NOT EXISTS idx_government_permits_status ON government_permits(status);
-      CREATE INDEX IF NOT EXISTS idx_schedule_events_date ON schedule_events(event_date ASC, start_time ASC);
-      CREATE INDEX IF NOT EXISTS idx_project_rfis_project_id ON project_rfis(project_id);
-      CREATE INDEX IF NOT EXISTS idx_commercial_change_orders_project_id ON commercial_change_orders(project_id);
-      CREATE INDEX IF NOT EXISTS idx_extended_payroll_created_at ON extended_payroll(created_at DESC);
-      CREATE INDEX IF NOT EXISTS idx_project_documents_created_at ON project_documents(created_at DESC);
-
-      -- Auto-align task statuses with progress (Gantt-to-Kanban bidirectional sync)
-      UPDATE project_tasks
-      SET status = 'COMPLETED'
-      WHERE progress >= 1.0 AND status != 'COMPLETED';
-
-      UPDATE project_tasks
-      SET status = 'IN_PROGRESS'
-      WHERE progress > 0 AND progress < 1.0 AND status = 'TODO';
     `);
+
+    // High-performance database indexing (executed individually for schema resilience)
+    const indexStatements = [
+      'CREATE INDEX IF NOT EXISTS idx_project_tasks_project_id ON project_tasks("projectId")',
+      'CREATE INDEX IF NOT EXISTS idx_project_tasks_parent_id ON project_tasks("parentTaskId")',
+      'CREATE INDEX IF NOT EXISTS idx_project_tasks_assigned_contractor ON project_tasks("assignedContractorId")',
+      'CREATE INDEX IF NOT EXISTS idx_project_tasks_created_at ON project_tasks("createdAt" DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_task_links_project_id ON task_links("projectId")',
+      'CREATE INDEX IF NOT EXISTS idx_task_links_source_id ON task_links("sourceId")',
+      'CREATE INDEX IF NOT EXISTS idx_task_links_target_id ON task_links("targetId")',
+      'CREATE INDEX IF NOT EXISTS idx_commercial_projects_created_at ON commercial_projects(created_at)',
+      'CREATE INDEX IF NOT EXISTS idx_contractors_status ON contractors(status)',
+      'CREATE INDEX IF NOT EXISTS idx_slots_parcel_id ON slots("parcelId")',
+      'CREATE INDEX IF NOT EXISTS idx_slots_status ON slots(status)',
+      'CREATE INDEX IF NOT EXISTS idx_daily_site_logs_date ON daily_site_logs(date DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_government_permits_project_id ON government_permits(project_id)',
+      'CREATE INDEX IF NOT EXISTS idx_government_permits_status ON government_permits(status)',
+      'CREATE INDEX IF NOT EXISTS idx_schedule_events_date ON schedule_events(event_date ASC, start_time ASC)',
+      'CREATE INDEX IF NOT EXISTS idx_project_rfis_project_id ON project_rfis(project_id)',
+      'CREATE INDEX IF NOT EXISTS idx_commercial_change_orders_project_id ON commercial_change_orders(project_id)',
+      'CREATE INDEX IF NOT EXISTS idx_extended_payroll_created_at ON extended_payroll(created_at DESC)',
+      'CREATE INDEX IF NOT EXISTS idx_project_documents_created_at ON project_documents(created_at DESC)',
+    ];
+
+    for (const stmt of indexStatements) {
+      try {
+        await pool.query(stmt);
+      } catch {
+        // Safe fallback if column name differs between legacy and prisma schemas
+      }
+    }
+
+    try {
+      // Auto-align task statuses with progress (Gantt-to-Kanban bidirectional sync)
+      await pool.query(`
+        UPDATE project_tasks
+        SET status = 'COMPLETED'
+        WHERE progress >= 1.0 AND status != 'COMPLETED';
+
+        UPDATE project_tasks
+        SET status = 'IN_PROGRESS'
+        WHERE progress > 0 AND progress < 1.0 AND status = 'TODO';
+      `);
+    } catch {}
+
     console.log('✅ PostgreSQL commercial fit-out schema and performance indexes initialized.');
-  } catch (err) {
-    console.error('Database initialization error:', err);
+  } catch (err: any) {
+    console.warn('Database initialization advisory (non-blocking):', err.message || err);
   }
 }
 

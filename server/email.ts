@@ -51,53 +51,158 @@ export async function sendFitOutQuotationEmail(params: {
     spaceType, finishTier, projectNotes, quoteId
   } = params;
 
-  const senderFrom = `"CTVill Builders Corporation" <${process.env.SMTP_USER || 'estimating@ctvill.com'}>`;
+  const senderFrom = `"CTVill Design & Construction" <${process.env.SMTP_USER || 'projectmanagementsytem@gmail.com'}>`;
   const formattedCost = estimatedCost ? `₱${Number(estimatedCost).toLocaleString()}` : 'Custom Estimate Pending';
   const formattedWeeks = estimatedWeeks ? `${estimatedWeeks} Weeks Estimated` : 'To be determined';
 
   const htmlContent = `
-    <!DOCTYPE html>
-    <html>
+    <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+    <html xmlns="http://www.w3.org/1999/xhtml">
     <head>
-      <meta charset="utf-8">
-      <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #030712; color: #f9fafb; margin: 0; padding: 24px; }
-        .container { max-width: 620px; margin: 0 auto; background: #0b0f19; border: 1px solid #1f2937; border-radius: 16px; overflow: hidden; }
-        .header { background: linear-gradient(135deg, #059669 0%, #0d9488 100%); padding: 32px 24px; text-align: center; }
-        .header h1 { margin: 0; font-size: 24px; font-weight: 800; color: #ffffff; letter-spacing: -0.5px; }
-        .header p { margin: 6px 0 0; color: #d1fae5; font-size: 13px; font-weight: 500; }
-        .content { padding: 28px 24px; }
-        .card { background: #111827; border: 1px solid #1f2937; border-radius: 12px; padding: 20px; margin: 20px 0; }
-        .card-title { font-size: 14px; font-weight: 700; color: #10b981; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px; }
-        .card-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #1e293b; font-size: 13px; }
-        .highlight { color: #f59e0b; font-weight: bold; font-size: 16px; }
-        .footer { background: #030712; padding: 20px 24px; text-align: center; font-size: 11px; color: #6b7280; border-top: 1px solid #1f2937; }
-      </style>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+      <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+      <title>CTVill Fit-Out Quotation Confirmation</title>
     </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <h1>CTVill Builders Corporation</h1>
-          <p>Turnkey Design & Interior Fit-Out Specialists</p>
-        </div>
-        <div class="content">
-          <p>Hello <strong>${clientName}</strong>,</p>
-          <p>Thank you for inquiring with CTVill Builders Corporation. We have officially logged your commercial fit-out quotation request:</p>
-          <div class="card">
-            <div class="card-title">Quotation Specifications</div>
-            <div class="card-row"><span>Ref Number:</span><strong style="color: #38bdf8;">${quoteId}</strong></div>
-            <div class="card-row"><span>Project Scope:</span><strong>${projectScope}</strong></div>
-            ${estimatorArea ? `<div class="card-row"><span>Area:</span><strong>${estimatorArea} sqm (${(spaceType || '').toUpperCase()})</strong></div>` : ''}
-            <div class="card-row"><span>Estimated Cost:</span><strong class="highlight">${formattedCost}</strong></div>
-            <div class="card-row"><span>Target Timeline:</span><strong style="color: #34d399;">${formattedWeeks}</strong></div>
-            ${projectNotes ? `<div class="card-row"><span>Notes:</span><strong>${projectNotes}</strong></div>` : ''}
-          </div>
-          <p style="font-size: 13px; color: #9ca3af;">Our architectural and engineering estimators will review your inquiry and contact you within 24 hours.</p>
-        </div>
-        <div class="footer">
-          CTVill Builders Corporation • Cabuyao, Laguna, Philippines • (049) 544 7724
-        </div>
-      </div>
+    <body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
+      
+      <!-- Wrapper Table -->
+      <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="#f1f5f9" style="background-color: #f1f5f9; padding: 24px 12px;">
+        <tr>
+          <td align="center">
+            
+            <!-- Email Container Card -->
+            <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: #ffffff; border: 1px solid #e2e8f0; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+              
+              <!-- Header Banner -->
+              <tr>
+                <td align="center" bgcolor="#0f172a" style="background-color: #0f172a; padding: 32px 24px; border-bottom: 4px solid #f59e0b;">
+                  <h1 style="margin: 0; font-size: 22px; font-weight: 800; color: #ffffff; letter-spacing: 0.5px; text-transform: uppercase;">
+                    CTVill Design &amp; Construction
+                  </h1>
+                  <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 13px; font-weight: 500;">
+                    Turnkey Commercial Fit-Out &amp; Engineering Contractors
+                  </p>
+                </td>
+              </tr>
+
+              <!-- Main Content Body -->
+              <tr>
+                <td style="padding: 32px 28px; background-color: #ffffff;">
+                  
+                  <p style="margin: 0 0 14px 0; font-size: 16px; color: #0f172a; font-weight: 700;">
+                    Hello ${clientName},
+                  </p>
+                  
+                  <p style="margin: 0 0 20px 0; font-size: 14px; color: #334155; line-height: 1.6;">
+                    Thank you for reaching out to <strong>CTVill Design &amp; Construction</strong>. We have officially registered your commercial fit-out quotation inquiry in our engineering system:
+                  </p>
+
+                  <!-- Specifications Table -->
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="#f8fafc" style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; margin: 0 0 24px 0;">
+                    <tr>
+                      <td colspan="2" bgcolor="#f1f5f9" style="background-color: #f1f5f9; padding: 12px 18px; border-bottom: 1px solid #e2e8f0; font-size: 11px; font-weight: 800; color: #0f172a; text-transform: uppercase; letter-spacing: 0.8px;">
+                        Quotation Specifications &amp; Project Overview
+                      </td>
+                    </tr>
+                    
+                    <tr>
+                      <td width="38%" style="padding: 11px 18px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #64748b; font-weight: 600;">
+                        Reference No:
+                      </td>
+                      <td width="62%" style="padding: 11px 18px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #0284c7; font-weight: 800; font-family: monospace;">
+                        ${quoteId}
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td style="padding: 11px 18px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #64748b; font-weight: 600;">
+                        Project Scope:
+                      </td>
+                      <td style="padding: 11px 18px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #0f172a; font-weight: 700;">
+                        ${projectScope}
+                      </td>
+                    </tr>
+
+                    ${estimatorArea ? `
+                    <tr>
+                      <td style="padding: 11px 18px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #64748b; font-weight: 600;">
+                        Estimated Area:
+                      </td>
+                      <td style="padding: 11px 18px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #0f172a; font-weight: 700;">
+                        ${estimatorArea} sqm (${(spaceType || 'Commercial').toUpperCase()})
+                      </td>
+                    </tr>
+                    ` : ''}
+
+                    <tr>
+                      <td style="padding: 12px 18px; border-bottom: 1px solid #e2e8f0; font-size: 13px; color: #64748b; font-weight: 600;">
+                        Preliminary Budget:
+                      </td>
+                      <td style="padding: 12px 18px; border-bottom: 1px solid #e2e8f0; font-size: 18px; color: #d97706; font-weight: 800;">
+                        ${formattedCost}
+                      </td>
+                    </tr>
+
+                    <tr>
+                      <td style="padding: 11px 18px; ${projectNotes ? 'border-bottom: 1px solid #e2e8f0;' : ''} font-size: 13px; color: #64748b; font-weight: 600;">
+                        Target Timeline:
+                      </td>
+                      <td style="padding: 11px 18px; ${projectNotes ? 'border-bottom: 1px solid #e2e8f0;' : ''} font-size: 13px; color: #059669; font-weight: 700;">
+                        ${formattedWeeks}
+                      </td>
+                    </tr>
+
+                    ${projectNotes ? `
+                    <tr>
+                      <td style="padding: 11px 18px; font-size: 13px; color: #64748b; font-weight: 600; vertical-align: top;">
+                        Client Notes:
+                      </td>
+                      <td style="padding: 11px 18px; font-size: 13px; color: #334155; line-height: 1.5;">
+                        ${projectNotes}
+                      </td>
+                    </tr>
+                    ` : ''}
+                  </table>
+
+                  <!-- Information Callout Box -->
+                  <table border="0" cellpadding="0" cellspacing="0" width="100%" bgcolor="#f0fdf4" style="background-color: #f0fdf4; border-left: 4px solid #16a34a; border-radius: 4px; margin: 0 0 20px 0;">
+                    <tr>
+                      <td style="padding: 14px 16px;">
+                        <p style="margin: 0; font-size: 13px; color: #166534; line-height: 1.5;">
+                          <strong>⚡ What Happens Next:</strong> Our Laguna estimating engineering desk is currently reviewing your specifications. An assigned estimator will contact you within <strong>24 business hours</strong> to discuss CAD drawings, material finishes, and arrange a site ocular inspection if required.
+                        </p>
+                      </td>
+                    </tr>
+                  </table>
+
+                  <p style="margin: 0; font-size: 13px; color: #64748b; line-height: 1.6;">
+                    If you have existing architectural blueprints or lease guidelines to share, feel free to reply directly to this email or send them to <a href="mailto:estimate@ctvill.com" style="color: #0284c7; text-decoration: none; font-weight: 600;">estimate@ctvill.com</a>.
+                  </p>
+
+                </td>
+              </tr>
+
+              <!-- Footer -->
+              <tr>
+                <td align="center" bgcolor="#f8fafc" style="background-color: #f8fafc; padding: 24px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #64748b; line-height: 1.6;">
+                  <p style="margin: 0 0 4px 0; font-weight: 700; color: #334155;">
+                    CTVill Design &amp; Construction
+                  </p>
+                  <p style="margin: 0 0 6px 0; color: #64748b;">
+                    Laguna Directorate &bull; Cabuyao &amp; Biñan, Laguna, Philippines &bull; Tel: (049) 544 7724 &bull; 0933-827-8885
+                  </p>
+                  <p style="margin: 0; color: #94a3b8; font-size: 10px;">
+                    &copy; ${new Date().getFullYear()} CTVill Design &amp; Construction. All rights reserved.
+                  </p>
+                </td>
+              </tr>
+
+            </table>
+
+          </td>
+        </tr>
+      </table>
+
     </body>
     </html>
   `;
@@ -108,18 +213,21 @@ export async function sendFitOutQuotationEmail(params: {
       const clientMailPromise = transporter.sendMail({
         from: senderFrom,
         to: clientEmail,
+        replyTo: 'estimate@ctvill.com',
         subject: `[CTVill Fit-Out] Official Quotation Request Confirmation - ${clientName}`,
         html: htmlContent,
-        text: `Hello ${clientName},\n\nThank you for requesting a fit-out quotation with CTVill Builders Corporation.\nRef: ${quoteId}\nScope: ${projectScope}\nEstimated: ${formattedCost}\n\nCTVill Builders Corporation`,
+        text: `Hello ${clientName},\n\nThank you for requesting a fit-out quotation with CTVill Design & Construction.\n\nRef: ${quoteId}\nProject Scope: ${projectScope}\nEstimated Cost: ${formattedCost}\nTarget Timeline: ${formattedWeeks}\n\nOur architectural and engineering estimators will review your inquiry and contact you within 24 hours.\n\nCTVill Design & Construction\nCabuyao, Laguna, Philippines | (049) 544 7724`,
       });
 
       const adminAlertHtml = `
-        <div style="font-family: sans-serif; background: #020617; color: #f8fafc; padding: 24px; border-radius: 12px;">
-          <h2 style="color: #f59e0b;">🚨 New Commercial Fit-Out Lead</h2>
+        <div style="font-family: Arial, sans-serif; background-color: #f8fafc; padding: 24px; border: 1px solid #e2e8f0; border-radius: 8px; color: #0f172a; max-width: 500px;">
+          <h2 style="color: #d97706; margin-top: 0;">🚨 New Commercial Fit-Out Lead</h2>
           <p><strong>Client:</strong> ${clientName} (${clientEmail}, ${clientPhone || 'N/A'})</p>
           <p><strong>Scope:</strong> ${projectScope}</p>
-          <p><strong>Estimated Budget:</strong> ${formattedCost}</p>
-          <p><strong>Ref ID:</strong> ${quoteId}</p>
+          <p><strong>Area:</strong> ${estimatorArea ? `${estimatorArea} sqm` : 'N/A'}</p>
+          <p><strong>Estimated Budget:</strong> <span style="color: #059669; font-weight: bold;">${formattedCost}</span></p>
+          <p><strong>Ref ID:</strong> <code style="background: #e2e8f0; padding: 2px 6px; border-radius: 4px;">${quoteId}</code></p>
+          ${projectNotes ? `<p><strong>Notes:</strong> ${projectNotes}</p>` : ''}
         </div>
       `;
 
