@@ -118,6 +118,7 @@ export default function App() {
                       ...prev,
                       name: p.name || prev.name,
                       email: p.email || prev.email,
+                      role: p.role || prev.role,
                       avatarUrl: p.avatarUrl !== undefined ? p.avatarUrl : prev.avatarUrl,
                       title: p.title || prev.title,
                       phone: p.contact || prev.phone,
@@ -1410,7 +1411,7 @@ export default function App() {
       projectId: permitData.projectId || '',
       projectName: permitData.projectName || 'Commercial Fit-Out',
       permitName: permitData.permitName || 'Government Clearance',
-      permitType: permitData.permitType || 'Building Permit',
+      permitType: permitData.permitType || 'LGU_BUILDING_PERMIT',
       issuingAgency: permitData.issuingAgency || 'LGU City Engineering Office',
       referenceNo: permitData.referenceNo || `REF-${Date.now()}`,
       status: (permitData.status as any) || 'PENDING',
@@ -1836,7 +1837,13 @@ export default function App() {
 
   const handleTriggerAiLaborScan = async () => {
     try {
-      await fetch('/api/ai-recommendations/scan', { method: 'POST' });
+      const res = await fetch('/api/ai-recommendations/scan', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.recommendations && Array.isArray(data.recommendations)) {
+          setAiRecommendations(data.recommendations);
+        }
+      }
       reloadAllData();
     } catch (err) {
       console.error('Failed to trigger live AI labor scan:', err);

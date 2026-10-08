@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { 
   Building2, Users, FileText, Settings2, BarChart3, PieChart, Landmark, ShieldCheck, Shield, Laptop,
@@ -14,7 +14,7 @@ import {
   Ticket, Award, Bot, RefreshCw, CheckCheck, Zap, SlidersHorizontal, Edit3, X, Smartphone,
   Mail, ExternalLink, Check, Copy, Send, Compass, UserCog, User, KeyRound, Bell, Building, Save, CheckSquare,
   Camera, Upload, Image as ImageIcon, EyeOff, Lock, CalendarDays, FileCheck, Briefcase, Lightbulb, ChevronUp,
-  Volume2, VolumeX, HelpCircle, CloudRain, LogOut
+  Volume2, VolumeX, HelpCircle, CloudRain, LogOut, ClipboardCheck, Receipt
 } from 'lucide-react';
 import { 
   ResponsiveContainer, PieChart as RePieChart, Pie, Cell, 
@@ -27,13 +27,17 @@ import {
   ChangeOrder, TaskStatus, CADParsedLot, GovernmentPermit, ScheduleEvent,
   ProjectProfile, ExtendedPayrollItem, CTVillDepartment, CTVillRole,
   ProjectRFI, FitoutQuotationItem, WorkforceClassification, RegistrationEntityType,
-  isOfficeOrExecutive, isIndividualStaffOrEngineer
+  isOfficeOrExecutive, isIndividualStaffOrEngineer, isTradeGroupOrOutsourcedContractor
 } from '../types';
 import { updateStoredSession } from '../utils/session';
 import { 
   CTVILL_ORGANIZATION_HIERARCHY, ALL_CTVILL_DEPARTMENTS, 
   getRolesForDepartment, getDefaultDailyRate, getDepartmentBadge 
 } from '../data/ctvillWorkforce';
+import { 
+  UserRole, ROLE_HIERARCHY, hasRoleOrHigher, 
+  normalizeRole, canAccessModule, getAttendanceCapabilities 
+} from '../utils/rbac';
 import logoJpg from '../assets/images/ctvill/logo.jpg';
 import ProjectKanban from './ProjectKanban';
 import GanttTimeline from './GanttTimeline';
@@ -50,6 +54,12 @@ import RfiManager from './RfiManager';
 import QuotationLeadsManager from './QuotationLeadsManager';
 import WorkforceMessengerRoster from './WorkforceMessengerRoster';
 import AccountsCentre from './AccountsCentre';
+import LaborWorkforceArtisanTrades from './LaborWorkforceArtisanTrades';
+import TimekeeperAttendanceDashboard from './TimekeeperAttendanceDashboard';
+import FinancePayrollDashboard from './FinancePayrollDashboard';
+import WorkerMasterlistManager from './WorkerMasterlistManager';
+import SubcontractorBillingsDisbursements from './SubcontractorBillingsDisbursements';
+import SubcontractorRollCallAudits from './SubcontractorRollCallAudits';
 import { useTheme } from '../context/ThemeContext';
 import { ThemeToggle } from './ThemeToggle';
 import {
@@ -177,15 +187,103 @@ export default function AdminPortal({
   onRefreshAllData
 }: AdminPortalProps) {
   
-  // User Role Resolution (Separation of Duties Architecture)
-  const rawRole = (session && typeof session === 'object' && session.role) ? String(session.role).toUpperCase() : 'ADMIN';
-  const isFinance = rawRole === 'FINANCE';
-  const isProjectManager = rawRole === 'PROJECT_MANAGER' || rawRole === 'PROJECTMANAGER';
-  const isOperationsDirector = !isFinance && !isProjectManager;
-  const isAdmin = isOperationsDirector || isFinance;
+  // User Role Resolution via Centralized RBAC Hierarchy (OM -> PM -> TIMEKEEPER, FINANCE)
+  const currentRole = normalizeRole(session?.role);
+  const isOperationsManager = currentRole === UserRole.OM;
+  const isProjectManager = currentRole === UserRole.PM;
+  const isTimekeeper = currentRole === UserRole.TIMEKEEPER;
+  const isFinance = currentRole === UserRole.FINANCE;
 
-  // Navigation Tabs
-  const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const isAdmin = isOperationsManager;
+  const isEngineer = isProjectManager;
+  const isOperationsDirector = isOperationsManager;
+  const rawRole = isTimekeeper ? 'TIMEKEEPER' : isFinance ? 'FINANCE' : isProjectManager ? 'ENGINEER' : 'ADMIN';
+
+  // Navigation Tabs with Role-Aware Default Landing Page
+  const [activeTab, setActiveTab] = useState<string>(() => {
+    if (isTimekeeper) return 'timekeeper-attendance';
+    if (isFinance) return 'finance-payroll';
+    if (isProjectManager) return 'projects';
+    return 'dashboard';
+  });
+
+  // Strict Vertical RBAC Guard: If role cannot access the active module, redirect to authorized default
+  useEffect(() => {
+    if (activeTab === 'forbidden-403') return;
+    if (!canAccessModule(currentRole, activeTab)) {
+      const defaultHome = isTimekeeper 
+        ? 'timekeeper-attendance' 
+        : isFinance 
+          ? 'finance-payroll' 
+          : isProjectManager 
+            ? 'projects' 
+            : 'dashboard';
+      setActiveTab(defaultHome);
+    }
+  }, [currentRole, activeTab, isTimekeeper, isFinance, isProjectManager]);
+
+  // URL Hash & Query Parameter Route Guard (Prevents URL Tampering)
+  useEffect(() => {
+    const handleUrlRoute = () => {
+      const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase().trim();
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab')?.toLowerCase().trim();
+      const pathname = window.location.pathname.replace(/^\//, '').toLowerCase().trim();
+      
+      const requestedRoute = hash || tabParam || pathname;
+      if (!requestedRoute) return;
+
+      const routeMap: Record<string, string> = {
+        'attendance': 'timekeeper-attendance',
+        'workforce/attendance': 'timekeeper-attendance',
+        'timekeeper-attendance': 'timekeeper-attendance',
+        'daily-attendance': 'timekeeper-attendance',
+        'workforce': isTimekeeper ? 'timekeeper-attendance' : 'contractors',
+        'contractors': 'contractors',
+        'dashboard': 'dashboard',
+        'executive-portfolio': 'dashboard',
+        'gantt': 'gantt',
+        'kanban': 'kanban',
+        'rfis': 'rfis',
+        'change-orders': 'change-orders',
+        'risks': 'risks',
+        'payroll': isFinance ? 'finance-payroll' : 'payroll',
+        'finance-payroll': 'finance-payroll',
+        'payments': 'payments',
+        'billings': 'payments',
+        'progress-billings': 'payments',
+        'projects': 'projects',
+        'subcontractor-audits': 'subcontractor-audits',
+        'subcontractor-payables': 'subcontractor-payables',
+        'quotations': 'quotation-leads',
+        'quotation-leads': 'quotation-leads',
+        'permits': 'permits',
+        'audit-trail': 'audit-trail',
+        'profile': 'account-settings',
+        'account-settings': 'account-settings',
+        'settings': 'account-settings',
+      };
+
+      const targetTab = routeMap[requestedRoute];
+      if (targetTab) {
+        if (!canAccessModule(currentRole, targetTab)) {
+          // Attempting to access unauthorized route: trigger 403 Forbidden view
+          setActiveTab('forbidden-403');
+        } else {
+          setActiveTab(targetTab);
+        }
+      }
+    };
+
+    handleUrlRoute();
+    window.addEventListener('hashchange', handleUrlRoute);
+    window.addEventListener('popstate', handleUrlRoute);
+    return () => {
+      window.removeEventListener('hashchange', handleUrlRoute);
+      window.removeEventListener('popstate', handleUrlRoute);
+    };
+  }, [isTimekeeper]);
+
   const [isRefreshing, setIsRefreshing] = useState<boolean>(false);
 
   const handleManualRefresh = async () => {
@@ -218,6 +316,16 @@ export default function AdminPortal({
         return <KanbanSkeleton />;
       case 'contractors':
         return <CardGridSkeleton type="workforce" title="Field Manpower & Workforce Center" cardsCount={6} />;
+      case 'timekeeper-attendance':
+        return <TableSkeleton title="Site Daily Attendance Roll-Call & Timekeeping" columns={6} rows={7} />;
+      case 'finance-payroll':
+        return <TableSkeleton title="Weekly Payroll & Wage Disbursal" columns={7} rows={7} />;
+      case 'subcontractor-audits':
+        return <TableSkeleton title="Subcontractor Roll-Call Audits (Finance Audit View)" columns={6} rows={6} />;
+      case 'subcontractor-payables':
+        return <TableSkeleton title="Subcontractor Billings & Disbursements — AP Ledger" columns={8} rows={6} />;
+      case 'worker-masterlist':
+        return <TableSkeleton title="Worker Masterlist & Daily Wage Rates" columns={6} rows={7} />;
       case 'rfis':
         return <TableSkeleton title="Engineering RFIs Register (Requests for Information)" columns={6} rows={7} />;
       case 'change-orders':
@@ -1271,11 +1379,13 @@ export default function AdminPortal({
       department: (isOffice || isFieldSuper) ? contDepartment : 'Project Management & Construction ("CONSTRUCT" Phase)',
       roleTitle: (isOffice || isFieldSuper) ? contRoleTitle : (isTradeCrew ? `Crew Lead (${contSpec || 'Trades'})` : 'Trade Subcontractor'),
       dailyRate: !isOutsourced && contDailyRate > 0 ? contDailyRate : null,
+      hourlyOtRate: !isOutsourced && contDailyRate > 0 ? Number(((contDailyRate / 8) * 1.25).toFixed(2)) : undefined,
       monthlySalary: !isOutsourced && contMonthlySalary > 0 ? contMonthlySalary : (contDailyRate ? contDailyRate * 22 : null),
       contact: contContact.trim() || undefined,
       status: 'ACTIVE',
       allocationStatus: isAssignedToSite ? 'ASSIGNED' : 'STANDBY',
       activeProjectSite: isAssignedToSite ? contSite : 'Unassigned',
+      assignedProjectId: projects.find(p => p.name === contSite || p.id === contSite)?.id,
       avatar: contAvatar.trim() || undefined,
     };
     onRegisterContractor(newContractor);
@@ -1330,16 +1440,31 @@ export default function AdminPortal({
     );
   };
 
-  // Helper to determine if worker/crew is actively deployed on an actual job site
-  const isWorkerDeployedOnActualSite = (c: Contractor): boolean => {
+  // Helper to determine if worker/crew is field personnel (not corporate / executive)
+  const isFieldLaborerOrArtisan = (c: Contractor): boolean => {
     if (isOfficeOrExecutive(c)) return false;
+    if (c.workforce_class === 'Corporate' || c.workforceClass === 'Corporate') return false;
     if (c.status && c.status !== 'ACTIVE') return false;
     if (c.allocationStatus === 'DEMOBILIZED' || c.allocationStatus === 'STANDBY') return false;
+    return true;
+  };
+
+  // Helper to determine if worker/crew is actively deployed on an actual job site
+  const isWorkerDeployedOnActualSite = (c: Contractor): boolean => {
+    if (!isFieldLaborerOrArtisan(c)) return false;
     
     const site = (c.activeProjectSite || '').trim();
-    if (!site || site === 'Unassigned' || site === 'None' || site.toLowerCase() === 'office' || site.toLowerCase() === 'hq') {
-      return false;
+    if (site && site !== 'Unassigned' && site !== 'None' && site.toLowerCase() !== 'office' && site.toLowerCase() !== 'hq') {
+      return true;
     }
+    // Check if worker is assigned to any commercial project
+    const isAssigned = (projects || []).some(p => 
+      (p.assignedContractorIds || []).includes(c.id) || 
+      (c.assignedProjectId && c.assignedProjectId === p.id)
+    );
+    if (isAssigned) return true;
+
+    // Active field artisans & trade partners default to active field workforce
     return true;
   };
 
@@ -1387,7 +1512,84 @@ export default function AdminPortal({
 
   // Manpower Roll-Call Audit Modal State
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
+
+  // Helper to determine whether a crew/worker is an outsourced subcontractor vs in-house
+  const isSubcontractorEntity = (c: Partial<Contractor>) => {
+    if (c.employmentType === 'OUTSOURCED') return true;
+    if (c.employmentType === 'INTERNAL' || (c.employmentType as string) === 'IN_HOUSE') return false;
+    const comp = (c.company || '').toLowerCase();
+    const name = (c.name || '').toLowerCase();
+    if (comp.includes('ctvill') || name.includes('ctvill')) return false;
+    if (comp && !comp.includes('ctvill')) return true;
+    return false;
+  };
+
+  // Filter contractor list for Roll-Call Audit: trade groups, artisan gangs, and outsourced crews (excludes corporate office staff & PM/executive engineers)
+  const auditTradeCrews = useMemo(() => {
+    return contractors.filter(c => {
+      if (isOfficeOrExecutive(c)) return false;
+      const role = (c.roleTitle || c.specialty || '').toLowerCase();
+      const dept = (c.department || '').toLowerCase();
+      if (
+        role.includes('project manager') ||
+        role.includes('architect') ||
+        role.includes('safety officer') ||
+        role.includes('surveyor') ||
+        role.includes('qa/qc') ||
+        role.includes('inspector') ||
+        dept.includes('project management') ||
+        dept.includes('executive')
+      ) {
+        return false;
+      }
+      return true;
+    });
+  }, [contractors]);
+
+  const outsourcedTradePartners = useMemo(() => {
+    return auditTradeCrews.filter(c => isSubcontractorEntity(c));
+  }, [auditTradeCrews]);
+
+  const inHouseTradeCrews = useMemo(() => {
+    return auditTradeCrews.filter(c => !isSubcontractorEntity(c));
+  }, [auditTradeCrews]);
+
   const [auditContractorId, setAuditContractorId] = useState(contractors[0]?.id || 'CONT-001');
+
+  const selectedAuditContractor = useMemo(() => {
+    return auditTradeCrews.find(c => c.id === auditContractorId) || contractors.find(c => c.id === auditContractorId) || auditTradeCrews[0] || contractors[0];
+  }, [auditTradeCrews, contractors, auditContractorId]);
+
+  const isSubcontractor = useMemo(() => {
+    if (!selectedAuditContractor) return true;
+    return isSubcontractorEntity(selectedAuditContractor);
+  }, [selectedAuditContractor]);
+
+  // Close audit modal on Escape key press
+  useEffect(() => {
+    if (!isAuditModalOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setIsAuditModalOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isAuditModalOpen]);
+
+  useEffect(() => {
+    if (isAuditModalOpen && auditTradeCrews.length > 0) {
+      if (!auditTradeCrews.some(c => c.id === auditContractorId)) {
+        const first = auditTradeCrews[0];
+        setAuditContractorId(first.id);
+        if (first.activeManpower) {
+          setAuditClaimed(first.activeManpower);
+          setAuditVerified(first.activeManpower);
+        }
+      }
+    }
+  }, [isAuditModalOpen, auditTradeCrews, auditContractorId]);
+
   const [auditShift, setAuditShift] = useState('Morning Shift (07:00 - 16:00)');
   const [isCustomShift, setIsCustomShift] = useState(false);
   const [customShiftStart, setCustomShiftStart] = useState('07:00');
@@ -1413,7 +1615,7 @@ export default function AdminPortal({
   const handleSubmitAudit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmittingAudit(true);
-    const selectedContractor = contractors.find(c => c.id === auditContractorId) || contractors[0];
+    const selectedContractor = auditTradeCrews.find(c => c.id === auditContractorId) || contractors.find(c => c.id === auditContractorId) || auditTradeCrews[0] || contractors[0];
     const finalShift = isCustomShift
       ? `${customShiftTag.trim() ? customShiftTag.trim() + ' ' : 'Flexible Shift '}(${customShiftStart} - ${customShiftEnd})`
       : auditShift;
@@ -1492,17 +1694,35 @@ export default function AdminPortal({
   // 1. Manpower by Project Site (Commercial Sites)
   const projectLaborChartData = (projects || [])
     .filter(p => p && p.name)
-    .map(p => ({
-      name: (p.name || '').replace(' Commercial HQ', ' HQ').replace(' Software Hub', ' Hub').replace(' Global BPO Floor', ' BPO').replace(' Creative Studio', ' Studio').replace(' Fit-Out', ''),
-      fullName: p.name || 'Commercial Site',
-      workers: p.assignedWorkersCount || 0,
-      progress: Math.round(p.progressPercentage || 0),
-      status: p.status || 'IN_PROGRESS'
-    }));
+    .map(p => {
+      // Find actual field artisans/contractors assigned to this project
+      const assignedFieldContractors = contractors.filter(c => {
+        if (!isFieldLaborerOrArtisan(c)) return false;
+        const inIds = (p.assignedContractorIds || []).includes(c.id);
+        const matchId = Boolean(c.assignedProjectId && c.assignedProjectId === p.id);
+        const matchName = Boolean(c.activeProjectSite && (
+          c.activeProjectSite.toLowerCase() === (p.name || '').toLowerCase() ||
+          (p.name || '').toLowerCase().includes(c.activeProjectSite.toLowerCase())
+        ));
+        return inIds || matchId || matchName;
+      });
 
-  // 2. Manpower by Engineering Specialty / Trade
+      const fieldWorkers = assignedFieldContractors.reduce((sum, c) => sum + (c.activeManpower || 1), 0);
+
+      return {
+        name: (p.name || '').replace(' Commercial HQ', ' HQ').replace(' Software Hub', ' Hub').replace(' Global BPO Floor', ' BPO').replace(' Creative Studio', ' Studio').replace(' Fit-Out', ''),
+        fullName: p.name || 'Commercial Site',
+        workers: fieldWorkers,
+        progress: Math.round(p.progressPercentage || 0),
+        status: p.status || 'IN_PROGRESS'
+      };
+    });
+
+  // 2. Manpower by Engineering Specialty / Trade (Field Artisans & Trade Crews)
   const specialtyManpowerMap: Record<string, number> = {};
   contractors.forEach(c => {
+    if (!isFieldLaborerOrArtisan(c)) return;
+
     const rawSpecialty = c.specialty || c.roleTitle || 'Skilled Trades';
     let group = 'General Civil Works';
     const s = rawSpecialty.toLowerCase();
@@ -1513,7 +1733,8 @@ export default function AdminPortal({
     else if (s.includes('drainage') || s.includes('pipe') || s.includes('plumb')) group = 'Plumbing & Drainage';
     else if (s.includes('road') || s.includes('paving') || s.includes('grade') || s.includes('level')) group = 'Site Grading & Civil';
     else if (s.includes('mason') || s.includes('concrete')) group = 'Masonry & Structural';
-    else group = 'Engineering & Supervision';
+    else if (s.includes('manpower') || s.includes('labor') || s.includes('supply')) group = 'General Trade Crew';
+    else group = 'Site Supervision & Engineering';
 
     specialtyManpowerMap[group] = (specialtyManpowerMap[group] || 0) + (c.activeManpower || 1);
   });
@@ -1526,7 +1747,8 @@ export default function AdminPortal({
     'Plumbing & Drainage': '#06b6d4',
     'Site Grading & Civil': '#14b8a6',
     'Masonry & Structural': '#f43f5e',
-    'Engineering & Supervision': '#ec4899',
+    'Site Supervision & Engineering': '#ec4899',
+    'General Trade Crew': '#38bdf8',
     'General Civil Works': '#64748b'
   };
 
@@ -1552,15 +1774,30 @@ export default function AdminPortal({
     };
   });
 
-  // 4. Employment Type Distribution (In-House vs Outsourced)
-  const inHouseCount = contractors.filter(c => c.employmentType !== 'OUTSOURCED').reduce((sum, c) => sum + (c.activeManpower || 0), 0);
-  const outsourcedCount = contractors.filter(c => c.employmentType === 'OUTSOURCED').reduce((sum, c) => sum + (c.activeManpower || 0), 0);
+  // 4. Employment Type Distribution (In-House vs Outsourced Field Personnel)
+  const inHouseCount = contractors.filter(c => isFieldLaborerOrArtisan(c) && c.employmentType !== 'OUTSOURCED').reduce((sum, c) => sum + (c.activeManpower || 1), 0);
+  const outsourcedCount = contractors.filter(c => isFieldLaborerOrArtisan(c) && c.employmentType === 'OUTSOURCED').reduce((sum, c) => sum + (c.activeManpower || 1), 0);
   const employmentMixChartData = (inHouseCount > 0 || outsourcedCount > 0) ? [
     { name: 'CTVill In-House Staff', value: inHouseCount, color: '#10b981' },
     { name: 'Outsourced Trade Partners', value: outsourcedCount, color: '#f59e0b' }
   ] : [];
 
-  const sidebarSections = isProjectManager ? [
+  const sidebarSections = isTimekeeper ? [
+    {
+      id: 'tk-workforce',
+      title: 'WORKFORCE',
+      items: [
+        { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call', icon: ClipboardCheck },
+      ]
+    },
+    {
+      id: 'tk-user',
+      title: 'PROFILE',
+      items: [
+        { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
+      ]
+    }
+  ] : isProjectManager ? [
     {
       id: 'pm-engineering',
       step: '01',
@@ -1592,6 +1829,7 @@ export default function AdminPortal({
       title: 'JOBSITE OPERATIONS',
       items: [
         { id: 'site-diary', label: 'Daily Diary & Weather', icon: CloudSun },
+        { id: 'timekeeper-attendance', label: 'In-House Artisan Attendance', icon: ClipboardCheck },
         { id: 'contractors', label: 'Artisans & Roll-Call', icon: Users },
         { 
           id: 'change-orders', 
@@ -1613,11 +1851,12 @@ export default function AdminPortal({
     {
       id: 'fin-treasury',
       step: '01',
-      title: 'FINANCIAL COMMAND',
+      title: 'PAYROLL & TREASURY',
       items: [
+        { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote },
+        { id: 'subcontractor-payables', label: 'Subcontractor Payables', icon: Receipt },
         { id: 'dashboard', label: 'Financial Executive Overview', icon: TrendingUp },
         { id: 'payments', label: 'Progress Billings & Receipts', icon: DollarSign },
-        { id: 'payroll', label: 'Payroll & Statutory Wages', icon: Banknote },
         { 
           id: 'change-orders', 
           label: 'Change Order Fund Releases', 
@@ -1630,8 +1869,10 @@ export default function AdminPortal({
     {
       id: 'fin-sites',
       step: '02',
-      title: 'COMMERCIAL SITES',
+      title: 'COMMERCIAL SITES & AUDIT',
       items: [
+        { id: 'timekeeper-attendance', label: 'In-House Attendance Records', icon: ClipboardCheck },
+        { id: 'subcontractor-audits', label: 'Subcontractor Roll-Call Audits', icon: ShieldCheck },
         { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
         { 
           id: 'quotation-leads', 
@@ -1644,6 +1885,77 @@ export default function AdminPortal({
     },
     {
       id: 'fin-system',
+      title: 'SYSTEM',
+      items: [
+        { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
+      ]
+    }
+  ] : isProjectManager ? [
+    {
+      id: 'pre-con',
+      step: '01',
+      title: 'PRE-CON & DESIGN',
+      items: [
+        { 
+          id: 'quotation-leads', 
+          label: 'Fit-Out Estimates & Leads', 
+          icon: Briefcase,
+          badge: quotations.filter(q => q.status === 'NEW_INQUIRY').length > 0 ? `${quotations.filter(q => q.status === 'NEW_INQUIRY').length}` : undefined 
+        },
+        { id: 'documents', label: 'Detailed Engineering & CAD', icon: FileCode },
+        { id: 'permits', label: 'PEZA & City Hall Permits', icon: FileCheck },
+      ]
+    },
+    {
+      id: 'project-controls',
+      step: '02',
+      title: 'PROJECT CONTROLS & SCHEDULE',
+      items: [
+        { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
+        { id: 'gantt', label: 'Master Gantt & Timeline', icon: BarChart3 },
+        { id: 'kanban', label: 'Field Execution Kanban', icon: CheckSquare },
+        { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
+      ]
+    },
+    {
+      id: 'field-operations',
+      step: '03',
+      title: 'FIELD OPERATIONS & SAFETY',
+      items: [
+        { id: 'site-diary', label: 'Site Diary & Weather', icon: CloudSun },
+        { 
+          id: 'rfis', 
+          label: 'Engineering RFIs Register', 
+          icon: FileSpreadsheet,
+          badge: rfis.filter(r => r.status === 'OPEN').length > 0 ? `${rfis.filter(r => r.status === 'OPEN').length}` : undefined 
+        },
+        { 
+          id: 'change-orders', 
+          label: 'Commercial Change Orders', 
+          icon: FileText,
+          badge: changeOrders.filter(c => c.status === 'PENDING').length > 0 ? `${changeOrders.filter(c => c.status === 'PENDING').length}` : undefined 
+        },
+        { id: 'risks', label: 'Jobsite Safety & Risk Matrix', icon: ShieldAlert },
+      ]
+    },
+    {
+      id: 'workforce',
+      step: '04',
+      title: 'SITE WORKFORCE & ATTENDANCE',
+      items: [
+        { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call & Timesheet', icon: ClipboardCheck },
+      ]
+    },
+    {
+      id: 'closeout',
+      step: '05',
+      title: 'QA & CLOSEOUT',
+      items: [
+        { id: 'audit-trail', label: 'Audit Trail & QA Logs', icon: History },
+      ]
+    },
+    {
+      id: 'settings',
       title: 'SYSTEM',
       items: [
         { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
@@ -1703,10 +2015,9 @@ export default function AdminPortal({
       step: '04',
       title: 'WORKFORCE & PAYROLL',
       items: [
-        { id: 'contractors', label: 'Artisan Trades & Workforce', icon: Users },
-        ...(showStatutoryAndPayroll ? [
-          { id: 'payroll', label: 'Artisan Payroll & Labor', icon: Banknote }
-        ] : []),
+        { id: 'contractors', label: 'Labor Workforce & Artisan Trades', icon: Users },
+        { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call & Timesheet', icon: ClipboardCheck },
+        { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote },
       ]
     },
     {
@@ -1751,20 +2062,24 @@ export default function AdminPortal({
               <div className="flex items-center gap-1.5 sm:gap-2">
                 <h1 className="text-sm sm:text-base font-black text-white tracking-tight shrink-0 whitespace-nowrap">CTVILL</h1>
                 <span className={`hidden sm:inline-flex text-[8px] sm:text-[9px] font-mono px-1.5 sm:px-2 py-0.5 rounded-full uppercase font-bold border whitespace-nowrap shrink-0 ${
-                  isProjectManager
+                  isTimekeeper
+                    ? 'bg-teal-500/15 border-teal-500/40 text-teal-300'
+                    : isProjectManager
                     ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300'
                     : isFinance
                     ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
                     : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
                 }`}>
-                  {isProjectManager ? 'SITE PM' : isFinance ? 'FINANCE' : 'OPERATIONS'}
+                  {isTimekeeper ? 'TIMEKEEPER' : isProjectManager ? 'PROJECT MANAGER' : isFinance ? 'FINANCE' : 'OPERATIONS MANAGER'}
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 font-mono hidden md:block truncate">
-                {isProjectManager
+                {isTimekeeper
+                  ? 'Daily Site Attendance Roll-Call, Overtime Logging & Timesheet Verification'
+                  : isProjectManager
                   ? `Field Execution & Jobsite Command • ${pmScopedProjects[0]?.name || 'Assigned Site'}`
                   : isFinance
-                  ? 'Corporate Treasury, Payroll & Financial Compliance'
+                  ? 'Corporate Treasury, Automated Weekly Payroll & Cash Advances (Vale)'
                   : 'Commercial Construction & Field Operations Directorate'}
               </p>
             </div>
@@ -1773,6 +2088,15 @@ export default function AdminPortal({
 
         {/* Global Action Bar */}
         <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
+          {/* Timekeeper Current Date Badge */}
+          {isTimekeeper && (
+            <div className="hidden sm:flex items-center gap-2 bg-teal-950/60 border border-teal-500/40 px-3 py-1.5 rounded-xl text-xs font-mono text-teal-300 shadow-xs">
+              <Calendar className="w-3.5 h-3.5 text-teal-400" />
+              <span>Today: {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
+            </div>
+          )}
+
+
           <ThemeToggle />
 
           {/* Notification Center Bell Dropdown */}
@@ -2153,9 +2477,22 @@ export default function AdminPortal({
                     {profileName}
                   </div>
                   <div className="text-[10px] text-amber-400 font-mono truncate">
-                    {isProjectManager ? 'Project Manager' : 'Operations Director'}
+                    {profileTitle || (isTimekeeper ? 'Site Timekeeper' : isFinance ? 'Finance Officer' : isProjectManager ? 'Project Manager' : 'Operations Manager')}
                   </div>
                 </div>
+              )}
+              {isSidebarOpen && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onLogout();
+                  }}
+                  title="Sign Out"
+                  className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
               )}
             </div>
           </div>
@@ -2206,9 +2543,53 @@ export default function AdminPortal({
         ) : (
           <>
             {/* ------------------------------------------------------------- */}
+            {/* VERTICAL HIERARCHICAL RBAC 403 FORBIDDEN GUARD */}
+            {/* ------------------------------------------------------------- */}
+            {(!canAccessModule(currentRole, activeTab) || activeTab === 'forbidden-403') && (
+              <div className="bg-slate-950 border border-red-500/40 rounded-2xl p-8 sm:p-12 text-center space-y-5 shadow-2xl max-w-xl mx-auto my-12 animate-in fade-in zoom-in-95 duration-200">
+                <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/40 mx-auto flex items-center justify-center text-red-400 shadow-lg shadow-red-500/10">
+                  <Lock className="w-8 h-8" />
+                </div>
+                <div className="space-y-2">
+                  <span className="bg-red-500/15 border border-red-500/40 text-red-300 font-mono text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                    ACCESS RESTRICTED • 403 FORBIDDEN
+                  </span>
+                  <h3 className="text-xl font-black text-white tracking-tight">
+                    {isTimekeeper ? 'Restricted Administrative Resource' : isProjectManager ? 'Executive / Financial Control Restricted' : 'Unauthorized Resource'}
+                  </h3>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
+                    {isTimekeeper
+                      ? 'Site Timekeeper accounts are strictly scoped to Daily Workforce Attendance check-ins. Access to executive controls, project scheduling, engineering specifications, financials, and company settings is prohibited under corporate RBAC security policy.'
+                      : isProjectManager
+                      ? 'Project Manager / Site Engineer accounts are scoped to assigned project field operations. Access to executive portfolio analytics, global financial ledgers, worker wage configurations, and corporate system settings is restricted to Operations Managers.'
+                      : `Your current role (${currentRole}) does not possess authorization to access the requested module.`}
+                  </p>
+                </div>
+                <div className="pt-2">
+                  <button
+                    onClick={() => {
+                      const defaultHome = isTimekeeper 
+                        ? 'timekeeper-attendance' 
+                        : isFinance 
+                          ? 'finance-payroll' 
+                          : isProjectManager 
+                            ? 'projects' 
+                            : 'dashboard';
+                      setActiveTab(defaultHome);
+                    }}
+                    className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-amber-500/20 cursor-pointer transition-all inline-flex items-center gap-2"
+                  >
+                    <ArrowRight className="w-4 h-4" />
+                    <span>Return to Authorized Workspace</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ------------------------------------------------------------- */}
             {/* TAB 0.2: INSTALLMENT PAYMENTS & BILLING */}
             {/* ------------------------------------------------------------- */}
-            {activeTab === 'payments' && (
+            {!isTimekeeper && activeTab === 'payments' && (
           <div className="space-y-6">
             {isProjectManager ? (
               <div className="bg-slate-950 border border-amber-500/30 rounded-2xl p-10 text-center space-y-4 shadow-xl">
@@ -2242,7 +2623,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 0.3: MASTER SCHEDULE & CALENDAR */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'schedule' && (
+        {!isTimekeeper && activeTab === 'schedule' && (
           <div className="space-y-6">
             <ProjectScheduleCalendar
               events={scheduleEvents}
@@ -2257,7 +2638,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 0.4: GOVERNMENT PERMITS & LEGAL COMPLIANCE */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'permits' && (
+        {!isTimekeeper && activeTab === 'permits' && (
           <div className="space-y-6">
             {isProjectManager ? (
               <div className="bg-slate-950 border border-amber-500/30 rounded-2xl p-10 text-center space-y-4 shadow-xl">
@@ -2281,10 +2662,11 @@ export default function AdminPortal({
               <GovernmentPermitsTracker
                 permits={permits}
                 projects={isProjectManager ? pmScopedProjects : projects}
-                onAddPermit={onAddPermit}
-                onUpdatePermitStatus={onUpdatePermitStatus}
-                onUpdatePermit={onUpdatePermit}
-                onDeletePermit={onDeletePermit}
+                readOnly={isFinance}
+                onAddPermit={!isFinance ? onAddPermit : undefined}
+                onUpdatePermitStatus={!isFinance ? onUpdatePermitStatus : undefined}
+                onUpdatePermit={!isFinance ? onUpdatePermit : undefined}
+                onDeletePermit={!isFinance ? onDeletePermit : undefined}
               />
             )}
           </div>
@@ -2293,7 +2675,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 0.5: PAYROLL & ARTISAN WAGE DISBURSAL */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'payroll' && (
+        {!isTimekeeper && activeTab === 'payroll' && (
           <div className="space-y-6">
             {isProjectManager ? (
               <div className="bg-slate-950 border border-amber-500/30 rounded-2xl p-10 text-center space-y-4 shadow-xl">
@@ -2330,9 +2712,48 @@ export default function AdminPortal({
         )}
 
         {/* ------------------------------------------------------------- */}
+        {/* TAB 0.6: SITE ATTENDANCE ROLL-CALL (TIMEKEEPER & AUDIT) */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'timekeeper-attendance' && (
+          <div className="space-y-6">
+            <TimekeeperAttendanceDashboard
+              projects={projects}
+              session={session}
+              onNotify={(msg) => notify(msg)}
+            />
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 0.7: AUTOMATED WEEKLY PAYROLL & VALE ENGINE (FINANCE & ADMIN) */}
+        {/* ------------------------------------------------------------- */}
+        {(isOperationsManager || isFinance) && activeTab === 'finance-payroll' && (
+          <div className="space-y-6">
+            <FinancePayrollDashboard
+              projects={projects}
+              session={session}
+              onNotify={(msg) => notify(msg)}
+            />
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
+        {/* TAB 0.8: WORKER MASTERLIST & DAILY WAGE RATES (ADMIN & OPS) */}
+        {/* ------------------------------------------------------------- */}
+        {(isOperationsManager || isFinance) && activeTab === 'worker-masterlist' && (
+          <div className="space-y-6">
+            <WorkerMasterlistManager
+              projects={projects}
+              session={session}
+              onNotify={(msg) => notify(msg)}
+            />
+          </div>
+        )}
+
+        {/* ------------------------------------------------------------- */}
         {/* TAB 1: CTVILL COMMERCIAL FIT-OUT DASHBOARD */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'dashboard' && (
+        {(isOperationsManager || isFinance) && activeTab === 'dashboard' && (
           <div className="space-y-6">
             {isProjectManager ? (
               /* ========================================================================= */
@@ -3186,7 +3607,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 5.1: COMMERCIAL SITES HUB */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'projects' && (
+        {activeTab === 'projects' && !isTimekeeper && (
           <div className="space-y-6">
             <ProjectProfileHub
               projects={pmScopedProjects.length > 0 ? pmScopedProjects : projects}
@@ -3194,11 +3615,11 @@ export default function AdminPortal({
               contractors={pmContractors}
               rfis={rfis}
               changeOrders={changeOrders}
-              isAdmin={isAdmin}
+              isAdmin={isAdmin && !isFinance}
               userRole={rawRole}
-              onCreateProject={onCreateProject}
-              onUpdateProject={onUpdateProject}
-              onDeleteProject={onDeleteProject}
+              onCreateProject={!isFinance ? onCreateProject : undefined}
+              onUpdateProject={!isFinance ? onUpdateProject : undefined}
+              onDeleteProject={!isFinance ? onDeleteProject : undefined}
             />
           </div>
         )}
@@ -3206,7 +3627,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 5.2: GANTT SCHEDULE & MILESTONES */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'gantt' && (
+        {activeTab === 'gantt' && !isTimekeeper && (
           <div className="space-y-6">
             <GanttTimeline
               projects={pmScopedProjects.length > 0 ? pmScopedProjects : projects}
@@ -3223,7 +3644,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 5.3: DAILY CONSTRUCTION SITE DIARY & WEATHER */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'site-diary' && (
+        {activeTab === 'site-diary' && !isTimekeeper && (
           <div className="space-y-6">
             <DailySiteDiary
               logs={siteLogs}
@@ -3242,7 +3663,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 5.4: CENTRALIZED DOCUMENT MANAGEMENT */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'documents' && (
+        {activeTab === 'documents' && !isTimekeeper && (
           <div className="space-y-6">
             <DocumentManager
               documents={documents}
@@ -3260,7 +3681,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 5.5: PROJECT KANBAN EXECUTION */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'kanban' && (
+        {activeTab === 'kanban' && !isTimekeeper && (
           <div className="space-y-6">
             <ProjectKanban
               tasks={tasks}
@@ -3276,7 +3697,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 5.6: RFI REGISTER (REQUESTS FOR INFORMATION) */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'rfis' && (
+        {activeTab === 'rfis' && !isTimekeeper && (
           <div className="space-y-6">
             <RfiManager
               rfis={rfis}
@@ -3292,7 +3713,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 5.7: CHANGE ORDERS & VARIATION CONTROL */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'change-orders' && (
+        {activeTab === 'change-orders' && !isTimekeeper && (
           <div className="space-y-6">
             <ChangeOrderManager
               changeOrders={changeOrders}
@@ -3308,7 +3729,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 5.8: RISK MATRIX & CONTINGENCY CONTROLS */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'risks' && (
+        {activeTab === 'risks' && !isTimekeeper && (
           <div className="space-y-6">
             <RiskMatrix
               risks={risks}
@@ -3320,13 +3741,16 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 5.9: COMMERCIAL FIT-OUT QUOTATION CRM (ADMIN ONLY) */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'quotation-leads' && !isProjectManager && (
+        {activeTab === 'quotation-leads' && !isProjectManager && !isTimekeeper && (
           <div className="space-y-6">
             <QuotationLeadsManager
               quotations={quotations}
               isAdmin={isAdmin}
               onUpdateStatus={onUpdateQuotationStatus}
               onConvertToProject={onConvertQuotationToProject}
+              navigateToProject={(projId) => {
+                setActiveTab('projects');
+              }}
             />
           </div>
         )}
@@ -3334,7 +3758,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB 7: OPERATIONAL AUDIT TRAIL */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'audit-trail' && (
+        {activeTab === 'audit-trail' && !isTimekeeper && (
           <div className="space-y-6">
             <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-xs">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
@@ -3373,864 +3797,69 @@ export default function AdminPortal({
         )}
 
         {/* ------------------------------------------------------------- */}
-        {/* TAB 8: FIELD MANPOWER ALLOCATION & CONTRACTOR VERIFICATION CENTER */}
+        {/* TAB 8: FIELD MANPOWER ALLOCATION & CONTRACTOR */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'contractors' && (
-          <div className="space-y-6">
-            
-            {/* Header */}
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse"></span>
-                  <span className="text-[10px] font-mono text-teal-400 font-bold uppercase tracking-wider">LIVE WORKFORCE OPERATIONS</span>
-                </div>
-                <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                  <Users className="w-6 h-6 text-teal-400" />
-                  Field Manpower Allocation & Contractor Verification Center
-                </h3>
-                <p className="text-xs text-slate-400 mt-1">Commercial fit-out workforce deployment, AI-suggested trade rebalancing, geofenced roll-call audits, and anti-ghost worker tracking.</p>
-              </div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <button
-                  onClick={() => setIsContractorModalOpen(true)}
-                  className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-lg text-xs font-bold cursor-pointer transition-all flex items-center gap-1.5 shadow-md shadow-teal-600/20"
-                >
-                  <Plus className="w-4 h-4" />
-                  <span>Register Worker</span>
-                </button>
-                <button
-                  onClick={() => setIsAuditModalOpen(true)}
-                  className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold cursor-pointer transition-colors flex items-center gap-1.5 shadow-md"
-                >
-                  <ShieldCheck className="w-4 h-4" />
-                  <span>Log Roll-Call Audit</span>
-                </button>
-                <span className="bg-teal-950 border border-teal-800 text-teal-300 text-xs font-mono px-3 py-2 rounded-lg font-bold">
-                  {totalManpower} Workers On-Site
-                </span>
-              </div>
-            </div>
+        {activeTab === 'contractors' && !isTimekeeper && (
+          <LaborWorkforceArtisanTrades
+            contractors={contractors}
+            manpowerAudits={manpowerAudits}
+            projects={projects}
+            aiRecommendations={aiRecommendations}
+            isAiScanning={isAiScanning}
+            aiScanMessage={aiScanMessage}
+            handleTriggerAiScan={handleTriggerAiScan}
+            onApplyAIRecommendation={onApplyAIRecommendation}
+            onDismissAIRecommendation={onDismissAIRecommendation}
+            showAppliedRecsHistory={showAppliedRecsHistory}
+            setShowAppliedRecsHistory={setShowAppliedRecsHistory}
+            totalManpower={totalManpower}
+            deployedFieldContractors={deployedFieldContractors}
+            inHouseCount={inHouseCount}
+            outsourcedCount={outsourcedCount}
+            projectLaborChartData={projectLaborChartData}
+            tradeManpowerChartData={tradeManpowerChartData}
+            rollCallComparisonChartData={rollCallComparisonChartData}
+            employmentMixChartData={employmentMixChartData}
+            onDeleteContractor={onDeleteContractor}
+            onUpdateContractor={onUpdateContractor}
+            onUpdateContractors={onUpdateContractors}
+            onUpdateProject={onUpdateProject}
+            onRegisterWorkerClick={() => setIsContractorModalOpen(true)}
+            onLogAuditClick={() => setIsAuditModalOpen(true)}
+            onVerifyRollCall={(cId) => {
+              setAuditContractorId(cId);
+              setIsAuditModalOpen(true);
+            }}
+            notify={notify}
+          />
+        )}
 
-            {/* Executive Workforce KPI Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
-                <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
-                  <span>TOTAL FIELD CREW</span>
-                  <HardHat className="w-4 h-4 text-teal-400" />
-                </div>
-                <div className="text-2xl font-bold font-mono text-white">{totalManpower} <span className="text-xs text-slate-400 font-normal">Active Laborers</span></div>
-                <span className="text-[10px] text-teal-400 block font-mono">{deployedFieldContractors.length} Trade Teams on Actual Sites ({contractors.length} Total Registered)</span>
-              </div>
+        {/* ------------------------------------------------------------- */}
+        {/* TAB: SUBCONTRACTOR ROLL-CALL AUDITS (FINANCE READ-ONLY VIEW) */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'subcontractor-audits' && (isFinance || isOperationsManager) && (
+          <SubcontractorRollCallAudits
+            manpowerAudits={manpowerAudits}
+            projects={projects}
+            contractors={contractors}
+            readOnly={isFinance}
+            isFinance={isFinance}
+            onLogAuditClick={isFinance ? undefined : () => setIsAuditModalOpen(true)}
+            notify={notify}
+          />
+        )}
 
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
-                <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
-                  <span>24H ROLL-CALL AUDIT</span>
-                  <ShieldCheck className="w-4 h-4 text-blue-400" />
-                </div>
-                <div className="text-2xl font-bold font-mono text-blue-300">
-                  {manpowerAudits.reduce((sum, a) => sum + a.verifiedHeadcount, 0)} / {manpowerAudits.reduce((sum, a) => sum + a.claimedHeadcount, 0)}
-                  <span className="text-xs text-slate-400 font-normal ml-1">Verified</span>
-                </div>
-                <span className="text-[10px] text-blue-400 block font-mono">GPS Geotagged Roll-Calls</span>
-              </div>
-
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
-                <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
-                  <span>LABOR DISCREPANCY RATE</span>
-                  <AlertTriangle className="w-4 h-4 text-amber-400" />
-                </div>
-                <div className="text-2xl font-bold font-mono text-amber-400">
-                  {manpowerAudits.filter(a => a.verificationStatus === 'DISCREPANCY_FLAGGED').length} <span className="text-xs text-slate-400 font-normal">Flagged Shifts</span>
-                </div>
-                <span className="text-[10px] text-amber-300/80 block font-mono">Billing auto-locked on variance</span>
-              </div>
-
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
-                <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
-                  <span>AVG LABOR PRODUCTIVITY</span>
-                  <Award className="w-4 h-4 text-emerald-400" />
-                </div>
-                <div className="text-2xl font-bold font-mono text-emerald-300">
-                  {manpowerAudits.length > 0 ? (manpowerAudits.reduce((sum, a) => sum + a.productivityIndex, 0) / manpowerAudits.length).toFixed(1) : '0.0'}%
-                </div>
-                <span className="text-[10px] text-emerald-400 block font-mono">Output Pace vs Crew Size</span>
-              </div>
-            </div>
-
-            {/* Discrepancy & Anti-Ghost Worker Warning Banner */}
-            {manpowerAudits.some(a => a.verificationStatus === 'DISCREPANCY_FLAGGED') && (
-              <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl p-4 flex items-start gap-3 text-xs">
-                <BadgeAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <strong className="text-amber-200 block">Active Labor Variance Detected by Field Site Monitor:</strong>
-                  <p className="text-slate-300">
-                    A discrepancy between contractor billed manifest and verified on-site headcount was flagged. Payout releases remain guarded until rectified on next shift inspection.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* ------------------------------------------------------------- */}
-            {/* SECTION 1: VISUAL WORKFORCE ANALYTICS & INTERACTIVE CHARTS */}
-            {/* ------------------------------------------------------------- */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              
-              {/* Chart 1: Manpower Headcount Deployed per Commercial Project */}
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                  <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                      <BarChart3 className="w-4 h-4 text-teal-400" />
-                      Labor Allocation by Commercial Site
-                    </h4>
-                    <p className="text-xs text-slate-400">Physical workforce distribution across active project sites</p>
-                  </div>
-                  <span className="text-[10px] font-mono bg-teal-950 border border-teal-800 text-teal-300 px-2.5 py-1 rounded-full font-bold">
-                    {projectLaborChartData.reduce((sum, p) => sum + p.workers, 0)} Total Assigned
-                  </span>
-                </div>
-
-                {projectLaborChartData.length === 0 ? (
-                  <div className="h-64 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
-                    <Building className="w-8 h-8 text-slate-600" />
-                    <span className="text-xs font-semibold text-slate-400">No Commercial Sites Registered</span>
-                    <span className="text-[11px] text-slate-600">Register a commercial project site to track labor distribution.</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="h-64 w-full pt-2">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <ReBarChart data={projectLaborChartData} margin={{ top: 10, right: 10, left: -15, bottom: 25 }}>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                          <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} interval={0} angle={-15} textAnchor="end" />
-                          <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
-                          <Tooltip
-                            content={({ active, payload }) => {
-                              if (active && payload && payload.length) {
-                                const data = payload[0].payload;
-                                return (
-                                  <div className="bg-slate-900 border border-slate-700 p-3 rounded-xl shadow-xl text-xs space-y-1 font-sans">
-                                    <div className="font-bold text-white">{data.fullName}</div>
-                                    <div className="text-teal-400 font-mono font-bold">{data.workers} Active Workers</div>
-                                    <div className="text-slate-300 font-mono">Completion: {data.progress}%</div>
-                                    <div className="text-[10px] text-slate-400 font-mono uppercase">{data.status}</div>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            }}
-                          />
-                          <Bar dataKey="workers" radius={[6, 6, 0, 0]}>
-                            {projectLaborChartData.map((entry, index) => (
-                              <Cell 
-                                key={`cell-${index}`} 
-                                fill={['#14b8a6', '#3b82f6', '#8b5cf6', '#f59e0b', '#10b981', '#06b6d4'][index % 6]} 
-                              />
-                            ))}
-                          </Bar>
-                        </ReBarChart>
-                      </ResponsiveContainer>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-800/80 text-[11px]">
-                      {projectLaborChartData.slice(0, 4).map((p, i) => (
-                        <div key={i} className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5 space-y-1">
-                          <div className="font-bold text-white truncate text-xs">{p.name}</div>
-                          <div className="flex items-center justify-between font-mono text-[10px]">
-                            <span className="text-teal-400 font-bold">{p.workers} Crew</span>
-                            <span className="text-slate-400">{p.progress}%</span>
-                          </div>
-                          <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-                            <div className="h-full bg-teal-400 rounded-full" style={{ width: `${p.progress}%` }}></div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Chart 2: Engineering Specialty & Trade Distribution Donut */}
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                  <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                      <PieChart className="w-4 h-4 text-indigo-400" />
-                      Trade Discipline & Specialty Breakdown
-                    </h4>
-                    <p className="text-xs text-slate-400">Headcount distribution across specialized construction trades</p>
-                  </div>
-                  <span className="text-[10px] font-mono bg-indigo-950 border border-indigo-800 text-indigo-300 px-2.5 py-1 rounded-full font-bold">
-                    {tradeManpowerChartData.length} Specialized Trades
-                  </span>
-                </div>
-
-                {tradeManpowerChartData.length === 0 ? (
-                  <div className="h-64 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
-                    <Users className="w-8 h-8 text-slate-600" />
-                    <span className="text-xs font-semibold text-slate-400">No Trade Workers Registered</span>
-                    <span className="text-[11px] text-slate-600">Click &quot;Register Worker&quot; above to add construction personnel and trades.</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="h-64 w-full flex items-center justify-center relative">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <RePieChart>
-                          <Pie
-                            data={tradeManpowerChartData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={90}
-                            paddingAngle={4}
-                            dataKey="value"
-                          >
-                            {tradeManpowerChartData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} stroke="#0f172a" strokeWidth={2} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            content={({ active, payload }) => {
-                              if (active && payload && payload.length) {
-                                const data = payload[0].payload;
-                                const total = tradeManpowerChartData.reduce((s, i) => s + i.value, 0);
-                                const pct = total > 0 ? ((data.value / total) * 100).toFixed(1) : '0';
-                                return (
-                                  <div className="bg-slate-900 border border-slate-700 p-2.5 rounded-xl shadow-xl text-xs font-sans">
-                                    <div className="font-bold text-white">{data.name}</div>
-                                    <div className="text-teal-400 font-mono font-bold mt-0.5">{data.value} Workers ({pct}%)</div>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            }}
-                          />
-                        </RePieChart>
-                      </ResponsiveContainer>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                        <span className="text-xl font-black font-mono text-white">{totalManpower}</span>
-                        <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider">Total Crew</span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 border-t border-slate-800/80 text-[11px]">
-                      {tradeManpowerChartData.slice(0, 6).map((item, idx) => (
-                        <div key={idx} className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2 space-y-0.5">
-                          <div className="flex items-center gap-1.5 font-semibold text-slate-200 truncate">
-                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: item.color }}></span>
-                            <span className="truncate text-xs">{item.name}</span>
-                          </div>
-                          <div className="flex justify-between items-center text-[10px] font-mono text-slate-400">
-                            <span>{totalManpower > 0 ? ((item.value / totalManpower) * 100).toFixed(0) : 0}%</span>
-                            <strong className="text-white">{item.value} Men</strong>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Chart 3: Roll-Call Discrepancy Multi-Bar Comparison */}
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                  <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                      <ShieldCheck className="w-4 h-4 text-blue-400" />
-                      Roll-Call Audit: Declared vs Verified vs Ghost Discrepancy
-                    </h4>
-                    <p className="text-xs text-slate-400">Physical gate muster vs subcontractor declared headcount</p>
-                  </div>
-                  <div className="flex items-center gap-3 text-[10px] font-mono">
-                    <span className="flex items-center gap-1 text-blue-400"><span className="w-2 h-2 rounded bg-blue-500"></span> Declared</span>
-                    <span className="flex items-center gap-1 text-emerald-400"><span className="w-2 h-2 rounded bg-emerald-500"></span> Verified</span>
-                    <span className="flex items-center gap-1 text-rose-400"><span className="w-2 h-2 rounded bg-rose-500"></span> Ghost Gap</span>
-                  </div>
-                </div>
-
-                {rollCallComparisonChartData.length === 0 ? (
-                  <div className="h-64 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
-                    <ShieldCheck className="w-8 h-8 text-slate-600" />
-                    <span className="text-xs font-semibold text-slate-400">No Roll-Call Audits Logged</span>
-                    <span className="text-[11px] text-slate-600">Conduct a physical muster audit to detect headcount variances and ghost workers.</span>
-                  </div>
-                ) : (
-                  <div className="h-64 w-full pt-2">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <ReBarChart data={rollCallComparisonChartData} margin={{ top: 10, right: 10, left: -15, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                        <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
-                        <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (active && payload && payload.length) {
-                              const d = payload[0].payload;
-                              return (
-                                <div className="bg-slate-900 border border-slate-700 p-3 rounded-xl shadow-xl text-xs font-sans space-y-1">
-                                  <div className="font-bold text-white">{d.fullName} ({d.shift})</div>
-                                  <div className="text-blue-400 font-mono">Declared Headcount: {d.claimed}</div>
-                                  <div className="text-emerald-400 font-mono">Verified Physical: {d.verified}</div>
-                                  {d.discrepancy > 0 ? (
-                                    <div className="text-rose-400 font-mono font-bold">⚠ Discrepancy: {d.discrepancy} Ghost Worker(s)</div>
-                                  ) : (
-                                    <div className="text-emerald-400 font-mono text-[10px]">✓ 100% Roll-Call Match</div>
-                                  )}
-                                </div>
-                              );
-                            }
-                            return null;
-                          }}
-                        />
-                        <Bar dataKey="claimed" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Declared" />
-                        <Bar dataKey="verified" fill="#10b981" radius={[4, 4, 0, 0]} name="Verified" />
-                        <Bar dataKey="discrepancy" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Ghost Discrepancy" />
-                      </ReBarChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-
-                <div className="p-3 bg-slate-900/60 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs">
-                  <div className="text-slate-300 flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
-                    <span>Real-Time Biometric & Geofenced Gate Muster Protection Active</span>
-                  </div>
-                  <button
-                    onClick={() => setIsAuditModalOpen(true)}
-                    className="px-3 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition cursor-pointer"
-                  >
-                    + New Roll-Call Audit
-                  </button>
-                </div>
-              </div>
-
-              {/* Chart 4: Employment Mix: In-House Core vs Outsourced Partners */}
-              <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
-                  <div>
-                    <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                      <Users className="w-4 h-4 text-emerald-400" />
-                      Workforce Structure: In-House vs Outsourced
-                    </h4>
-                    <p className="text-xs text-slate-400">Direct employee supervision vs subcontractor specialized capacity</p>
-                  </div>
-                  <span className="text-[10px] font-mono bg-emerald-950 border border-emerald-800 text-emerald-300 px-2.5 py-1 rounded-full font-bold">
-                    {contractors.length} Total Workforce Entities
-                  </span>
-                </div>
-
-                {employmentMixChartData.length === 0 ? (
-                  <div className="h-64 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
-                    <Users className="w-8 h-8 text-slate-600" />
-                    <span className="text-xs font-semibold text-slate-400">No Workforce Registered</span>
-                    <span className="text-[11px] text-slate-600">Register in-house personnel or subcontracted trade partners to view organizational mix.</span>
-                  </div>
-                ) : (
-                  <>
-                    <div className="h-64 w-full flex items-center justify-center relative">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <RePieChart>
-                          <Pie
-                            data={employmentMixChartData}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={60}
-                            outerRadius={90}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            {employmentMixChartData.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} stroke="#0f172a" strokeWidth={2} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            content={({ active, payload }) => {
-                              if (active && payload && payload.length) {
-                                const data = payload[0].payload;
-                                const total = employmentMixChartData.reduce((s, i) => s + i.value, 0);
-                                const pct = total > 0 ? ((data.value / total) * 100).toFixed(1) : '0';
-                                return (
-                                  <div className="bg-slate-900 border border-slate-700 p-2.5 rounded-xl shadow-xl text-xs font-sans">
-                                    <div className="font-bold text-white">{data.name}</div>
-                                    <div className="text-teal-400 font-mono font-bold mt-0.5">{data.value} Headcount ({pct}%)</div>
-                                  </div>
-                                );
-                              }
-                              return null;
-                            }}
-                          />
-                        </RePieChart>
-                      </ResponsiveContainer>
-                      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                        <span className="text-xl font-black font-mono text-emerald-400">
-                          {Math.round((inHouseCount / Math.max(1, inHouseCount + outsourcedCount)) * 100)}%
-                        </span>
-                        <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider">In-House</span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-3 pt-2 border-t border-slate-800/80 text-xs">
-                      <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3 space-y-1">
-                        <div className="flex items-center gap-1.5 font-bold text-white">
-                          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-                          <span>CTVill In-House Core</span>
-                        </div>
-                        <div className="text-xl font-black font-mono text-emerald-300">{inHouseCount} Staff</div>
-                        <p className="text-[10px] text-slate-400">Engineers, Foremen & Permanent Skilled Trades</p>
-                      </div>
-
-                      <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-3 space-y-1">
-                        <div className="flex items-center gap-1.5 font-bold text-white">
-                          <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
-                          <span>Outsourced Trade Partners</span>
-                        </div>
-                        <div className="text-xl font-black font-mono text-amber-300">{outsourcedCount} Workers</div>
-                        <p className="text-[10px] text-slate-400">Specialized Subcontractors & Mechanical Teams</p>
-                      </div>
-                    </div>
-                  </>
-                )}
-              </div>
-
-            </div>
-
-            {/* ------------------------------------------------------------- */}
-            {/* SECTION 2: AI MULTI-SITE LABOR OPTIMIZATION FLOW (VISUAL CARDS) */}
-            {/* ------------------------------------------------------------- */}
-            <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/40 border border-indigo-500/30 rounded-2xl p-6 shadow-lg space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
-                <div className="flex items-center gap-3">
-                  <div className="bg-indigo-600/30 border border-indigo-500/50 p-2.5 rounded-xl text-indigo-300">
-                    <Bot className="w-5 h-5" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-base font-bold text-white flex items-center gap-1.5">
-                        AI Workforce Optimization Engine
-                      </h4>
-                      <span className="bg-indigo-950 border border-indigo-700 text-indigo-300 text-[10px] font-mono px-2 py-0.5 rounded font-bold flex items-center gap-1">
-                        <Sparkles className="w-3 h-3 text-indigo-400" />
-                        ADVISORY AI
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Cross-project labor flow recommendations: transfers surplus specialized trades from near-completion sites to critical path projects.
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleTriggerAiScan}
-                  disabled={isAiScanning}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold font-mono cursor-pointer transition-all flex items-center gap-2 shadow-md shadow-indigo-600/20 shrink-0"
-                >
-                  <RefreshCw className={`w-3.5 h-3.5 ${isAiScanning ? 'animate-spin' : ''}`} />
-                  <span>{isAiScanning ? 'Scanning All Commercial Sites...' : 'Run Multi-Site AI Scan'}</span>
-                </button>
-              </div>
-
-              {aiScanMessage && (
-                <div className="bg-indigo-950/80 border border-indigo-500 text-indigo-200 text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 animate-fadeIn">
-                  <CheckCircle className="w-4 h-4 text-indigo-400 shrink-0" />
-                  <span>{aiScanMessage}</span>
-                </div>
-              )}
-
-              {/* Visual Transfer Flow Cards */}
-              {(() => {
-                const pendingRecs = aiRecommendations.filter(r => !r.applied && !r.dismissed);
-                const appliedRecs = aiRecommendations.filter(r => r.applied && !r.dismissed);
-
-                return (
-                  <div className="space-y-4 pt-1">
-                    {pendingRecs.length === 0 ? (
-                      <div className="py-10 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center border border-dashed border-slate-800/80 rounded-xl">
-                        <Bot className="w-8 h-8 text-slate-600" />
-                        <span className="text-xs font-semibold text-slate-400">
-                          {appliedRecs.length > 0 ? 'All Recommendations Acted Upon' : 'No AI Reallocation Recommendations'}
-                        </span>
-                        <span className="text-[11px] text-slate-600 max-w-sm">
-                          {appliedRecs.length > 0 
-                            ? 'All current balance suggestions have been deployed or reviewed. Click "Run Multi-Site AI Scan" above to re-analyze active projects.'
-                            : 'Click "Run Multi-Site AI Scan" above to scan active commercial projects and balance specialized trade crews across sites.'}
-                        </span>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                        {pendingRecs.map((rec) => {
-                          const donorDisplay = rec.donorProjectName || (rec.title.includes('from') ? rec.title.split('from')[1]?.split('to')[0]?.replace(/"/g, '').trim() : 'General Standby Pool');
-                          const targetDisplay = rec.targetProjectName || rec.targetLots;
-                          const workerDisplay = rec.workerName || rec.contractorName;
-                          const crewDelta = rec.recommendedHeadcount - rec.currentHeadcount > 0 ? rec.recommendedHeadcount - rec.currentHeadcount : 1;
-
-                          return (
-                            <div 
-                              key={rec.id} 
-                              className="bg-slate-900/90 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-4 space-y-3 transition-all flex flex-col justify-between"
-                            >
-                              <div className="space-y-3">
-                                <div className="flex justify-between items-center">
-                                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
-                                    rec.priority === 'HIGH' ? 'bg-rose-950 text-rose-300 border-rose-800' :
-                                    rec.priority === 'MEDIUM' ? 'bg-amber-950 text-amber-300 border-amber-800' :
-                                    'bg-teal-950 text-teal-300 border-teal-800'
-                                  }`}>
-                                    {rec.priority} PRIORITY
-                                  </span>
-
-                                  <span className="text-[10px] font-mono text-indigo-400 bg-indigo-950/60 px-2 py-0.5 rounded border border-indigo-800/60 flex items-center gap-1">
-                                    <Sparkles className="w-3 h-3 text-indigo-400" />
-                                    <span>Transfer Ready</span>
-                                  </span>
-                                </div>
-
-                                {/* Visual Flow Arrow */}
-                                <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-3 flex items-center justify-between gap-2">
-                                  <div className="min-w-0 flex-1">
-                                    <span className="text-[9px] text-slate-500 font-mono uppercase block">Donor Project</span>
-                                    <div className="text-xs font-bold text-white truncate" title={donorDisplay}>
-                                      {donorDisplay}
-                                    </div>
-                                  </div>
-
-                                  <div className="flex flex-col items-center shrink-0 px-3">
-                                    <span className="text-[10px] font-mono font-bold text-amber-400">
-                                      +{crewDelta} Staff
-                                    </span>
-                                    <div className="w-16 h-0.5 bg-gradient-to-r from-amber-500 to-teal-400 my-1 relative">
-                                      <div className="w-1.5 h-1.5 rounded-full bg-teal-400 absolute -right-0.5 -top-0.5"></div>
-                                    </div>
-                                    <span className="text-[9px] font-mono text-slate-400 uppercase max-w-[85px] truncate font-medium text-center" title={rec.tradeType || workerDisplay}>
-                                      {rec.tradeType ? rec.tradeType.split(' ')[0] : workerDisplay.split(' ')[0]}
-                                    </span>
-                                  </div>
-
-                                  <div className="min-w-0 flex-1 text-right">
-                                    <span className="text-[9px] text-slate-500 font-mono uppercase block">Target Project</span>
-                                    <div className="text-xs font-bold text-teal-400 truncate" title={targetDisplay}>
-                                      {targetDisplay}
-                                    </div>
-                                  </div>
-                                </div>
-
-                                {/* Worker & Headcount Breakdown */}
-                                <div className="text-[11px] text-slate-300 flex items-center justify-between font-mono bg-slate-950/50 p-2 rounded-lg border border-slate-800/60">
-                                  <div className="flex items-center gap-1.5 truncate mr-2">
-                                    <Users className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                                    <span className="text-slate-300 font-semibold truncate">{workerDisplay}</span>
-                                    {rec.tradeType && (
-                                      <span className="text-[10px] text-slate-500 truncate">({rec.tradeType})</span>
-                                    )}
-                                  </div>
-                                  <strong className="text-indigo-300 shrink-0">{rec.currentHeadcount} → {rec.recommendedHeadcount} Staff</strong>
-                                </div>
-
-                                {/* AI Rationale & Learned Decision Basis */}
-                                {rec.rationale && (
-                                  <div className="bg-indigo-950/40 border border-indigo-500/30 rounded-xl p-3 flex items-start gap-2.5 text-xs text-indigo-100 shadow-xs">
-                                    <Lightbulb className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                                    <div className="space-y-0.5 flex-1">
-                                      <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-wider block">
-                                        AI Recommendation:
-                                      </span>
-                                      <p className="leading-relaxed text-slate-200 text-xs">
-                                        {rec.rationale}
-                                      </p>
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
-
-                              {/* Action Buttons: 1-Click Reallocate & Pass/Dismiss */}
-                              <div className="pt-3 border-t border-slate-800/80 flex items-center gap-2">
-                                <button
-                                  onClick={() => {
-                                    if (onApplyAIRecommendation) {
-                                      onApplyAIRecommendation(rec.id);
-                                      notify(`AI transfer approved: ${workerDisplay} reallocated to "${targetDisplay}".`);
-                                    }
-                                  }}
-                                  className="flex-1 py-2 px-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold font-mono transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/20"
-                                >
-                                  <Zap className="w-3.5 h-3.5" />
-                                  <span>1-Click Reallocate</span>
-                                </button>
-
-                                <button
-                                  onClick={() => {
-                                    if (onDismissAIRecommendation) {
-                                      onDismissAIRecommendation(rec.id);
-                                    }
-                                    notify(`AI suggestion dismissed. Feedback logged to train future scans.`);
-                                  }}
-                                  title="Dismiss recommendation and train AI not to suggest this pair again"
-                                  className="py-2 px-3 bg-slate-800 hover:bg-rose-950/40 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-800/60 rounded-xl text-xs font-mono font-semibold transition-all flex items-center justify-center gap-1 cursor-pointer"
-                                >
-                                  <X className="w-3.5 h-3.5" />
-                                  <span>Pass</span>
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-
-                    {/* Applied Transfers History Drawer */}
-                    {appliedRecs.length > 0 && (
-                      <div className="pt-3 border-t border-slate-800/80">
-                        <button
-                          onClick={() => setShowAppliedRecsHistory(prev => !prev)}
-                          className="w-full flex items-center justify-between py-2 px-4 bg-slate-950/60 hover:bg-slate-900 border border-slate-800 rounded-xl text-xs font-mono transition-all cursor-pointer text-slate-400 hover:text-slate-200"
-                        >
-                          <span className="flex items-center gap-2 font-semibold">
-                            <CheckCheck className="w-4 h-4 text-emerald-400" />
-                            <span>Applied Transfers History ({appliedRecs.length})</span>
-                          </span>
-                          {showAppliedRecsHistory ? (
-                            <ChevronUp className="w-4 h-4 text-slate-500" />
-                          ) : (
-                            <ChevronDown className="w-4 h-4 text-slate-500" />
-                          )}
-                        </button>
-
-                        {showAppliedRecsHistory && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 mt-3 animate-fadeIn">
-                            {appliedRecs.map((rec) => {
-                              const donorDisplay = rec.donorProjectName || 'General Standby Pool';
-                              const targetDisplay = rec.targetProjectName || rec.targetLots;
-                              const workerDisplay = rec.workerName || rec.contractorName;
-
-                              return (
-                                <div 
-                                  key={rec.id}
-                                  className="bg-emerald-950/15 border border-emerald-500/40 rounded-xl p-3 space-y-2 text-xs"
-                                >
-                                  <div className="flex items-center justify-between">
-                                    <span className="text-[10px] font-mono text-emerald-300 font-bold flex items-center gap-1">
-                                      <CheckCheck className="w-3 h-3 text-emerald-400" /> DEPLOYED
-                                    </span>
-                                    <span className="text-[10px] font-mono text-slate-500">
-                                      {rec.tradeType || 'Workforce'}
-                                    </span>
-                                  </div>
-                                  <div className="font-bold text-white truncate text-xs">
-                                    {workerDisplay}
-                                  </div>
-                                  <div className="text-[11px] text-slate-400 font-mono flex items-center justify-between">
-                                    <span className="truncate max-w-[45%] text-slate-300">{donorDisplay}</span>
-                                    <ArrowRight className="w-3 h-3 text-emerald-400 shrink-0" />
-                                    <span className="truncate max-w-[45%] text-teal-300 font-semibold">{targetDisplay}</span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Section 2: Contractor & In-House Workforce Rosters — Messenger Edition */}
-            <WorkforceMessengerRoster
-              contractors={contractors}
-              manpowerAudits={manpowerAudits}
-              projects={projects}
-              onRegisterClick={() => setIsContractorModalOpen(true)}
-              onVerifyRollCall={(cId) => {
-                setAuditContractorId(cId);
-                setIsAuditModalOpen(true);
-              }}
-              onDeleteContractor={onDeleteContractor}
-              onUpdateContractor={onUpdateContractor}
-              onUpdateContractors={onUpdateContractors}
-              onUpdateProject={onUpdateProject}
-              notify={notify}
-            />
-
-            {/* Section 3: Daily Field Attendance & GPS Audit Trail Feed */}
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
-                <div>
-                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                    <ClipboardList className="w-4 h-4 text-teal-400" />
-                    Certified Daily Roll-Call Audits & GPS Attendance Records
-                  </h4>
-                  <p className="text-xs text-slate-400">Field supervisor on-site roll-call certifications with GPS geotags and anti-fraud verification</p>
-                </div>
-                <span className="text-teal-400 font-mono text-xs font-bold">
-                  {manpowerAudits.length} Audited Logs
-                </span>
-              </div>
-
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs font-sans">
-                  <thead>
-                    <tr className="border-b border-slate-800 text-slate-400 font-mono text-[10px] uppercase">
-                      <th className="py-2.5 px-3">Date & Shift</th>
-                      <th className="py-2.5 px-3">Partner / Specialty</th>
-                      <th className="py-2.5 px-3">Allocated Zone</th>
-                      <th className="py-2.5 px-3 text-center">Manifest vs Verified</th>
-                      <th className="py-2.5 px-3 text-center">Variance Status</th>
-                      <th className="py-2.5 px-3">GPS & Proof</th>
-                      <th className="py-2.5 px-3">Site Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60">
-                    {manpowerAudits.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="py-8 text-center text-slate-500 text-xs">
-                          <ClipboardList className="w-6 h-6 mx-auto text-slate-600 mb-1" />
-                          <div className="font-semibold text-slate-400">No Daily Roll-Call Records Found</div>
-                          <div className="text-[11px] text-slate-600">Click &quot;Log Roll-Call Audit&quot; above to register on-site attendance.</div>
-                        </td>
-                      </tr>
-                    ) : (
-                      manpowerAudits.map((audit) => (
-                      <tr key={audit.id} className="hover:bg-slate-900/60 transition-colors">
-                        <td className="py-3 px-3 font-mono whitespace-nowrap">
-                          <span className="text-white font-bold block">{audit.date}</span>
-                          <span className="text-slate-500 text-[10px]">{audit.shift}</span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className="text-white font-bold block">{audit.contractorName}</span>
-                          <span className="text-teal-400 font-mono text-[10px]">{audit.specialty}</span>
-                        </td>
-                        <td className="py-3 px-3 text-slate-300 max-w-[180px] truncate">
-                          {audit.assignedSectorOrLot}
-                        </td>
-                        <td className="py-3 px-3 text-center font-mono whitespace-nowrap">
-                          <span className="text-teal-300 font-bold text-sm">{audit.verifiedHeadcount}</span>
-                          <span className="text-slate-500 text-xs"> / {audit.claimedHeadcount} Men</span>
-                        </td>
-                        <td className="py-3 px-3 text-center whitespace-nowrap">
-                          <span className={`px-2 py-0.5 rounded font-mono text-[10px] font-bold border ${
-                            audit.verificationStatus === 'VERIFIED_MATCH'
-                              ? 'bg-emerald-950 text-emerald-300 border-emerald-700'
-                              : 'bg-amber-950 text-amber-300 border-amber-700'
-                          }`}>
-                            {audit.verificationStatus === 'VERIFIED_MATCH' ? 'MATCH ✓' : `MISSING (-${audit.discrepancy})`}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-[10px] font-mono whitespace-nowrap">
-                          <span className="text-slate-400 block">📍 {audit.gpsCoordinates ? audit.gpsCoordinates.split('(')[0] : 'Commercial Site'}</span>
-                          <span className="text-emerald-400">✓ Photo Roll-Call</span>
-                        </td>
-                        <td className="py-3 px-3 text-slate-300 italic text-[11px] max-w-[220px]">
-                          "{audit.remarks}"
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* ------------------------------------------------------------- */}
-            {/* SECTION: PROJECT CONTRACTOR & SITE PERSONNEL COST TRACKING TOOL */}
-            {/* ------------------------------------------------------------- */}
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <span className="p-1.5 rounded-lg bg-blue-950 text-blue-400 border border-blue-800">
-                      <Banknote className="w-4 h-4" />
-                    </span>
-                    <h4 className="text-sm font-bold text-white tracking-tight">
-                      Project Contractor & Site Personnel Cost Tracking Tool
-                    </h4>
-                  </div>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Logs site operational expenses and subcontractor disbursements directly tied to construction milestones.
-                  </p>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <div className="bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg font-mono text-xs">
-                    <span className="text-slate-500 text-[10px] block">TOTAL DISBURSEMENTS</span>
-                    <strong className="text-emerald-400 text-sm">
-                      ₱{payroll.reduce((sum, p) => sum + p.amount, 0).toLocaleString()}
-                    </strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* Disbursements Table */}
-              <div className="overflow-x-auto border border-slate-800 rounded-xl">
-                <table className="w-full text-left text-xs text-slate-300">
-                  <thead className="bg-slate-900/80 text-[11px] text-slate-400 font-mono uppercase tracking-wider border-b border-slate-800">
-                    <tr>
-                      <th className="py-2.5 px-3">Disbursement Date</th>
-                      <th className="py-2.5 px-3">Payee & Organization</th>
-                      <th className="py-2.5 px-3">Role</th>
-                      <th className="py-2.5 px-3">Expense Category / Milestone</th>
-                      <th className="py-2.5 px-3 text-right">Amount (₱)</th>
-                      <th className="py-2.5 px-3">Payment Channel</th>
-                      <th className="py-2.5 px-3 text-center">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800/60 font-sans">
-                    {payroll.length === 0 ? (
-                      <tr>
-                        <td colSpan={7} className="py-8 text-center text-slate-500 text-xs">
-                          <Banknote className="w-6 h-6 mx-auto text-slate-600 mb-1" />
-                          <div className="font-semibold text-slate-400">No Disbursements Logged</div>
-                          <div className="text-[11px] text-slate-600">Subcontractor and personnel payouts will appear here.</div>
-                        </td>
-                      </tr>
-                    ) : (
-                      payroll.map((rec) => (
-                      <tr key={rec.id} className="hover:bg-slate-900/50 transition-colors">
-                        <td className="py-3 px-3 font-mono text-slate-400 whitespace-nowrap">
-                          {rec.date}
-                        </td>
-                        <td className="py-3 px-3">
-                          <strong className="text-white block">{rec.payeeName}</strong>
-                          <span className="text-slate-500 font-mono text-[10px]">{rec.id}</span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
-                            rec.role === 'Contractor' 
-                              ? 'bg-amber-950/80 text-amber-300 border-amber-800'
-                              : rec.role === 'Site Monitor'
-                              ? 'bg-blue-950/80 text-blue-300 border-blue-800'
-                              : 'bg-slate-800 text-slate-300 border-slate-700'
-                          }`}>
-                            {rec.role}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3">
-                          <span className="text-white font-medium block">{rec.disbursementType}</span>
-                          <span className="text-slate-400 text-[11px]">
-                            {rec.disbursementType === 'Contract Milestone' 
-                              ? 'Tied to Civil Works Phase Sign-Off'
-                              : 'Field Supervision & QA Retainer'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-right font-mono font-bold text-white whitespace-nowrap">
-                          ₱{rec.amount.toLocaleString()}
-                        </td>
-                        <td className="py-3 px-3 font-mono text-slate-300 text-[11px] whitespace-nowrap">
-                          💳 {rec.paymentMethod}
-                        </td>
-                        <td className="py-3 px-3 text-center whitespace-nowrap">
-                          <span className="px-2 py-0.5 rounded font-mono text-[10px] font-bold bg-emerald-950 text-emerald-300 border border-emerald-800">
-                            ✓ {rec.status}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-          </div>
+        {/* ------------------------------------------------------------- */}
+        {/* TAB: SUBCONTRACTOR BILLINGS & DISBURSEMENTS (AP LEDGER)        */}
+        {/* ------------------------------------------------------------- */}
+        {activeTab === 'subcontractor-payables' && (isFinance || isAdmin) && (
+          <SubcontractorBillingsDisbursements
+            manpowerAudits={manpowerAudits}
+            contractors={contractors}
+            projects={projects}
+            session={session}
+            onNotify={notify}
+          />
         )}
 
         {/* ------------------------------------------------------------- */}
@@ -4262,7 +3891,7 @@ export default function AdminPortal({
         {/* ------------------------------------------------------------- */}
         {/* TAB: OPERATIONS & SYSTEM SETTINGS */}
         {/* ------------------------------------------------------------- */}
-        {activeTab === 'operations-settings' && (
+        {activeTab === 'operations-settings' && isOperationsManager && (
           <div className="space-y-6 max-w-5xl">
             {/* Header banner */}
             <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -4610,11 +4239,6 @@ export default function AdminPortal({
                   )}
                 </div>
 
-                <div className="pt-1 border-t border-slate-800">
-                  <p className="text-[10px] text-slate-600 font-mono">
-                    Default credentials: Admin → admin123 &nbsp;|&nbsp; Project Manager → pm@ctvill.com / pm123
-                  </p>
-                </div>
               </div>
             )}
 
@@ -5218,30 +4842,31 @@ export default function AdminPortal({
                       onChange={(e) => setContSpec(e.target.value)}
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-emerald-500"
                     >
-                      <option>Carpentry &amp; Formwork</option>
-                      <option>Civil &amp; Concrete Masonry</option>
-                      <option>Steel &amp; Rebar Works</option>
-                      <option>Electrical Works</option>
-                      <option>Plumbing &amp; Sanitary</option>
-                      <option>Painting &amp; Finishing</option>
-                      <option>Tiling &amp; Flooring</option>
-                      <option>Interior Fit-Out &amp; Drywall</option>
-                      <option>Earthworks &amp; Site Grading</option>
-                      <option>General Labor Gang</option>
+                      <option value="Mason">Mason (Masonry &amp; Plastering)</option>
+                      <option value="Carpentry & Formwork">Carpentry &amp; Formwork</option>
+                      <option value="Civil & Concrete Masonry">Civil &amp; Concrete Masonry</option>
+                      <option value="Steel & Rebar Works">Steel &amp; Rebar Works</option>
+                      <option value="Electrical Works">Electrical Works</option>
+                      <option value="Plumbing & Sanitary">Plumbing &amp; Sanitary</option>
+                      <option value="Painting & Finishing">Painting &amp; Finishing</option>
+                      <option value="Tiling & Flooring">Tiling &amp; Flooring</option>
+                      <option value="Interior Fit-Out & Drywall">Interior Fit-Out &amp; Drywall</option>
+                      <option value="Earthworks & Site Grading">Earthworks &amp; Site Grading</option>
+                      <option value="General Labor Gang">General Labor Gang</option>
                     </select>
                   </div>
 
-                  {/* Crew Lead Name */}
+                  {/* Crew Lead / Worker Name */}
                   <div>
                     <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-1">
-                      Crew Lead / Capataz Full Name *
+                      Artisan / Worker Full Name *
                     </label>
                     <input
                       type="text"
                       required
                       value={contName}
                       onChange={(e) => setContName(e.target.value)}
-                      placeholder="e.g. Danilo Santos (Capataz - Carpentry Gang)"
+                      placeholder="e.g. Juan Dela Cruz"
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-emerald-500"
                     />
                   </div>
@@ -5490,27 +5115,34 @@ export default function AdminPortal({
 
       {/* Daily Physical Manpower Roll-Call Audit Modal */}
       {typeof document !== 'undefined' && isAuditModalOpen && createPortal(
-        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4">
+        <div 
+          className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in duration-150"
+          onClick={() => setIsAuditModalOpen(false)}
+        >
           <div 
-            className="fixed inset-0 bg-slate-950/85 backdrop-blur-sm cursor-pointer"
-            onClick={() => setIsAuditModalOpen(false)}
-          />
-          <div 
-            className="relative z-10 w-full max-w-lg bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl flex flex-col my-auto overflow-hidden"
+            className="relative z-10 w-full max-w-lg bg-slate-950 border border-slate-700 rounded-2xl shadow-2xl flex flex-col my-auto overflow-hidden animate-in zoom-in-95 duration-150"
             style={{ maxHeight: 'calc(100vh - 2rem)' }}
+            onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
             <div className="shrink-0 p-5 border-b border-slate-800 flex justify-between items-center bg-slate-900/60">
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold">
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold ${
+                  isSubcontractor ? 'bg-blue-500/20 text-blue-400' : 'bg-emerald-500/20 text-emerald-400'
+                }`}>
                   <ShieldCheck className="w-4 h-4" />
                 </div>
                 <div>
                   <h3 className="text-sm font-bold text-white">Log Physical Roll-Call Audit</h3>
-                  <p className="text-[11px] text-slate-400">Verify on-site headcount & flag ghost worker invoice discrepancies</p>
+                  <p className="text-[11px] text-slate-400">
+                    {isSubcontractor 
+                      ? 'Verify on-site headcount & flag ghost worker invoice discrepancies'
+                      : 'Verify on-site muster & record in-house trade crew attendance'}
+                  </p>
                 </div>
               </div>
               <button 
+                type="button"
                 onClick={() => setIsAuditModalOpen(false)}
                 className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 cursor-pointer transition-colors"
               >
@@ -5521,14 +5153,23 @@ export default function AdminPortal({
             {/* Form Body */}
             <form id="auditRollCallForm" onSubmit={handleSubmitAudit} className="flex-1 overflow-y-auto p-5 space-y-4">
               <div>
-                <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-1">
-                  Contractor / Trade Crew *
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider">
+                    Contractor / Trade Crew *
+                  </label>
+                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-semibold ${
+                    isSubcontractor 
+                      ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' 
+                      : 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20'
+                  }`}>
+                    {isSubcontractor ? 'Outsourced Subcontractor' : 'In-House Artisan Trade Crew'}
+                  </span>
+                </div>
                 <select
                   value={auditContractorId}
                   onChange={(e) => {
                     setAuditContractorId(e.target.value);
-                    const c = contractors.find(item => item.id === e.target.value);
+                    const c = auditTradeCrews.find(item => item.id === e.target.value);
                     if (c && c.activeManpower) {
                       setAuditClaimed(c.activeManpower);
                       setAuditVerified(c.activeManpower);
@@ -5536,15 +5177,33 @@ export default function AdminPortal({
                   }}
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-blue-500"
                 >
-                  {contractors.filter(c => !isOfficeOrExecutive(c)).map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} ({c.specialty || c.company || 'Crew'}) — Roster: {c.activeManpower || 1} {c.activeManpower === 1 ? 'person' : 'men'}
-                    </option>
-                  ))}
-                  {contractors.filter(c => !isOfficeOrExecutive(c)).length === 0 && (
-                    <option disabled value="">No active field crews or trade partners registered</option>
+                  {outsourcedTradePartners.length > 0 && (
+                    <optgroup label="Outsourced Trade Partners / Subcontractors">
+                      {outsourcedTradePartners.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.specialty || c.company || 'Subcontractor'}) — Subcontractor • Billed: {c.activeManpower || 1} men
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {inHouseTradeCrews.length > 0 && (
+                    <optgroup label="In-House Artisan Trade Crews">
+                      {inHouseTradeCrews.map(c => (
+                        <option key={c.id} value={c.id}>
+                          {c.name} ({c.specialty || c.roleTitle || 'Trade Crew'}) — In-House • Scheduled: {c.activeManpower || 1} men
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {auditTradeCrews.length === 0 && (
+                    <option disabled value="">No active trade crews or subcontractors found</option>
                   )}
                 </select>
+                <p className="mt-1 text-[10px] text-slate-500">
+                  {isSubcontractor 
+                    ? 'Auditing billable vendor headcounts protects against ghost billing on contractor invoices.' 
+                    : 'Auditing scheduled internal staffing against live site muster records attendance and absenteeism.'}
+                </p>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-start">
@@ -5681,7 +5340,7 @@ export default function AdminPortal({
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-1">
-                    Claimed (Billed) Count *
+                    {isSubcontractor ? 'Claimed (Billed) Count *' : 'Scheduled Roster Count *'}
                   </label>
                   <input
                     type="number"
@@ -5712,9 +5371,13 @@ export default function AdminPortal({
                 <div className="bg-amber-950/60 border border-amber-500/50 rounded-lg p-3 text-xs flex items-start gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                   <div>
-                    <strong className="text-amber-200 block">Ghost-Worker Discrepancy Detected:</strong>
+                    <strong className="text-amber-200 block">
+                      {isSubcontractor ? 'Ghost-Worker Discrepancy Detected:' : 'In-House Attendance Variance Detected:'}
+                    </strong>
                     <span className="text-slate-300">
-                      Claimed count exceeds physical roll-call by {Number(auditClaimed) - Number(auditVerified)} worker(s). Payout authorization will automatically lock on invoice variance.
+                      {isSubcontractor
+                        ? `Claimed count exceeds physical roll-call by ${Number(auditClaimed) - Number(auditVerified)} worker(s). Payout authorization will automatically lock on invoice variance.`
+                        : `Scheduled roster exceeds physical muster by ${Number(auditClaimed) - Number(auditVerified)} worker(s). Site supervisor notified for absenteeism reporting.`}
                     </span>
                   </div>
                 </div>

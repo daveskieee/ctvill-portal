@@ -195,7 +195,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
               </p>
             </div>
 
-            <form onSubmit={handleLoginSubmit} className="space-y-4 mt-6 text-xs">
+            <form onSubmit={handleLoginSubmit} autoComplete="off" className="space-y-4 mt-6 text-xs">
               {errorMsg && (
                 <div className="bg-red-950/60 border border-red-800 text-red-300 p-3 rounded-xl flex items-start gap-2">
                   <ShieldAlert className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />
@@ -215,6 +215,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="name@ctvill.com"
+                    autoComplete="off"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
                   />
                 </div>
@@ -232,6 +233,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
+                    autoComplete="off"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
                   />
                 </div>
@@ -271,6 +273,8 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
                   </>
                 )}
               </button>
+
+
 
             </form>
           </div>

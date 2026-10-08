@@ -45,7 +45,7 @@ export default function RfiManager({
   const [formSuggested, setFormSuggested] = useState('');
   const [formDrawingRef, setFormDrawingRef] = useState('');
   const [formPriority, setFormPriority] = useState<ProjectRFI['priority']>('MEDIUM');
-  const [formAssignee, setFormAssignee] = useState('Principal Architect Maria Santos');
+  const [formAssignee, setFormAssignee] = useState('Ar. Jonathan Dela Cruz');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Answer Form
@@ -410,12 +410,15 @@ export default function RfiManager({
       {showSubmitModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 animate-scaleUp">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+            <div className="p-6 pb-4 border-b border-slate-800 flex items-center justify-between">
               <h4 className="text-base font-bold text-white flex items-center gap-2">
                 <HelpCircle className="w-5 h-5 text-blue-400" />
                 Raise Request for Information (RFI)
               </h4>
-              <button onClick={() => setShowSubmitModal(false)} className="text-slate-500 hover:text-white cursor-pointer">
+              <button 
+                onClick={() => setShowSubmitModal(false)} 
+                className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
@@ -477,13 +480,16 @@ export default function RfiManager({
 
                 <div>
                   <label className="block text-slate-300 font-semibold mb-1">Assigned Architect / Lead</label>
-                  <input
-                    type="text"
-                    required
+                  <select
                     value={formAssignee}
                     onChange={(e) => setFormAssignee(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                  />
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-blue-500 font-mono text-xs cursor-pointer"
+                  >
+                    <option value="Ar. Jonathan Dela Cruz">Ar. Jonathan Dela Cruz (Principal Architect & Design Lead)</option>
+                    <option value="Principal Architect Marco Alcantara">Principal Architect Marco Alcantara</option>
+                    <option value="Engr. Ricardo Ramos">Engr. Ricardo Ramos (Senior Project Manager)</option>
+                    <option value="Engr. Carlos Mendoza">Engr. Carlos Mendoza (Civil & Structural Lead)</option>
+                  </select>
                 </div>
               </div>
 
@@ -535,12 +541,15 @@ export default function RfiManager({
       {answerRfiModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+            <div className="p-6 pb-4 border-b border-slate-800 flex items-center justify-between">
               <h4 className="text-base font-bold text-white flex items-center gap-2">
                 <Send className="w-5 h-5 text-emerald-400" />
                 Technical Resolution for {answerRfiModal.rfiNumber}
               </h4>
-              <button onClick={() => setAnswerRfiModal(null)} className="text-slate-500 hover:text-white cursor-pointer">
+              <button 
+                onClick={() => setAnswerRfiModal(null)} 
+                className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>

@@ -169,6 +169,8 @@ engineeringRouter.delete('/permits/:id', async (req: Request, res: Response) => 
 // GET /api/documents
 engineeringRouter.get('/documents', async (req: Request, res: Response) => {
   try {
+    const { ensureSeedDocuments } = await import('./documents');
+    await ensureSeedDocuments();
     const docs = await prisma.projectDocument.findMany({ orderBy: { createdAt: 'desc' } });
     res.json(docs);
   } catch (error) {

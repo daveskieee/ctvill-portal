@@ -17,14 +17,23 @@ interface QuotationLeadsManagerProps {
   isAdmin?: boolean;
   onUpdateStatus?: (id: string, status: FitoutQuotationItem['status']) => Promise<void> | void;
   onConvertToProject?: (quotation: FitoutQuotationItem) => Promise<void> | void;
+  navigateToProject?: (projectId?: string) => void;
 }
 
 export default function QuotationLeadsManager({
   quotations = [],
   isAdmin = true,
   onUpdateStatus,
-  onConvertToProject
+  onConvertToProject,
+  navigateToProject: propNavigateToProject
 }: QuotationLeadsManagerProps) {
+  const navigateToProject = (projectId?: string) => {
+    if (propNavigateToProject) {
+      propNavigateToProject(projectId);
+    } else {
+      window.dispatchEvent(new CustomEvent('navigate-to-project', { detail: { projectId } }));
+    }
+  };
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedQuote, setSelectedQuote] = useState<FitoutQuotationItem | null>(null);
@@ -317,16 +326,30 @@ export default function QuotationLeadsManager({
                         >
                           Notes
                         </button>
-                        {isAdmin && quote.status !== 'CONVERTED' && (
-                          <button
-                            onClick={() => handleConvert(quote)}
-                            disabled={isConvertingId === quote.id}
-                            className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 shadow-xs"
-                          >
-                            <Sparkles className="w-3 h-3 text-emerald-200" />
-                            <span>{isConvertingId === quote.id ? 'Converting...' : 'Convert to Project'}</span>
-                          </button>
-                        )}
+                        {(() => {
+                          const lead = quote;
+                          if (!isAdmin) return null;
+                          if (lead.status === 'CONVERTED') {
+                            return (
+                              <button 
+                                onClick={() => navigateToProject(lead.convertedProjectId)}
+                                className="px-3 py-1.5 text-xs font-semibold rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/20 flex items-center gap-1"
+                              >
+                                View Project →
+                              </button>
+                            );
+                          }
+                          return (
+                            <button
+                              onClick={() => handleConvert(lead)}
+                              disabled={isConvertingId === lead.id}
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 shadow-xs"
+                            >
+                              <Sparkles className="w-3 h-3 text-emerald-200" />
+                              <span>{isConvertingId === lead.id ? 'Converting...' : 'Convert to Project'}</span>
+                            </button>
+                          );
+                        })()}
                       </div>
                     </td>
                   </tr>

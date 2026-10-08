@@ -11,11 +11,11 @@ import { broadcastChange } from '../events';
 
 export const authRouter = Router();
 
-// GET /api/staff — List all Admin, Project Manager, and Finance accounts
+// GET /api/staff — List all Admin, Engineer, Timekeeper, and Finance accounts
 authRouter.get('/staff', async (req: Request, res: Response) => {
   try {
     const staff = await prisma.user.findMany({
-      where: { role: { in: [Role.ADMIN, Role.PROJECT_MANAGER, Role.FINANCE] } },
+      where: { role: { in: [Role.ADMIN, Role.ENGINEER, Role.TIMEKEEPER, Role.FINANCE, Role.PROJECT_MANAGER] } },
       select: { id: true, email: true, name: true, role: true, accountStatus: true, contact: true, createdAt: true },
       orderBy: { createdAt: 'asc' },
     });
@@ -23,7 +23,11 @@ authRouter.get('/staff', async (req: Request, res: Response) => {
       id: u.id,
       email: u.email,
       name: u.name,
-      role: u.role === Role.ADMIN ? 'Admin' : u.role === Role.PROJECT_MANAGER ? 'ProjectManager' : u.role === Role.FINANCE ? 'Finance' : 'Client',
+      role: u.role === Role.ADMIN ? 'Admin' 
+        : (u.role === Role.ENGINEER || u.role === Role.PROJECT_MANAGER) ? 'Engineer' 
+        : u.role === Role.TIMEKEEPER ? 'Timekeeper' 
+        : u.role === Role.FINANCE ? 'Finance' 
+        : 'Client',
       accountStatus: u.accountStatus,
       contact: u.contact || '',
       createdAt: u.createdAt.toISOString(),
@@ -46,7 +50,10 @@ authRouter.post('/staff', async (req: Request, res: Response) => {
     if (existing) {
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
-    const role = rawRole === 'Admin' ? Role.ADMIN : rawRole === 'Finance' ? Role.FINANCE : Role.PROJECT_MANAGER;
+    const role = rawRole === 'Admin' ? Role.ADMIN 
+      : rawRole === 'Finance' ? Role.FINANCE 
+      : rawRole === 'Timekeeper' ? Role.TIMEKEEPER 
+      : Role.ENGINEER;
     const passwordHash = hashPassword(password);
     const newUser = await prisma.user.create({
       data: {
@@ -65,7 +72,7 @@ authRouter.post('/staff', async (req: Request, res: Response) => {
         action: 'STAFF_ACCOUNT_CREATED',
         actorName: 'System Admin',
         actorRole: 'ADMIN',
-        details: `Created ${role === Role.ADMIN ? 'Admin' : role === Role.FINANCE ? 'Finance' : 'Project Manager'} account for ${name.trim()} (${normalizedEmail}).`,
+        details: `Created ${role} account for ${name.trim()} (${normalizedEmail}).`,
       }
     }).catch(() => {});
     broadcastChange('auditLogs');
@@ -74,7 +81,11 @@ authRouter.post('/staff', async (req: Request, res: Response) => {
       id: newUser.id,
       email: newUser.email,
       name: newUser.name,
-      role: role === Role.ADMIN ? 'Admin' : role === Role.FINANCE ? 'Finance' : 'ProjectManager',
+      role: role === Role.ADMIN ? 'Admin' 
+        : role === Role.ENGINEER ? 'Engineer' 
+        : role === Role.TIMEKEEPER ? 'Timekeeper' 
+        : role === Role.FINANCE ? 'Finance' 
+        : 'Client',
       accountStatus: newUser.accountStatus,
       createdAt: newUser.createdAt.toISOString(),
     });
@@ -153,7 +164,14 @@ authRouter.post('/auth/login', async (req: Request, res: Response) => {
       isPasswordValid = verifyPassword(password || '', user.passwordHash);
     } else {
       // Demo fallback passkeys for newly created or legacy unhashed demo accounts
-      if (password === 'admin123' || password === 'pm123' || password === 'client123' || password === 'demo-session-key') {
+      if (
+        password === 'admin123' || 
+        password === 'pm123' || 
+        password === 'tk123' || 
+        password === 'finance123' || 
+        password === 'client123' || 
+        password === 'demo-session-key'
+      ) {
         isPasswordValid = true;
       }
     }
@@ -174,26 +192,39 @@ authRouter.post('/auth/login', async (req: Request, res: Response) => {
     const customSettings = (await getSystemSetting(settingKey)) || {};
 
     // Role-based default titles and divisions
-    const defaultTitle = user.role === Role.PROJECT_MANAGER
-      ? 'Senior Project Manager & Field Lead'
+    const defaultTitle = (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
+      ? 'Site Engineer & Project Field Lead'
+      : user.role === Role.TIMEKEEPER
+      ? 'Site Timekeeper & Manpower Officer'
       : user.role === Role.FINANCE
       ? 'Finance Controller & Corporate Accounting Head'
       : 'Operations Director & Project Lead';
     const defaultDivision = user.role === Role.FINANCE
       ? 'Finance & Treasury Department'
+      : user.role === Role.TIMEKEEPER
+      ? 'Site Operations & Manpower Field Unit'
+      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
+      ? 'Civil Engineering & Project Execution'
       : 'Commercial & Corporate Interiors';
+
+    const normalizedRole = user.role === Role.ADMIN ? 'Admin' 
+      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer' 
+      : user.role === Role.TIMEKEEPER ? 'Timekeeper' 
+      : user.role === Role.FINANCE ? 'Finance' 
+      : 'Client';
 
     const session: any = {
       id: user.id,
       email: customSettings.profileEmail || user.email,
       name: customSettings.profileName || user.name,
-      role: user.role === Role.ADMIN ? 'Admin' : user.role === Role.PROJECT_MANAGER ? 'ProjectManager' : user.role === Role.FINANCE ? 'Finance' : 'Client',
+      role: normalizedRole,
       clientId: user.role === Role.CLIENT ? user.id : undefined,
       accountStatus: user.accountStatus,
       avatarUrl: customSettings.avatarUrl || null,
       title: customSettings.profileTitle || defaultTitle,
       phone: customSettings.profilePhone || user.contact || '',
       division: customSettings.profileDivision || defaultDivision,
+      projectIds: user.projectIds || []
     };
 
     res.json({ success: true, session });
@@ -224,15 +255,19 @@ authRouter.get('/auth/profile', async (req: Request, res: Response) => {
 
     // Role-based defaults derived from the authenticated user's role
     const defaultTitle = !user ? 'Operations Director & Project Lead'
-      : user.role === Role.PROJECT_MANAGER ? 'Senior Project Manager & Field Lead'
+      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Site Engineer & Project Field Lead'
+      : user.role === Role.TIMEKEEPER ? 'Site Timekeeper & Manpower Officer'
       : user.role === Role.FINANCE ? 'Finance Controller & Corporate Accounting Head'
       : 'Operations Director & Project Lead';
     const defaultDivision = !user ? 'Commercial & Corporate Interiors'
       : user.role === Role.FINANCE ? 'Finance & Treasury Department'
+      : user.role === Role.TIMEKEEPER ? 'Site Operations & Manpower Field Unit'
+      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Civil Engineering & Project Execution'
       : 'Commercial & Corporate Interiors';
     const roleLabel = !user ? 'Admin'
       : user.role === Role.ADMIN ? 'Admin'
-      : user.role === Role.PROJECT_MANAGER ? 'ProjectManager'
+      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer'
+      : user.role === Role.TIMEKEEPER ? 'Timekeeper'
       : user.role === Role.FINANCE ? 'Finance'
       : 'Client';
 

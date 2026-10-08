@@ -2015,7 +2015,7 @@ export default function GanttTimeline({
                       strokeWidth={isBreached ? 2.5 : 1.75}
                       strokeDasharray={isBreached ? '4 2' : undefined}
                       markerEnd={markerId}
-                      className="transition-all duration-200"
+                      className="pointer-events-none transition-all duration-200"
                     />
                   );
                 }).filter(Boolean);

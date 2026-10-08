@@ -8,10 +8,12 @@ generator client {
 
 enum Role {
   ADMIN
+  ENGINEER
+  TIMEKEEPER
+  FINANCE
   INSPECTOR
   CLIENT
   PROJECT_MANAGER
-  FINANCE
 }
 
 enum SlotStatus {
@@ -52,14 +54,17 @@ model User {
   inviteToken       String?
   inviteTokenExpiry DateTime?
   contact           String?
+  projectIds        String[]      @default([]) @map("project_ids")
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
   // Relationships
-  clientPackage      ClientPackage?      // One-to-one mapping for client package details
-  weeklyProgressLogs WeeklyProgressLog[] // Inspector logs created by this user
-  inspectedDefects   PunchListDefect[]   // Defects reported by inspector
-  buyerKyc           BuyerKyc?           // KYC verification checklist
+  clientPackage        ClientPackage?      // One-to-one mapping for client package details
+  weeklyProgressLogs   WeeklyProgressLog[] // Inspector logs created by this user
+  inspectedDefects     PunchListDefect[]   // Defects reported by inspector
+  buyerKyc             BuyerKyc?           // KYC verification checklist
+  loggedAttendanceLogs AttendanceLog[]     @relation("LoggedAttendance")
+  approvedPayrollRuns  PayrollRun[]        @relation("ApprovedPayrolls")
 
   @@index([inviteToken])
   @@map("users")
@@ -396,6 +401,10 @@ model CommercialProject {
 
   // Relationships
   tasks                      ProjectTask[]
+  workerAssignments          ProjectWorkerAssignment[]
+  attendanceLogs             AttendanceLog[]
+  cashAdvances               CashAdvance[]
+  payrollRuns                PayrollRun[]
 
   @@map("commercial_projects")
 }
@@ -637,3 +646,131 @@ model FitoutQuotation {
 
   @@map("fitout_quotations")
 }
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  HALF_DAY
+}
+
+enum CashAdvanceStatus {
+  PENDING
+  DEDUCTED
+}
+
+enum PayrollRunStatus {
+  DRAFT
+  FINALIZED
+  PAID
+}
+
+model Worker {
+  id           String   @id @default(uuid())
+  firstName    String   @map("first_name")
+  lastName     String   @map("last_name")
+  dailyRate    Decimal  @map("daily_rate") @db.Decimal(10, 2)
+  hourlyOtRate Decimal  @map("hourly_ot_rate") @db.Decimal(10, 2)
+  position     String   // e.g., Foreman, Skilled, Laborer
+  status       String   @default("Active") // Active, Inactive
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  assignments    ProjectWorkerAssignment[]
+  attendanceLogs AttendanceLog[]
+  cashAdvances   CashAdvance[]
+  payrollItems   PayrollItem[]
+
+  @@map("workers")
+}
+
+model ProjectWorkerAssignment {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  workerId   String   @map("worker_id")
+  assignedAt DateTime @default(now()) @map("assigned_at")
+  status     String   @default("ACTIVE")
+
+  project CommercialProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  worker  Worker            @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, workerId])
+  @@map("project_worker_assignments")
+}
+
+model AttendanceLog {
+  id             String           @id @default(uuid())
+  projectId      String           @map("project_id")
+  workerId       String           @map("worker_id")
+  loggedByUserId String           @map("logged_by_user_id")
+  date           DateTime         @db.Date
+  status         AttendanceStatus
+  overtimeHours  Float            @default(0) @map("overtime_hours")
+  isLocked       Boolean          @default(false) @map("is_locked")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  project  CommercialProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  worker   Worker            @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  loggedBy User              @relation("LoggedAttendance", fields: [loggedByUserId], references: [id])
+
+  @@unique([projectId, workerId, date])
+  @@map("attendance_logs")
+}
+
+model CashAdvance {
+  id                  String            @id @default(uuid())
+  projectId           String            @map("project_id")
+  workerId            String            @map("worker_id")
+  amount              Decimal           @db.Decimal(10, 2)
+  dateIssued          DateTime          @default(now()) @map("date_issued")
+  deductedInPayrollId String?           @map("deducted_in_payroll_id")
+  status              CashAdvanceStatus @default(PENDING)
+  notes               String?           @db.Text
+  createdAt           DateTime          @default(now()) @map("created_at")
+
+  project           CommercialProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  worker            Worker            @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  deductedInPayroll PayrollRun?       @relation(fields: [deductedInPayrollId], references: [id], onDelete: SetNull)
+
+  @@map("cash_advances")
+}
+
+model PayrollRun {
+  id               String           @id @default(uuid())
+  projectId        String           @map("project_id")
+  periodStart      DateTime         @map("period_start") @db.Date
+  periodEnd        DateTime         @map("period_end") @db.Date
+  status           PayrollRunStatus @default(DRAFT)
+  totalGross       Decimal          @default(0) @map("total_gross") @db.Decimal(12, 2)
+  totalDeductions  Decimal          @default(0) @map("total_deductions") @db.Decimal(12, 2)
+  totalNet         Decimal          @default(0) @map("total_net") @db.Decimal(12, 2)
+  approvedByUserId String?          @map("approved_by_user_id")
+  createdAt        DateTime         @default(now()) @map("created_at")
+  updatedAt        DateTime         @updatedAt @map("updated_at")
+
+  project      CommercialProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  approvedBy   User?             @relation("ApprovedPayrolls", fields: [approvedByUserId], references: [id])
+  items        PayrollItem[]
+  cashAdvances CashAdvance[]
+
+  @@map("payroll_runs")
+}
+
+model PayrollItem {
+  id              String   @id @default(uuid())
+  payrollRunId    String   @map("payroll_run_id")
+  workerId        String   @map("worker_id")
+  daysWorked      Float    @map("days_worked")
+  otHours         Float    @default(0) @map("ot_hours")
+  grossPay        Decimal  @map("gross_pay") @db.Decimal(10, 2)
+  totalDeductions Decimal  @default(0) @map("total_deductions") @db.Decimal(10, 2)
+  netPay          Decimal  @map("net_pay") @db.Decimal(10, 2)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  payrollRun PayrollRun @relation(fields: [payrollRunId], references: [id], onDelete: Cascade)
+  worker     Worker     @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([payrollRunId, workerId])
+  @@map("payroll_items")
+}
+

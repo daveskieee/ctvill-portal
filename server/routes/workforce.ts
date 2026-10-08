@@ -16,9 +16,12 @@ export const workforceRouter = Router();
 
 // Helper to determine if worker/personnel is office, executive, or corporate support
 export function isOfficeOrExecutiveWorker(c: any): boolean {
+  if (!c) return false;
+  const workforceClass = c.workforce_class || c.workforceClass;
+  if (workforceClass === 'Corporate') return true;
   if (c.workforceCategory === 'OFFICE_STAFF') return true;
   const dept = (c.department || '').toLowerCase();
-  const role = (c.roleTitle || c.specialty || '').toLowerCase();
+  const role = (c.roleTitle || c.specialty || c.role || '').toLowerCase();
   return (
     dept.includes('executive') ||
     dept.includes('corporate') ||
@@ -43,6 +46,63 @@ export function isOfficeOrExecutiveWorker(c: any): boolean {
   );
 }
 
+// Strictly determine if worker is eligible for manual artisan trade swaps/reallocations
+// Excludes corporate staff, office personnel, architects, project managers, engineers, and permanent safety inspectors (e.g. EHSO)
+export function isEligibleForArtisanReallocation(c: any): boolean {
+  if (!c) return false;
+  const name = (c.name || '').toLowerCase();
+  if (name.includes('builders') || name.includes('corporation') || name.includes('inc.') || name.includes('corp.')) {
+    return false;
+  }
+  const workforceClass = c.workforce_class || c.workforceClass;
+  if (workforceClass === 'Corporate') return false;
+  if (c.workforceCategory === 'OFFICE_STAFF') return false;
+  if (isOfficeOrExecutiveWorker(c)) return false;
+
+  const role = (c.roleTitle || c.specialty || c.role || '').toLowerCase();
+  const dept = (c.department || '').toLowerCase();
+
+  // Exclude architects & pre-construction designers
+  if (role.includes('architect') || role.includes('designer') || dept.includes('design') || dept.includes('pre-construction')) {
+    return false;
+  }
+
+  // Exclude project managers, site engineers, and coordinators
+  if (
+    role.includes('project manager') ||
+    role.includes('pm') ||
+    role.includes('construction manager') ||
+    role.includes('site manager') ||
+    role.includes('site engineer') ||
+    role.includes('project engineer') ||
+    role.includes('engineer') ||
+    role.includes('qa/qc') ||
+    role.includes('consultant') ||
+    role.includes('coordinator') ||
+    role.includes('director') ||
+    role.includes('executive')
+  ) {
+    return false;
+  }
+
+  // Exclude permanent safety inspectors (EHSO) & officers
+  if (
+    role.includes('safety') ||
+    role.includes('ehso') ||
+    role.includes('inspector') ||
+    dept.includes('safety') ||
+    dept.includes('inspection')
+  ) {
+    return false;
+  }
+
+  if (role.includes('officer') && !role.includes('artisan')) {
+    return false;
+  }
+
+  return true;
+}
+
 // GET /api/contractors-list
 workforceRouter.get('/contractors-list', async (req: Request, res: Response) => {
   try {
@@ -58,6 +118,38 @@ workforceRouter.get('/contractors-list', async (req: Request, res: Response) => 
       const activePresence = (rawP === 'BREAK' || rawP === 'ON_BREAK') ? 'BREAK'
         : (rawP === 'OFFLINE' || rawP === 'INACTIVE' || rawP === 'ON_LEAVE') ? 'OFFLINE'
         : 'ONLINE';
+
+      const dept = ((c as any).department || '').toLowerCase();
+      const role = ((c as any).roleTitle || c.specialty || '').toLowerCase();
+      const cat = ((c as any).workforceCategory || '').toUpperCase();
+      const isCorporate = (
+        cat === 'OFFICE_STAFF' ||
+        dept.includes('executive') ||
+        dept.includes('corporate') ||
+        dept.includes('office') ||
+        dept.includes('finance') ||
+        dept.includes('accounting') ||
+        dept.includes('human resources') ||
+        dept.includes('hr') ||
+        dept.includes('legal') ||
+        dept.includes('procurement') ||
+        dept.includes('admin') ||
+        role.includes('coo') ||
+        role.includes('ceo') ||
+        role.includes('chief') ||
+        role.includes('director') ||
+        role.includes('finance') ||
+        role.includes('hr') ||
+        role.includes('accounting') ||
+        role.includes('clerk') ||
+        role.includes('admin')
+      ) && !role.includes('safety') && !role.includes('ehso');
+
+      const workforceClass = isCorporate 
+        ? 'Corporate' 
+        : ((c as any).employmentType === 'OUTSOURCED' || Number(c.activeManpower || 1) > 1) 
+          ? 'Trade Crew' 
+          : 'Artisan';
 
       return {
         id: c.id,
@@ -80,6 +172,8 @@ workforceRouter.get('/contractors-list', async (req: Request, res: Response) => 
         monthlySalary: (c as any).monthlySalary !== null && (c as any).monthlySalary !== undefined ? Number((c as any).monthlySalary) : null,
         status: (c as any).status || 'ACTIVE',
         activePresence,
+        workforce_class: workforceClass,
+        workforceClass,
       };
     });
     res.json(contractors);
@@ -148,7 +242,56 @@ workforceRouter.post('/contractors', async (req: Request, res: Response) => {
       await pool.query('UPDATE contractors SET active_presence = $1 WHERE id = $2', [activePresence, contractorId]);
     }
 
+    // --- SYNCHRONIZE DIRECTLY WITH PRIMARY WORKERS TABLE ---
+    const effectiveDailyRate = dailyRate !== undefined && dailyRate !== null && dailyRate !== '' ? Number(dailyRate) : 600;
+    const effectiveOtRate = Number(((effectiveDailyRate / 8) * 1.25).toFixed(2));
+    const workerTrade = specialty || roleTitle || 'Artisan';
+    const workerPosition = roleTitle || specialty || 'Artisan';
+    const workerStatus = (status && status.toUpperCase() === 'INACTIVE') ? 'Inactive' : 'Active';
+
+    // Match assigned commercial project by ID or Name
+    let assignedProjectId: string | null = null;
+    if (activeProjectSite && activeProjectSite !== 'Unassigned' && activeProjectSite !== 'None') {
+      const projRes = await pool.query(
+        'SELECT id FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) LIMIT 1',
+        [activeProjectSite]
+      );
+      if (projRes.rows.length > 0) {
+        assignedProjectId = projRes.rows[0].id;
+      }
+    }
+
+    const trimmedName = name.trim();
+    const parts = trimmedName.split(' ');
+    const fName = parts[0] || trimmedName;
+    const lName = parts.slice(1).join(' ') || fName;
+
+    await pool.query(`
+      INSERT INTO workers (id, name, first_name, last_name, trade, position, daily_rate, hourly_ot_rate, assigned_project_id, status, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        first_name = EXCLUDED.first_name,
+        last_name = EXCLUDED.last_name,
+        trade = EXCLUDED.trade,
+        position = EXCLUDED.position,
+        daily_rate = EXCLUDED.daily_rate,
+        hourly_ot_rate = EXCLUDED.hourly_ot_rate,
+        assigned_project_id = EXCLUDED.assigned_project_id,
+        status = EXCLUDED.status,
+        updated_at = CURRENT_TIMESTAMP
+    `, [contractorId, trimmedName, fName, lName, workerTrade, workerPosition, effectiveDailyRate, effectiveOtRate, assignedProjectId, workerStatus]);
+
+    if (assignedProjectId) {
+      await pool.query(`
+        INSERT INTO project_worker_assignments (id, project_id, worker_id, assigned_at, status)
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 'ACTIVE')
+        ON CONFLICT (project_id, worker_id) DO UPDATE SET status = 'ACTIVE'
+      `, [`PWA-${assignedProjectId}-${contractorId}`, assignedProjectId, contractorId]);
+    }
+
     broadcastChange('contractors');
+    broadcastChange('workers');
     invalidateAllDataCache();
     res.status(201).json({
       ...newContractor,
@@ -233,7 +376,91 @@ workforceRouter.put('/contractors/:id', async (req: Request, res: Response) => {
       await pool.query('UPDATE contractors SET active_presence = $1, status = $2 WHERE id = $3', [data.activePresence, statusVal, id]);
     }
 
+    // --- SYNCHRONIZE UPDATES TO WORKERS TABLE ---
+    const updateClauses: string[] = [];
+    const updateParams: any[] = [];
+    let uIdx = 1;
+
+    if (data.name !== undefined) {
+      const trimmed = data.name.trim();
+      const parts = trimmed.split(' ');
+      updateClauses.push(`name = $${uIdx++}`, `first_name = $${uIdx++}`, `last_name = $${uIdx++}`);
+      updateParams.push(trimmed, parts[0] || trimmed, parts.slice(1).join(' ') || parts[0] || trimmed);
+    }
+    if (data.specialty !== undefined || data.roleTitle !== undefined) {
+      const pos = data.roleTitle || data.specialty;
+      updateClauses.push(`position = $${uIdx++}`, `trade = $${uIdx++}`);
+      updateParams.push(pos, pos);
+    }
+    if (data.dailyRate !== undefined && data.dailyRate !== null && data.dailyRate !== '') {
+      const dRate = Number(data.dailyRate);
+      const otRate = Number(((dRate / 8) * 1.25).toFixed(2));
+      updateClauses.push(`daily_rate = $${uIdx++}`, `hourly_ot_rate = $${uIdx++}`);
+      updateParams.push(dRate, otRate);
+    }
+    if (data.status !== undefined || statusVal !== undefined) {
+      const st = (data.status || statusVal).toUpperCase() === 'INACTIVE' ? 'Inactive' : 'Active';
+      updateClauses.push(`status = $${uIdx++}`);
+      updateParams.push(st);
+    }
+    if (data.activeProjectSite !== undefined) {
+      let assignedProjId: string | null = null;
+      if (data.activeProjectSite && data.activeProjectSite !== 'Unassigned' && data.activeProjectSite !== 'None') {
+        const pMatch = await pool.query(
+          'SELECT id FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) LIMIT 1',
+          [data.activeProjectSite]
+        );
+        if (pMatch.rows.length > 0) {
+          assignedProjId = pMatch.rows[0].id;
+        }
+      }
+      updateClauses.push(`assigned_project_id = $${uIdx++}`);
+      updateParams.push(assignedProjId);
+
+      // Also sync project_worker_assignments & commercial_projects
+      if (assignedProjId) {
+        // Remove from any other project assignments so worker strictly belongs to the new site
+        await pool.query('DELETE FROM project_worker_assignments WHERE worker_id = $1 AND project_id != $2', [id, assignedProjId]);
+        await pool.query(`
+          INSERT INTO project_worker_assignments (id, project_id, worker_id, assigned_at, status)
+          VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 'ACTIVE')
+          ON CONFLICT (project_id, worker_id) DO UPDATE SET status = 'ACTIVE'
+        `, [`PWA-${assignedProjId}-${id}`, assignedProjId, id]);
+
+        // Synchronize commercial_projects.assigned_contractor_ids
+        await pool.query(`
+          UPDATE commercial_projects
+          SET assigned_contractor_ids = array_remove(assigned_contractor_ids, $1)
+          WHERE id != $2 AND $1 = ANY(assigned_contractor_ids)
+        `, [id, assignedProjId]);
+        await pool.query(`
+          UPDATE commercial_projects
+          SET assigned_contractor_ids = array_append(array_remove(assigned_contractor_ids, $1), $1)
+          WHERE id = $2
+        `, [id, assignedProjId]);
+      } else {
+        await pool.query('DELETE FROM project_worker_assignments WHERE worker_id = $1', [id]);
+        await pool.query(`
+          UPDATE commercial_projects
+          SET assigned_contractor_ids = array_remove(assigned_contractor_ids, $1)
+          WHERE $1 = ANY(assigned_contractor_ids)
+        `, [id]);
+      }
+    }
+
+    if (updateClauses.length > 0) {
+      updateClauses.push('updated_at = CURRENT_TIMESTAMP');
+      updateParams.push(id);
+      await pool.query(
+        `UPDATE workers SET ${updateClauses.join(', ')} WHERE id = $${uIdx}`,
+        updateParams
+      );
+    }
+
     broadcastChange('contractors');
+    broadcastChange('workers');
+    broadcastChange('projects');
+    broadcastChange('attendance');
     invalidateAllDataCache();
     res.json(updated);
   } catch (error) {
@@ -255,8 +482,11 @@ workforceRouter.delete('/contractors/:id', async (req: Request, res: Response) =
       data: { assignedContractorId: null }
     });
     await pool.query('DELETE FROM labor_allocations WHERE contractor_id = $1', [id]);
+    await pool.query('DELETE FROM project_worker_assignments WHERE worker_id = $1', [id]);
+    await pool.query('DELETE FROM workers WHERE id = $1', [id]);
     await prisma.contractor.delete({ where: { id } });
     broadcastChange('contractors');
+    broadcastChange('workers');
     invalidateAllDataCache();
     res.json({ success: true });
   } catch (error) {
@@ -334,30 +564,63 @@ workforceRouter.post('/labor-allocations', async (req: Request, res: Response) =
 workforceRouter.get('/ai-recommendations', async (req: Request, res: Response) => {
   try {
     const result = await pool.query('SELECT * FROM ai_manpower_recommendations WHERE dismissed = false ORDER BY created_at DESC');
-    const recs = (result.rows || []).map(r => ({
-      id: r.id,
-      title: r.title,
-      targetLots: r.target_project_name || r.target_lots || 'Target Project',
-      targetSector: r.target_project_name || r.target_lots || 'Target Project',
-      contractorId: r.contractor_id,
-      contractorName: r.contractor_name,
-      currentHeadcount: Number(r.current_headcount || 0),
-      recommendedHeadcount: Number(r.recommended_headcount || 0),
-      rationale: r.rationale,
-      suggestedScope: r.rationale,
-      priority: r.priority || 'MEDIUM',
-      impact: 'High Efficiency Gain',
-      applied: Boolean(r.applied),
-      dismissed: Boolean(r.dismissed),
-      donorProjectId: r.donor_project_id,
-      donorProjectName: r.donor_project_name || 'General Standby Pool',
-      targetProjectId: r.target_project_id,
-      targetProjectName: r.target_project_name || r.target_lots,
-      workerId: r.worker_id || r.contractor_id,
-      workerName: r.worker_name || r.contractor_name,
-      tradeType: r.trade_type || 'Artisan'
-    }));
-    res.json(recs);
+    const recs = (result.rows || []).map(r => {
+      // Derive concise category tag
+      let conciseCategory = r.category_tag;
+      if (!conciseCategory) {
+        const isStandby = (r.donor_project_name || '').toLowerCase().includes('standby') || (r.rationale || '').toLowerCase().includes('standby') || (r.rationale || '').toLowerCase().includes('idle');
+        const isTimeline = (r.rationale || '').toLowerCase().includes('completion') || (r.rationale || '').toLowerCase().includes('timeline') || (r.rationale || '').toLowerCase().includes('compress');
+        const isCritical = r.priority === 'HIGH' || (r.rationale || '').toLowerCase().includes('critical') || (r.rationale || '').toLowerCase().includes('expedite');
+        conciseCategory = isStandby ? 'Idle Labor Mitigation' : isTimeline ? 'Timeline Compression' : isCritical ? 'Critical Path Expedite' : 'Trade Deficit Offset';
+      }
+
+      return {
+        id: r.id,
+        title: r.title,
+        targetLots: r.target_project_name || r.target_lots || 'Target Project',
+        targetSector: r.target_project_name || r.target_lots || 'Target Project',
+        contractorId: r.contractor_id,
+        contractorName: r.contractor_name,
+        currentHeadcount: Number(r.current_headcount || 0),
+        recommendedHeadcount: Number(r.recommended_headcount || 0),
+        rationale: r.rationale,
+        suggestedScope: conciseCategory,
+        priority: r.priority || 'MEDIUM',
+        impact: 'High Efficiency Gain',
+        applied: Boolean(r.applied),
+        dismissed: Boolean(r.dismissed),
+        donorProjectId: r.donor_project_id,
+        donorProjectName: r.donor_project_name || 'General Standby Pool',
+        targetProjectId: r.target_project_id,
+        targetProjectName: r.target_project_name || r.target_lots,
+        workerId: r.worker_id || r.contractor_id,
+        workerName: r.worker_name || r.contractor_name,
+        tradeType: r.trade_type || 'Artisan'
+      };
+    });
+
+    // Exclude corporate office staff, PMs, and permanent safety inspectors (EHSO)
+    const filteredRecs = recs.filter(r => {
+      const trade = (r.tradeType || '').toLowerCase();
+      const worker = (r.workerName || '').toLowerCase();
+      if (
+        trade.includes('safety') ||
+        trade.includes('ehso') ||
+        trade.includes('inspector') ||
+        trade.includes('project manager') ||
+        trade.includes('pm') ||
+        (trade.includes('officer') && !trade.includes('artisan')) ||
+        worker.includes('coo') ||
+        worker.includes('president') ||
+        worker.includes('hr') ||
+        worker.includes('finance')
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    res.json(filteredRecs);
   } catch (error) {
     console.error('Error fetching AI recommendations:', error);
     res.status(500).json({ error: 'Internal Server Error' });
@@ -474,6 +737,9 @@ workforceRouter.post('/ai-recommendations/dismiss', async (req: Request, res: Re
 // POST /api/ai-recommendations/scan
 workforceRouter.post('/ai-recommendations/scan', async (req: Request, res: Response) => {
   try {
+    // Ensure category_tag column exists
+    await pool.query('ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS category_tag TEXT;').catch(() => {});
+
     const dbProjectsRes = await pool.query('SELECT * FROM commercial_projects ORDER BY created_at ASC');
     const dbContractors = await prisma.contractor.findMany({ where: { status: { not: 'INACTIVE' } } });
     const dbHistoryRes = await pool.query('SELECT * FROM ai_workforce_learning_history ORDER BY created_at DESC LIMIT 50');
@@ -489,11 +755,15 @@ workforceRouter.post('/ai-recommendations/scan', async (req: Request, res: Respo
 
     let newRecommendations: any[] = [];
 
+    // Filter strictly for eligible trade artisans (excluding corporate staff, PMs, permanent safety inspectors)
+    const eligibleWorkers = dbContractors.filter((c: any) => isEligibleForArtisanReallocation(c));
+
     if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 20) {
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const prompt = `You are an expert Commercial Construction Workforce Optimization AI for CTVill Builders Corporation.
-Analyze active fit-out projects and workforce to generate 1 to 3 targeted, actionable labor reallocation recommendations.
+Analyze active fit-out projects and artisan workforce to generate 6 to 12 targeted, actionable labor reallocation recommendations.
+Only include field trade artisans and laborers. Strictly EXCLUDE corporate executives, office staff, finance, HR, legal, project managers (PMs), and permanent safety officers (EHSO).
 
 ACTIVE PROJECTS:
 ${JSON.stringify(projects.map((p: any) => ({
@@ -506,8 +776,8 @@ ${JSON.stringify(projects.map((p: any) => ({
   weatherSuspended: Boolean(p.weather_suspended)
 })))}
 
-WORKFORCE ROSTER:
-${JSON.stringify(dbContractors.map((c: any) => ({
+WORKFORCE ROSTER (ARTISANS ONLY):
+${JSON.stringify(eligibleWorkers.map((c: any) => ({
   id: c.id,
   name: c.name,
   trade: c.tradeType || c.specialty || 'General Artisan',
@@ -526,6 +796,7 @@ Return a strict JSON array of objects with fields:
 - recommendedHeadcount: number
 - currentHeadcount: number
 - rationale: string
+- categoryTag: "Trade Deficit Offset" | "Idle Labor Mitigation" | "Timeline Compression" | "Critical Path Expedite"
 - priority: "HIGH" | "MEDIUM"
 `;
         const response = await ai.models.generateContent({
@@ -551,6 +822,7 @@ Return a strict JSON array of objects with fields:
               currentHeadcount: Number(item.currentHeadcount || 1),
               recommendedHeadcount: Number(item.recommendedHeadcount || 3),
               rationale: item.rationale,
+              categoryTag: item.categoryTag || 'Trade Deficit Offset',
               priority: item.priority || 'MEDIUM'
             }));
           }
@@ -560,7 +832,7 @@ Return a strict JSON array of objects with fields:
       }
     }
 
-    if (newRecommendations.length === 0 && projects.length > 0 && dbContractors.length > 0) {
+    if (newRecommendations.length === 0 && projects.length > 0 && eligibleWorkers.length > 0) {
       const recipientProjects = projects.filter((p: any) => 
         p.status !== 'COMPLETED' && 
         p.status !== 'HANDED_OVER' &&
@@ -572,27 +844,27 @@ Return a strict JSON array of objects with fields:
         return Number(a.progress_percentage || 0) - Number(b.progress_percentage || 0);
       });
 
-      const targetProj = recipientProjects[0] || projects[0];
+      // Generate a rich queue of 6-12 cross-project recommendations across eligible artisans
+      const candidatePool = [...eligibleWorkers];
+      const maxQueueItems = Math.min(12, Math.max(6, candidatePool.length));
 
-      const donorCandidates = dbContractors.filter((c: any) => {
-        // Strictly exclude corporate office staff, executives, finance, HR, legal
-        if (isOfficeOrExecutiveWorker(c)) return false;
-        if (c.activeProjectSite && targetProj.name && c.activeProjectSite.toLowerCase().trim() === targetProj.name.toLowerCase().trim()) {
-          return false;
-        }
-        const pairKey = `${(c.name || '').toLowerCase()}|${(targetProj.name || '').toLowerCase()}`;
-        if (dismissedPairs.has(pairKey)) {
-          return false;
-        }
-        return true;
-      });
-
-      const selectedWorkers = donorCandidates.slice(0, 3);
-
-      selectedWorkers.forEach((worker: any) => {
+      for (let i = 0; i < candidatePool.length && newRecommendations.length < maxQueueItems; i++) {
+        const worker = candidatePool[i] as any;
         const trade = worker.tradeType || worker.specialty || 'General Trade';
         const isStandby = !worker.activeProjectSite || worker.activeProjectSite === 'STANDBY' || worker.allocationStatus === 'STANDBY';
-        
+
+        // Find matching recipient project that is NOT the worker's current active site
+        const targetProj = recipientProjects.find((p: any) => 
+          !worker.activeProjectSite || p.name.toLowerCase().trim() !== worker.activeProjectSite.toLowerCase().trim()
+        ) || recipientProjects[i % Math.max(1, recipientProjects.length)];
+
+        if (!targetProj) continue;
+
+        const pairKey = `${(worker.name || '').toLowerCase()}|${(targetProj.name || '').toLowerCase()}`;
+        if (dismissedPairs.has(pairKey)) {
+          continue;
+        }
+
         const donorProj = projects.find((p: any) => 
           worker.activeProjectSite && p.name && p.name.toLowerCase().trim() === worker.activeProjectSite.toLowerCase().trim()
         );
@@ -602,17 +874,26 @@ Return a strict JSON array of objects with fields:
         const targetProgress = Math.round(Number(targetProj.progress_percentage || 0));
         const isTargetBehind = targetProj.weather_suspended || targetProj.status === 'BEHIND_SCHEDULE';
 
-        const priority: 'HIGH' | 'MEDIUM' = isTargetBehind || isStandby ? 'HIGH' : 'MEDIUM';
-        const recId = `REC-${donorId || 'STANDBY'}-${targetProj.id}-${worker.id}`;
-
+        // Concise Category Tags: "Idle Labor Mitigation" | "Timeline Compression" | "Critical Path Expedite" | "Trade Deficit Offset"
+        let categoryTag = 'Trade Deficit Offset';
         let rationale = '';
+
         if (isStandby) {
-          rationale = `${worker.name} (${trade}) is currently on Standby. Assigning to "${targetProj.name}" (${targetProgress}% progress) accelerates critical fit-out execution.`;
+          categoryTag = 'Idle Labor Mitigation';
+          rationale = `${worker.name} (${trade}) is idle in standby pool. Reallocating to "${targetProj.name}" accelerates critical fit-out execution.`;
         } else if (donorProj && Number(donorProj.progress_percentage || 0) >= 80) {
-          rationale = `Donor project "${donorProj.name}" is near completion (${donorProj.progress_percentage}% progress). Transferring ${worker.name} (${trade}) to "${targetProj.name}" recovers scheduled velocity.`;
+          categoryTag = 'Timeline Compression';
+          rationale = `Donor site "${donorProj.name}" is near completion (${donorProj.progress_percentage}%). Reallocating ${worker.name} (${trade}) compresses delivery timeline on "${targetProj.name}".`;
+        } else if (isTargetBehind) {
+          categoryTag = 'Critical Path Expedite';
+          rationale = `Target site "${targetProj.name}" requires trade surge. Deploying ${worker.name} (${trade}) expedites delayed milestones.`;
         } else {
-          rationale = `Cross-project labor balance: Reallocating ${worker.name} (${trade}) from "${donorName}" reinforces "${targetProj.name}" on-site trade capacity.`;
+          categoryTag = 'Trade Deficit Offset';
+          rationale = `Offsets specialized trade deficit: Deploys ${worker.name} (${trade}) from "${donorName}" to reinforce "${targetProj.name}".`;
         }
+
+        const priority: 'HIGH' | 'MEDIUM' = (isTargetBehind || isStandby || newRecommendations.length % 2 === 0) ? 'HIGH' : 'MEDIUM';
+        const recId = `REC-${donorId || 'STANDBY'}-${targetProj.id}-${worker.id}`;
 
         const isCrew = (worker.activeManpower || 1) > 1 || 
           worker.workforceCategory === 'TRADE_CREW' || 
@@ -636,9 +917,10 @@ Return a strict JSON array of objects with fields:
           currentHeadcount: worker.activeManpower || 1,
           recommendedHeadcount: isCrew ? Math.max(2, (worker.activeManpower || 1) + 2) : 1,
           rationale,
+          categoryTag,
           priority
         });
-      });
+      }
     }
 
     await pool.query('DELETE FROM ai_manpower_recommendations WHERE applied = false OR dismissed = true');
@@ -647,8 +929,8 @@ Return a strict JSON array of objects with fields:
       await pool.query(`
         INSERT INTO ai_manpower_recommendations 
         (id, title, target_lots, contractor_id, contractor_name, current_headcount, recommended_headcount, rationale, priority, applied, dismissed,
-         donor_project_id, donor_project_name, target_project_id, target_project_name, worker_id, worker_name, trade_type)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, false, $10, $11, $12, $13, $14, $15, $16)
+         donor_project_id, donor_project_name, target_project_id, target_project_name, worker_id, worker_name, trade_type, category_tag)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, false, $10, $11, $12, $13, $14, $15, $16, $17)
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           target_lots = EXCLUDED.target_lots,
@@ -660,7 +942,8 @@ Return a strict JSON array of objects with fields:
           target_project_name = EXCLUDED.target_project_name,
           worker_id = EXCLUDED.worker_id,
           worker_name = EXCLUDED.worker_name,
-          trade_type = EXCLUDED.trade_type
+          trade_type = EXCLUDED.trade_type,
+          category_tag = EXCLUDED.category_tag
       `, [
         rec.id,
         rec.title,
@@ -677,52 +960,55 @@ Return a strict JSON array of objects with fields:
         rec.targetProjectName,
         rec.workerId,
         rec.workerName,
-        rec.tradeType
+        rec.tradeType,
+        rec.categoryTag || 'Trade Deficit Offset'
       ]);
     }
 
     broadcastChange('aiRecommendations');
 
     const updatedRecs = await pool.query('SELECT * FROM ai_manpower_recommendations WHERE dismissed = false ORDER BY created_at DESC');
+    const returnedRecs = (updatedRecs.rows || []).map((r: any) => ({
+      id: r.id,
+      title: r.title,
+      targetLots: r.target_project_name || r.target_lots,
+      targetSector: r.target_project_name || r.target_lots,
+      contractorId: r.contractor_id,
+      contractorName: r.contractor_name,
+      currentHeadcount: Number(r.current_headcount),
+      recommendedHeadcount: Number(r.recommended_headcount),
+      rationale: r.rationale,
+      suggestedScope: r.category_tag || 'Trade Deficit Offset',
+      priority: r.priority,
+      impact: 'High Velocity Schedule Protection',
+      applied: Boolean(r.applied),
+      dismissed: Boolean(r.dismissed),
+      donorProjectId: r.donor_project_id,
+      donorProjectName: r.donor_project_name || 'General Standby Pool',
+      targetProjectId: r.target_project_id,
+      targetProjectName: r.target_project_name || r.target_lots,
+      workerId: r.worker_id || r.contractor_id,
+      workerName: r.worker_name || r.contractor_name,
+      tradeType: r.trade_type || 'Artisan'
+    }));
+
     res.json({
       success: true,
-      count: updatedRecs.rows.length,
-      recommendations: updatedRecs.rows.map((r: any) => ({
-        id: r.id,
-        title: r.title,
-        targetLots: r.target_project_name || r.target_lots,
-        targetSector: r.target_project_name || r.target_lots,
-        contractorId: r.contractor_id,
-        contractorName: r.contractor_name,
-        currentHeadcount: Number(r.current_headcount),
-        recommendedHeadcount: Number(r.recommended_headcount),
-        rationale: r.rationale,
-        suggestedScope: r.rationale,
-        priority: r.priority,
-        impact: 'High Velocity Schedule Protection',
-        applied: Boolean(r.applied),
-        dismissed: Boolean(r.dismissed),
-        donorProjectId: r.donor_project_id,
-        donorProjectName: r.donor_project_name || 'General Standby Pool',
-        targetProjectId: r.target_project_id,
-        targetProjectName: r.target_project_name || r.target_lots,
-        workerId: r.worker_id || r.contractor_id,
-        workerName: r.worker_name || r.contractor_name,
-        tradeType: r.trade_type || 'Artisan'
-      }))
+      count: returnedRecs.length,
+      recommendations: returnedRecs
     });
   } catch (error) {
-    console.error('Error running AI labor scan:', error);
-    res.status(500).json({ error: 'Failed to run AI labor scan' });
+    console.error('Error running AI scan:', error);
+    res.status(500).json({ error: 'AI scan failed' });
   }
 });
 
-// GET /api/manpower-audits
-workforceRouter.get('/manpower-audits', async (req: Request, res: Response) => {
+// GET /api/manpower-audits & /api/subcontractor-audits
+const handleGetManpowerAudits = async (req: Request, res: Response) => {
   try {
     const audits = await prisma.dailyManpowerAudit.findMany({
       orderBy: { date: 'desc' },
-      take: 50
+      take: 100
     });
     res.json(audits.map(a => ({
       ...a,
@@ -732,7 +1018,9 @@ workforceRouter.get('/manpower-audits', async (req: Request, res: Response) => {
     console.error('Error fetching manpower audits:', error);
     res.status(500).json({ error: 'Failed to fetch manpower audits' });
   }
-});
+};
+workforceRouter.get('/manpower-audits', handleGetManpowerAudits);
+workforceRouter.get('/subcontractor-audits', handleGetManpowerAudits);
 
 // POST /api/manpower-audits
 workforceRouter.post('/manpower-audits', async (req: Request, res: Response) => {

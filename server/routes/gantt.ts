@@ -310,14 +310,22 @@ export function createGanttRouter(prisma: PrismaClient) {
           const allTasks = await tx.projectTask.findMany({ where: { projectId } });
           let avgProgress = 0;
           if (allTasks.length > 0) {
-            const totalDuration = allTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
-            const weightedProgress = allTasks.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, curr.duration || 1), 0);
-            avgProgress = totalDuration > 0 ? Math.round((weightedProgress / totalDuration) * 100) : 0;
+            const milestones = allTasks.filter(t => t.type === 'milestone' || t.duration === 0);
+            const items = milestones.length > 0 ? milestones : allTasks;
+            const sumProgress = items.reduce((acc, curr) => {
+              let p = curr.progress || 0;
+              if (p > 0 && p <= 1) p = p * 100;
+              return acc + p;
+            }, 0);
+            avgProgress = Math.round(sumProgress / items.length);
+            const existingProj = await tx.commercialProject.findUnique({ where: { id: projectId } });
+            const shouldAdvanceStatus = avgProgress > 0 && (!existingProj?.status || existingProj.status === 'PLANNING');
             await tx.commercialProject.update({
               where: { id: projectId },
               data: {
                 progressPercentage: avgProgress,
-                tasksCount: allTasks.length
+                tasksCount: allTasks.length,
+                ...(shouldAdvanceStatus ? { status: 'IN_PROGRESS' } : {})
               }
             }).catch(() => {});
           }

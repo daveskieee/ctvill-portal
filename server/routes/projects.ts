@@ -52,7 +52,7 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
         budget: Number(p.budget || 0),
         fundsCollected: Number(p.funds_collected || 0),
         progressPercentage: Number(p.progress_percentage || 0),
-        status: p.status || 'IN_PROGRESS',
+        status: (Number(p.progress_percentage || 0) > 0 && p.status === 'PLANNING') ? 'IN_PROGRESS' : (p.status || 'IN_PROGRESS'),
         targetHandoverDate: p.target_handover_date ? (p.target_handover_date instanceof Date ? p.target_handover_date.toISOString().split('T')[0] : String(p.target_handover_date).split('T')[0]) : '2026-12-31',
         startDate: p.start_date ? (p.start_date instanceof Date ? p.start_date.toISOString().split('T')[0] : String(p.start_date).split('T')[0]) : '2026-01-01',
         assignedWorkersCount: Number(p.assigned_workers_count || 0),
@@ -332,6 +332,12 @@ projectsRouter.put('/projects/:id/workers', async (req: Request, res: Response) 
     let updated: string[];
     if (action === 'add') {
       updated = current.includes(workerId) ? current : [...current, workerId];
+      // Remove worker from other commercial projects
+      await pool.query(`
+        UPDATE commercial_projects
+        SET assigned_contractor_ids = array_remove(assigned_contractor_ids, $1)
+        WHERE id != $2 AND $1 = ANY(assigned_contractor_ids)
+      `, [workerId, projectId]);
     } else {
       updated = current.filter(id => id !== workerId);
     }
@@ -346,15 +352,38 @@ projectsRouter.put('/projects/:id/workers', async (req: Request, res: Response) 
         'UPDATE contractors SET active_project_site = $1 WHERE id = $2',
         [projectName, workerId]
       );
+      await pool.query(
+        'UPDATE workers SET assigned_project_id = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+        [projectId, workerId]
+      );
+      await pool.query(
+        'DELETE FROM project_worker_assignments WHERE worker_id = $1 AND project_id != $2',
+        [workerId, projectId]
+      );
+      await pool.query(`
+        INSERT INTO project_worker_assignments (id, project_id, worker_id, assigned_at, status)
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 'ACTIVE')
+        ON CONFLICT (project_id, worker_id) DO UPDATE SET status = 'ACTIVE'
+      `, [`PWA-${projectId}-${workerId}`, projectId, workerId]);
     } else {
       await pool.query(
         "UPDATE contractors SET active_project_site = NULL WHERE id = $1 AND active_project_site = $2",
         [workerId, projectName]
       );
+      await pool.query(
+        "UPDATE workers SET assigned_project_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND assigned_project_id = $2",
+        [workerId, projectId]
+      );
+      await pool.query(
+        'DELETE FROM project_worker_assignments WHERE worker_id = $1 AND project_id = $2',
+        [workerId, projectId]
+      );
     }
 
     broadcastChange('projects');
     broadcastChange('contractors');
+    broadcastChange('workers');
+    broadcastChange('attendance');
     res.json({ success: true, assignedContractorIds: updated, assignedWorkersCount: updated.length });
   } catch (error) {
     console.error('Error updating project workers:', error);
@@ -589,14 +618,22 @@ projectsRouter.patch('/tasks/:id', async (req: Request, res: Response) => {
     if (task.projectId) {
       const allTasks = await prisma.projectTask.findMany({ where: { projectId: task.projectId } });
       if (allTasks.length > 0) {
-        const totalDuration = allTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
-        const weightedProgress = allTasks.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, curr.duration || 1), 0);
-        const avgProgress = totalDuration > 0 ? Math.round((weightedProgress / totalDuration) * 100) : 0;
+        const milestones = allTasks.filter(t => t.type === 'milestone' || t.duration === 0);
+        const items = milestones.length > 0 ? milestones : allTasks;
+        const sumProgress = items.reduce((acc, curr) => {
+          let p = curr.progress || 0;
+          if (p > 0 && p <= 1) p = p * 100;
+          return acc + p;
+        }, 0);
+        const avgProgress = Math.round(sumProgress / items.length);
+        const existingProj = await prisma.commercialProject.findUnique({ where: { id: task.projectId } });
+        const shouldAdvanceStatus = avgProgress > 0 && (!existingProj?.status || existingProj.status === 'PLANNING');
         await prisma.commercialProject.update({
           where: { id: task.projectId },
           data: {
             progressPercentage: avgProgress,
-            tasksCount: allTasks.length
+            tasksCount: allTasks.length,
+            ...(shouldAdvanceStatus ? { status: 'IN_PROGRESS' } : {})
           }
         }).catch(() => {});
         broadcastChange('projects');

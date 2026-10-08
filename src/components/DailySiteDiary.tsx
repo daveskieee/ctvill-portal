@@ -497,6 +497,13 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
 
   // Force Majeure Weather Suspension Toggle
   const handleToggleForceMajeure = async () => {
+    if (!isForceMajeureSuspended) {
+      const confirmed = window.confirm(
+        "Confirm Emergency Site Suspension: This will pause all active CPM Gantt milestones and notify site supervisors. Proceed?"
+      );
+      if (!confirmed) return;
+    }
+
     const nextState = !isForceMajeureSuspended;
     setIsForceMajeureSuspended(nextState);
 
@@ -536,6 +543,11 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
 
   // Transmit Worker Emergency Stoppage Dispatch
   const handleDispatchWorkerBroadcast = async () => {
+    const confirmed = window.confirm(
+      "Confirm Emergency Site Suspension: This will pause all active CPM Gantt milestones and notify site supervisors. Proceed?"
+    );
+    if (!confirmed) return;
+
     setIsBroadcasting(true);
     // Simulate real-time GSM/LTE multi-channel broadcast
     await new Promise(r => setTimeout(r, 1000));

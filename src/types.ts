@@ -203,8 +203,11 @@ export interface Contractor {
   department?: CTVillDepartment | string;
   roleTitle?: CTVillRole | string;
   dailyRate?: number;
+  hourlyOtRate?: number;
   monthlySalary?: number;
   status?: 'ACTIVE' | 'ON_LEAVE' | 'INACTIVE' | 'BREAK' | 'OFFLINE';
+  workforce_class?: 'Corporate' | 'Artisan' | 'Trade Crew' | string;
+  workforceClass?: 'Corporate' | 'Artisan' | 'Trade Crew' | string;
   workforceCategory?: 'OFFICE_STAFF' | 'FIELD_SUPERVISION' | 'TRADE_CREW' | 'INDIVIDUAL_ARTISAN' | 'PROFESSIONAL' | 'SKILLED' | 'GENERAL_LABOR';
   allocationStatus?: 'ASSIGNED' | 'STANDBY' | 'REALLOCATED' | 'DEMOBILIZED';
   contractAmount: number;
@@ -214,6 +217,7 @@ export interface Contractor {
   rating: number; // Rating out of 5
   contact?: string;
   activeProjectSite?: string;
+  assignedProjectId?: string;
   createdAt?: string;
   avatar?: string;
   activePresence?: 'ONLINE' | 'BREAK' | 'OFFLINE';
@@ -227,10 +231,14 @@ export interface Contractor {
 }
 
 export function isOfficeOrExecutive(c: Partial<Contractor>): boolean {
+  if (c.workforce_class === 'Corporate' || c.workforceClass === 'Corporate') return true;
   if (c.workforceCategory === 'OFFICE_STAFF') return true;
   const dept = (c.department || '').toLowerCase();
   const role = (c.roleTitle || c.specialty || '').toLowerCase();
-  
+
+  // Safety Officers are field safety personnel on job sites, not corporate office executives
+  if (role.includes('safety') || role.includes('ehso')) return false;
+
   if (
     dept.includes('executive') || 
     dept.includes('corporate') || 
@@ -238,6 +246,7 @@ export function isOfficeOrExecutive(c: Partial<Contractor>): boolean {
     dept.includes('finance') || 
     dept.includes('accounting') || 
     dept.includes('human resources') || 
+    dept.includes('hr') || 
     dept.includes('legal') || 
     dept.includes('procurement') || 
     dept.includes('sales') || 
@@ -250,7 +259,6 @@ export function isOfficeOrExecutive(c: Partial<Contractor>): boolean {
     role.includes('ceo') || 
     role.includes('chief') || 
     role.includes('director') || 
-    role.includes('officer') || 
     role.includes('finance') || 
     role.includes('hr') || 
     role.includes('accounting') || 
@@ -278,6 +286,64 @@ export function isIndividualStaffOrEngineer(c: Partial<Contractor>): boolean {
   ) {
     return true;
   }
+  return false;
+}
+
+export function isTradeGroupOrOutsourcedContractor(c: Partial<Contractor>): boolean {
+  if (isOfficeOrExecutive(c)) return false;
+  if (isIndividualStaffOrEngineer(c)) return false;
+  if (c.entityType === 'INDIVIDUAL') return false;
+
+  const roleOrSpecialty = (c.roleTitle || c.specialty || '').toLowerCase();
+  const company = (c.company || '').toLowerCase();
+  const name = (c.name || '').toLowerCase();
+  const dept = (c.department || '').toLowerCase();
+
+  // Exclude individual salaried staff (PM, COO, Engineer, Architect, Safety Officer, etc.)
+  if (
+    roleOrSpecialty.includes('project manager') ||
+    roleOrSpecialty.includes('pm') ||
+    roleOrSpecialty.includes('engineer') ||
+    roleOrSpecialty.includes('architect') ||
+    roleOrSpecialty.includes('safety officer') ||
+    roleOrSpecialty.includes('coo') ||
+    roleOrSpecialty.includes('director') ||
+    roleOrSpecialty.includes('inspector') ||
+    roleOrSpecialty.includes('coordinator') ||
+    dept.includes('project management') ||
+    dept.includes('executive')
+  ) {
+    return false;
+  }
+
+  // Include if outsourced contractor, crew, gang, team, trade supplier, or manpower supply
+  if (c.employmentType === 'OUTSOURCED' || (c.activeManpower && c.activeManpower > 1)) {
+    return true;
+  }
+
+  if (
+    roleOrSpecialty.includes('crew') ||
+    roleOrSpecialty.includes('team') ||
+    roleOrSpecialty.includes('trade') ||
+    roleOrSpecialty.includes('gang') ||
+    roleOrSpecialty.includes('manpower') ||
+    roleOrSpecialty.includes('subcontractor') ||
+    roleOrSpecialty.includes('contractor') ||
+    roleOrSpecialty.includes('masonry') ||
+    roleOrSpecialty.includes('electrical') ||
+    roleOrSpecialty.includes('carpentry') ||
+    roleOrSpecialty.includes('painting') ||
+    roleOrSpecialty.includes('plumbing') ||
+    company.includes('builders') ||
+    company.includes('supply') ||
+    company.includes('services') ||
+    company.includes('contractor') ||
+    name.includes('crew') ||
+    name.includes('team')
+  ) {
+    return true;
+  }
+
   return false;
 }
 
@@ -320,6 +386,9 @@ export interface DailyManpowerAudit {
   photoEvidenceVerified: boolean;
   remarks: string;
   productivityIndex: number; // e.g. 92%
+  projectId?: string;
+  allocatedZone?: string;
+  projectTitle?: string;
 }
 
 export interface LaborAllocation {
@@ -359,11 +428,13 @@ export interface AIManpowerRecommendation {
   tradeType?: string;
 }
 
+export type ConstructionRole = 'Admin' | 'Engineer' | 'Timekeeper' | 'Finance';
+
 export interface UserSession {
   id?: string;
   email: string;
   name: string;
-  role: 'Admin' | 'ProjectManager' | 'Finance' | 'Client' | string;
+  role: 'Admin' | 'Engineer' | 'Timekeeper' | 'Finance' | 'ProjectManager' | 'Client' | string;
   clientId?: string; // If role is 'Client'
   accountStatus?: 'INVITED' | 'ACTIVE' | 'SUSPENDED';
   token?: string;
@@ -371,6 +442,7 @@ export interface UserSession {
   title?: string;
   phone?: string;
   division?: string;
+  projectIds?: string[];
   rememberMe?: boolean;
 }
 
@@ -534,12 +606,15 @@ export interface ScheduleEvent {
   projectId?: string;
   projectName?: string;
   title: string;
+  description?: string;
   eventType: ScheduleEventType;
   eventDate: string;
   startTime?: string;
   endTime?: string;
   location?: string;
   attendees?: string;
+  organizerName?: string;
+  participants?: string;
   notes?: string;
   status?: 'SCHEDULED' | 'COMPLETED' | 'CANCELLED';
   createdAt?: string;
@@ -558,7 +633,7 @@ export interface ProjectProfile {
   targetHandoverDate: string;
   startDate: string;
   assignedWorkersCount: number;
-  assignedContractorIds: string[];
+  assignedContractorIds?: string[];
   assignedProjectManagerId?: string;
   assignedProjectManagerName?: string;
   latitude?: number;
@@ -618,12 +693,19 @@ export interface ProjectRFI {
   question: string;
   suggestedSolution?: string;
   answer?: string;
+  officialAnswer?: string;
+  answeredBy?: string;
+  answeredAt?: string | null;
   status: 'OPEN' | 'UNDER_REVIEW' | 'ANSWERED' | 'CLOSED';
   priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL';
   assignedTo?: string;
   submittedBy: string;
   drawingRef?: string;
+  drawingsAffected?: string;
   dueDate?: string;
+  dateRequired?: string;
+  costImpactEstimated?: number;
+  scheduleImpactDays?: number;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -641,5 +723,142 @@ export interface FitoutQuotationItem {
   finishTier?: string;
   projectNotes?: string;
   status: 'NEW_INQUIRY' | 'CONTACTED' | 'PROPOSAL_SENT' | 'CONVERTED';
+  convertedProjectId?: string;
+  createdAt?: string;
+}
+
+// --- AUTOMATED ATTENDANCE TO PAYROLL SYSTEM TYPES ---
+
+export type AttendanceStatus = 'PRESENT' | 'ABSENT' | 'HALF_DAY';
+
+export interface SiteWorker {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  name: string;
+  trade?: string;
+  dailyRate: number;
+  hourlyOtRate: number;
+  position: string;
+  assignedProjectId?: string;
+  status: 'Active' | 'Inactive' | string;
+  workforceClass?: 'Artisan' | 'Trade Crew' | string;
+  assignments?: {
+    projectId: string;
+    projectName?: string;
+    assignedAt?: string;
+    status?: string;
+  }[];
+  assignedProjectIds?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface AttendanceRecord {
+  id: string;
+  projectId: string;
+  projectName?: string;
+  workerId: string;
+  workerName?: string;
+  position?: string;
+  dailyRate?: number;
+  hourlyOtRate?: number;
+  loggedByUserId: string;
+  loggedByName?: string;
+  date: string;
+  status: AttendanceStatus;
+  overtimeHours: number;
+  isLocked: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface CashAdvance {
+  id: string;
+  projectId: string;
+  projectName?: string;
+  workerId: string;
+  workerName?: string;
+  position?: string;
+  amount: number;
+  dateIssued: string;
+  deductedInPayrollId?: string | null;
+  status: 'PENDING' | 'DEDUCTED';
+  notes?: string | null;
+  createdAt?: string;
+}
+
+export interface PayrollRun {
+  id: string;
+  projectId: string;
+  projectName?: string;
+  clientName?: string;
+  location?: string;
+  periodStart: string;
+  periodEnd: string;
+  status: 'DRAFT' | 'FINALIZED' | 'PAID';
+  totalGross: number;
+  totalDeductions: number;
+  totalNet: number;
+  approvedByUserId?: string;
+  approvedByName?: string;
+  workerCount?: number;
+  createdAt?: string;
+  items?: PayrollBreakdownItem[];
+  cashAdvances?: any[];
+}
+
+export interface PayrollBreakdownItem {
+  id?: string;
+  workerId: string;
+  workerName: string;
+  position: string;
+  dailyRate: number;
+  hourlyOtRate: number;
+  daysWorked: number;
+  presentCount?: number;
+  halfDayCount?: number;
+  absentCount?: number;
+  otHours: number;
+  basePay: number;
+  otPay: number;
+  grossPay: number;
+  totalDeductions: number;
+  netPay: number;
+  appliedCashAdvanceIds?: string[];
+  cashAdvances?: CashAdvance[];
+}
+
+
+// ============================================================================
+// SUBCONTRACTOR PAYABLES (Accounts Payable � AP Ledger for Trade Crews)
+// ============================================================================
+
+export type SubcontractorPayableStatus =
+  | 'PENDING_AUDIT'
+  | 'APPROVED'
+  | 'PAID'
+  | 'DISPUTED';
+
+export interface SubcontractorPayable {
+  id: string;
+  disbursementDate?: string | null;
+  payeeContractorId?: string;
+  payeeContractorName: string;
+  tradeSpecialty: string;
+  projectSite: string;
+  auditId?: string;
+  verifiedHeadcount: number;
+  claimedHeadcount: number;
+  billedDays: number;
+  ratePerDay: number;
+  billedAmount: number;
+  approvedAmount?: number;
+  disbursedAmount?: number;
+  paymentMethod: string;
+  referenceNo?: string;
+  status: SubcontractorPayableStatus;
+  remarks?: string;
+  createdBy?: string;
   createdAt?: string;
 }

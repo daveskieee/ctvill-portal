@@ -487,10 +487,10 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                             {c.name}
                           </h4>
                           <span className="text-[10px] font-mono text-slate-500 shrink-0">
-                            {isOfficeOrExecutive(c)
-                              ? 'Office Staff (1)'
+                            {isOfficeOrExecutive(c) || c.workforce_class === 'Corporate' || c.workforceClass === 'Corporate'
+                              ? 'Corporate (1)'
                               : isIndividualStaffOrEngineer(c)
-                                ? 'Field Pro (1)'
+                                ? 'Artisan (1)'
                                 : `${c.activeManpower} crew`}
                           </span>
                         </div>
@@ -575,7 +575,11 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                           <h2 className="text-base sm:text-lg font-bold text-white tracking-wide">
                             {selectedContractor.name}
                           </h2>
-                          {selectedContractor.employmentType !== 'OUTSOURCED' ? (
+                          {selectedContractor.workforce_class === 'Corporate' || selectedContractor.workforceClass === 'Corporate' || isOfficeOrExecutive(selectedContractor) ? (
+                            <span className="bg-purple-950/80 border border-purple-700 text-purple-300 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold">
+                              🏢 CORPORATE / OFFICE
+                            </span>
+                          ) : selectedContractor.employmentType !== 'OUTSOURCED' ? (
                             <span className="bg-emerald-950/80 border border-emerald-700 text-emerald-300 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold">
                               🏢 CTVILL IN-HOUSE
                             </span>
@@ -648,14 +652,16 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
 
                   {/* Actions Row */}
                   <div className="flex items-center gap-2 pt-4 mt-4 border-t border-slate-800/80 flex-wrap">
-                    <button
-                      type="button"
-                      onClick={() => onVerifyRollCall(selectedContractor.id)}
-                      className="px-3.5 py-1.5 bg-emerald-950 hover:bg-emerald-900 border border-emerald-700/80 text-emerald-300 rounded-lg text-xs font-mono font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
-                    >
-                      <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Verify Roll-Call Muster</span>
-                    </button>
+                    {!(selectedContractor.workforce_class === 'Corporate' || selectedContractor.workforceClass === 'Corporate' || isOfficeOrExecutive(selectedContractor)) && (
+                      <button
+                        type="button"
+                        onClick={() => onVerifyRollCall(selectedContractor.id)}
+                        className="px-3.5 py-1.5 bg-emerald-950 hover:bg-emerald-900 border border-emerald-700/80 text-emerald-300 rounded-lg text-xs font-mono font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-xs"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Verify Roll-Call Muster</span>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -892,9 +898,13 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                       <span className="text-slate-500 text-[10px]">{workerAudits.length} Records</span>
                     </div>
 
-                    {workerAudits.length === 0 ? (
+                    {(selectedContractor.workforce_class === 'Corporate' || selectedContractor.workforceClass === 'Corporate' || isOfficeOrExecutive(selectedContractor)) ? (
                       <div className="text-center py-3 text-slate-500 text-xs font-mono">
-                        No recent roll-call audit logged today for this contractor. Click "Verify Roll-Call Muster" to register attendance.
+                        Corporate and executive office personnel are not subject to field roll-call audits.
+                      </div>
+                    ) : workerAudits.length === 0 ? (
+                      <div className="text-center py-3 text-slate-500 text-xs font-mono">
+                        No recent roll-call audit logged today for this contractor. Click &quot;Verify Roll-Call Muster&quot; to register attendance.
                       </div>
                     ) : (
                       <div className="divide-y divide-slate-800/80">
@@ -1051,14 +1061,16 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                     <span>Open Profile</span>
                   </button>
 
-                  <button
-                    type="button"
-                    onClick={() => onVerifyRollCall(c.id)}
-                    className="py-1.5 px-2.5 bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white rounded-lg text-xs font-mono font-bold cursor-pointer transition-colors flex items-center justify-center gap-1"
-                    title="Verify Roll-Call Muster"
-                  >
-                    <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
-                  </button>
+                  {!(c.workforce_class === 'Corporate' || c.workforceClass === 'Corporate' || isOfficeOrExecutive(c)) && (
+                    <button
+                      type="button"
+                      onClick={() => onVerifyRollCall(c.id)}
+                      className="py-1.5 px-2.5 bg-slate-800 hover:bg-blue-600 text-slate-300 hover:text-white rounded-lg text-xs font-mono font-bold cursor-pointer transition-colors flex items-center justify-center gap-1"
+                      title="Verify Roll-Call Muster"
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5 text-blue-400" />
+                    </button>
+                  )}
 
                   {onDeleteContractor && (
                     <button

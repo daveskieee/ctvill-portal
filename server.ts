@@ -17,6 +17,10 @@ import { siteDiaryRouter } from './server/routes/siteDiary';
 import { financeRouter } from './server/routes/finance';
 import { workforceRouter } from './server/routes/workforce';
 import { legacyParcelsRouter } from './server/routes/legacyParcels';
+import { attendanceRouter } from './server/routes/attendance';
+import { payrollRouter } from './server/routes/payroll';
+import { workersRouter } from './server/routes/workers';
+import { documentsRouter } from './server/routes/documents';
 
 dotenv.config();
 
@@ -30,7 +34,7 @@ const PORT = process.env.PORT || 3001;
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-user-role, x-user-id, x-project-id');
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -40,6 +44,11 @@ app.use((req, res, next) => {
 // Support up to 50MB payloads for base64 encoded photo uploads and CAD document assets
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Health Check Endpoint
+app.get('/api/health', (_req, res) => {
+  res.json({ status: 'ok', server: 'CTVill ERP', time: new Date().toISOString() });
+});
 
 // Initialize critical database tables on boot
 initializeDatabaseTables().catch(err => {
@@ -60,10 +69,16 @@ app.use('/api/projects', createGanttRouter(prisma));
 app.use('/api', authRouter);
 app.use('/api', projectsRouter);
 app.use('/api', engineeringRouter);
+app.use('/api', documentsRouter);
+app.use('/api/documents', documentsRouter);
 app.use('/api', siteDiaryRouter);
 app.use('/api', financeRouter);
 app.use('/api', workforceRouter);
 app.use('/api', legacyParcelsRouter);
+app.use('/api/attendance', attendanceRouter);
+app.use('/api/payroll', payrollRouter);
+app.use('/api/workers', workersRouter);
+app.use('/api', workersRouter);
 
 // Serve static frontend build in production
 const distPath = path.join(__dirname, 'dist');

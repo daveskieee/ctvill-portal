@@ -32,6 +32,7 @@ financeRouter.get('/quotations', async (req: Request, res: Response) => {
       finishTier: q.finish_tier,
       projectNotes: q.project_notes,
       status: q.status === 'PENDING' ? 'NEW_INQUIRY' : (q.status || 'NEW_INQUIRY'),
+      convertedProjectId: q.converted_project_id || undefined,
       createdAt: q.created_at ? (q.created_at instanceof Date ? q.created_at.toISOString() : String(q.created_at)) : undefined,
     }));
     res.json(quotations);
@@ -215,7 +216,7 @@ financeRouter.post('/quotations/:id/convert-to-project', async (req: Request, re
       handoverDate
     ]);
 
-    await pool.query('UPDATE fitout_quotations SET status = $1 WHERE id = $2', ['CONVERTED', id]);
+    await pool.query('UPDATE fitout_quotations SET status = $1, converted_project_id = $2 WHERE id = $3', ['CONVERTED', newProjId, id]);
     broadcastChange('quotations');
     broadcastChange('projects');
     invalidateAllDataCache();
@@ -724,5 +725,273 @@ financeRouter.delete('/payments/installment/:id', async (req: Request, res: Resp
   } catch (error) {
     console.error('Error deleting installment ledger:', error);
     res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// SUBCONTRACTOR PAYABLES (AP - Accounts Payable / Contractor Disbursements)
+// ============================================================================
+
+const ensureSubcontractorPayablesTable = async () => {
+  await pool.query(
+    `CREATE TABLE IF NOT EXISTS subcontractor_payables (
+      id TEXT PRIMARY KEY,
+      disbursement_date DATE,
+      payee_contractor_id TEXT,
+      payee_contractor_name TEXT NOT NULL,
+      trade_specialty TEXT NOT NULL DEFAULT 'General Trade',
+      project_site TEXT NOT NULL,
+      audit_id TEXT,
+      verified_headcount INTEGER DEFAULT 0,
+      claimed_headcount INTEGER DEFAULT 0,
+      billed_days NUMERIC DEFAULT 0,
+      rate_per_day NUMERIC DEFAULT 0,
+      billed_amount NUMERIC NOT NULL DEFAULT 0,
+      approved_amount NUMERIC,
+      disbursed_amount NUMERIC,
+      payment_method TEXT DEFAULT 'Bank Wire',
+      reference_no TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING_AUDIT',
+      remarks TEXT,
+      created_by TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )`
+  );
+
+  const countRes = await pool.query('SELECT count(*) FROM subcontractor_payables');
+  if (parseInt(countRes.rows[0].count, 10) === 0) {
+    await pool.query(
+      `INSERT INTO subcontractor_payables
+       (id, disbursement_date, payee_contractor_id, payee_contractor_name, trade_specialty, project_site, audit_id,
+        verified_headcount, claimed_headcount, billed_days, rate_per_day, billed_amount,
+        approved_amount, disbursed_amount, payment_method, reference_no, status, remarks, created_by, created_at)
+       VALUES 
+       ('SPY-001', '2026-09-26', 'CONT-1789598922028', 'Brent', 'Concrete Pouring & Structural Works', 'NexBridge Software Hub', 'AUD-1790357393677',
+        15, 15, 3, 1000, 45000, NULL, NULL, 'Bank Wire', NULL, 'PENDING_AUDIT', '15 Men Verified on-site for NexBridge Concrete Pouring shift. Gate muster 100% matched, pending fund release.', 'Finance Department', NOW()),
+       ('SPY-002', '2026-09-20', 'CONT-1789599140157', 'Paul', 'Skilled Trade Crews (Electricians, Carpenters, Painters, Masons)', 'NexBridge Software Hub', 'AUD-67542',
+        10, 10, 2, 1400, 28000, 28000, NULL, 'Check', 'CHK-2026-0981', 'APPROVED', 'Quadrant B electrical rough-ins and conduit works verified with GPS photo proof. Approved for payout.', 'Finance Department', NOW() - INTERVAL '6 days'),
+       ('SPY-003', '2026-09-18', 'CONT-1789599064683', 'Lizter', 'Site Foremen & General Labor Muster', 'NexBridge Software Hub', 'AUD-08944',
+        50, 50, 2.5, 1000, 125000, 125000, 125000, 'Bank Wire', 'BW-889123-BDO', 'PAID', 'Full 50-man field supervision gang verified across all NexBridge levels. Disbursed via BDO wire.', 'Finance Department', NOW() - INTERVAL '8 days')
+       ON CONFLICT (id) DO NOTHING`
+    );
+  }
+};
+
+const formatToISODateString = (val: any): string | null => {
+  if (!val) return null;
+  if (val instanceof Date) {
+    if (isNaN(val.getTime())) return null;
+    return val.toISOString().split('T')[0];
+  }
+  const s = String(val).trim();
+  const d = new Date(s);
+  if (!isNaN(d.getTime())) {
+    return d.toISOString().split('T')[0];
+  }
+  return s;
+};
+
+// GET /api/subcontractor-payables
+financeRouter.get('/subcontractor-payables', async (req: Request, res: Response) => {
+  try {
+    await ensureSubcontractorPayablesTable();
+    const result = await pool.query(
+      `SELECT * FROM subcontractor_payables ORDER BY created_at DESC`
+    );
+    const records = (result.rows || []).map((r: any) => ({
+      id: r.id,
+      disbursementDate: formatToISODateString(r.disbursement_date),
+      payeeContractorId: r.payee_contractor_id || undefined,
+      payeeContractorName: r.payee_contractor_name,
+      tradeSpecialty: r.trade_specialty,
+      projectSite: r.project_site,
+      auditId: r.audit_id || undefined,
+      verifiedHeadcount: Number(r.verified_headcount || 0),
+      claimedHeadcount: Number(r.claimed_headcount || 0),
+      billedDays: Number(r.billed_days || 0),
+      ratePerDay: Number(r.rate_per_day || 0),
+      billedAmount: Number(r.billed_amount || 0),
+      approvedAmount: r.approved_amount !== null && r.approved_amount !== undefined ? Number(r.approved_amount) : undefined,
+      disbursedAmount: r.disbursed_amount !== null && r.disbursed_amount !== undefined ? Number(r.disbursed_amount) : undefined,
+      paymentMethod: r.payment_method || 'Bank Wire',
+      referenceNo: r.reference_no || undefined,
+      status: r.status || 'PENDING_AUDIT',
+      remarks: r.remarks || undefined,
+      createdBy: r.created_by || undefined,
+      createdAt: r.created_at ? (r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at)) : undefined,
+    }));
+    res.json(records);
+  } catch (error: any) {
+    console.warn('subcontractor_payables fetch warning:', error?.message);
+    res.json([]);
+  }
+});
+
+// POST /api/subcontractor-payables  - Create new disbursement record
+financeRouter.post('/subcontractor-payables', async (req: Request, res: Response) => {
+  try {
+    const {
+      payeeContractorId, payeeContractorName, tradeSpecialty, projectSite,
+      auditId, verifiedHeadcount, claimedHeadcount, billedDays, ratePerDay,
+      billedAmount, approvedAmount, paymentMethod, referenceNo, status, remarks, createdBy
+    } = req.body;
+
+    if (!payeeContractorName || !projectSite || !billedAmount) {
+      return res.status(400).json({ error: 'payeeContractorName, projectSite, and billedAmount are required.' });
+    }
+
+    // Auto-create table if it does not exist
+    await pool.query(
+      `CREATE TABLE IF NOT EXISTS subcontractor_payables (
+        id TEXT PRIMARY KEY,
+        disbursement_date DATE,
+        payee_contractor_id TEXT,
+        payee_contractor_name TEXT NOT NULL,
+        trade_specialty TEXT NOT NULL DEFAULT 'General Trade',
+        project_site TEXT NOT NULL,
+        audit_id TEXT,
+        verified_headcount INTEGER DEFAULT 0,
+        claimed_headcount INTEGER DEFAULT 0,
+        billed_days NUMERIC DEFAULT 0,
+        rate_per_day NUMERIC DEFAULT 0,
+        billed_amount NUMERIC NOT NULL DEFAULT 0,
+        approved_amount NUMERIC,
+        disbursed_amount NUMERIC,
+        payment_method TEXT DEFAULT 'Bank Wire',
+        reference_no TEXT,
+        status TEXT NOT NULL DEFAULT 'PENDING_AUDIT',
+        remarks TEXT,
+        created_by TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )`
+    );
+
+    const id = `SPY-${Date.now()}`;
+    const billedAmt = Number(billedAmount) || (Number(billedDays || 0) * Number(ratePerDay || 0));
+    await pool.query(
+      `INSERT INTO subcontractor_payables
+       (id, payee_contractor_id, payee_contractor_name, trade_specialty, project_site, audit_id,
+        verified_headcount, claimed_headcount, billed_days, rate_per_day, billed_amount,
+        approved_amount, payment_method, reference_no, status, remarks, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+      [
+        id, payeeContractorId || null, payeeContractorName, tradeSpecialty || 'General Trade',
+        projectSite, auditId || null, Number(verifiedHeadcount || 0), Number(claimedHeadcount || 0),
+        Number(billedDays || 0), Number(ratePerDay || 0), billedAmt,
+        approvedAmount !== undefined && approvedAmount !== null ? Number(approvedAmount) : null,
+        paymentMethod || 'Bank Wire', referenceNo || null,
+        status || 'PENDING_AUDIT', remarks || null, createdBy || null,
+      ]
+    );
+
+    // Record in Process Audit Log
+    try {
+      await prisma.processAuditLog.create({
+        data: {
+          entityType: 'SUBCONTRACTOR_PAYABLE',
+          entityId: id,
+          action: 'INVOICE_GENERATED',
+          actorName: (req as any).user?.name || createdBy || 'Finance Department',
+          actorRole: 'FINANCE',
+          details: `Logged subcontractor payable invoice for ${payeeContractorName} (${projectSite}) for ₱${Number(billedAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Headcount basis: ${verifiedHeadcount} verified / ${claimedHeadcount} claimed. Linked Audit: ${auditId || 'None'}.`,
+        }
+      });
+      broadcastChange('auditLogs');
+    } catch (auditErr: any) {
+      console.warn('Process audit log error for new payable:', auditErr?.message);
+    }
+
+    broadcastChange('subcontractorPayables');
+    res.json({ success: true, id });
+  } catch (error: any) {
+    console.error('Error creating subcontractor payable:', error);
+    res.status(500).json({ error: 'Internal Server Error: ' + (error?.message || '') });
+  }
+});
+
+// PATCH /api/subcontractor-payables/:id  - Update status / disburse
+financeRouter.patch('/subcontractor-payables/:id', async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const {
+      status, disbursementDate, approvedAmount, disbursedAmount,
+      paymentMethod, referenceNo, remarks
+    } = req.body;
+
+    const updates: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+
+    if (status !== undefined) { updates.push(`status = $${idx++}`); values.push(status); }
+    if (disbursementDate !== undefined) { updates.push(`disbursement_date = $${idx++}`); values.push(disbursementDate || null); }
+    if (approvedAmount !== undefined) { updates.push(`approved_amount = $${idx++}`); values.push(Number(approvedAmount)); }
+    if (disbursedAmount !== undefined) { updates.push(`disbursed_amount = $${idx++}`); values.push(Number(disbursedAmount)); }
+    if (paymentMethod !== undefined) { updates.push(`payment_method = $${idx++}`); values.push(paymentMethod); }
+    if (referenceNo !== undefined) { updates.push(`reference_no = $${idx++}`); values.push(referenceNo); }
+    if (remarks !== undefined) { updates.push(`remarks = $${idx++}`); values.push(remarks); }
+
+    if (updates.length > 0) {
+      values.push(id);
+      await pool.query(`UPDATE subcontractor_payables SET ${updates.join(', ')} WHERE id = $${idx}`, values);
+
+      // Record in Process Audit Log on status transition
+      try {
+        const curRes = await pool.query('SELECT * FROM subcontractor_payables WHERE id = $1', [id]);
+        const cur = curRes.rows[0];
+        const payeeName = cur?.payee_contractor_name || 'Subcontractor';
+        const project = cur?.project_site || 'Project Site';
+
+        if (status === 'PAID') {
+          const finalAmount = disbursedAmount ?? cur?.disbursed_amount ?? cur?.approved_amount ?? cur?.billed_amount ?? 0;
+          const finalRef = referenceNo || cur?.reference_no || 'N/A';
+          const method = paymentMethod || cur?.payment_method || 'Bank Wire';
+
+          await prisma.processAuditLog.create({
+            data: {
+              entityType: 'SUBCONTRACTOR_PAYABLE',
+              entityId: id,
+              action: 'DISBURSEMENT_RELEASED',
+              actorName: (req as any).user?.name || 'Finance Officer',
+              actorRole: 'FINANCE',
+              details: `Subcontractor disbursement released to ${payeeName} (${project}). Amount: ₱${Number(finalAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} via ${method} (Ref: #${finalRef}). Linked Audit: ${cur?.audit_id || 'N/A'}.`,
+            }
+          });
+          broadcastChange('auditLogs');
+        } else if (status === 'APPROVED') {
+          const appAmount = approvedAmount ?? cur?.approved_amount ?? cur?.billed_amount ?? 0;
+          await prisma.processAuditLog.create({
+            data: {
+              entityType: 'SUBCONTRACTOR_PAYABLE',
+              entityId: id,
+              action: 'PAYABLE_APPROVED',
+              actorName: (req as any).user?.name || 'Finance Officer',
+              actorRole: 'FINANCE',
+              details: `Subcontractor payable invoice approved for ${payeeName} (${project}). Approved payout amount: ₱${Number(appAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Linked Audit: ${cur?.audit_id || 'N/A'}.`,
+            }
+          });
+          broadcastChange('auditLogs');
+        } else if (status === 'DISPUTED') {
+          await prisma.processAuditLog.create({
+            data: {
+              entityType: 'SUBCONTRACTOR_PAYABLE',
+              entityId: id,
+              action: 'PAYABLE_DISPUTED',
+              actorName: (req as any).user?.name || 'Finance Officer',
+              actorRole: 'FINANCE',
+              details: `Subcontractor payable invoice for ${payeeName} (${project}) flagged as DISPUTED. Audit verification discrepancy detected.`,
+            }
+          });
+          broadcastChange('auditLogs');
+        }
+      } catch (auditErr: any) {
+        console.warn('Process audit log error for payable patch:', auditErr?.message);
+      }
+    }
+
+    broadcastChange('subcontractorPayables');
+    res.json({ success: true, id });
+  } catch (error: any) {
+    console.error('Error updating subcontractor payable:', error);
+    res.status(500).json({ error: 'Internal Server Error: ' + (error?.message || '') });
   }
 });

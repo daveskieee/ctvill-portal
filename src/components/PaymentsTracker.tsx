@@ -18,7 +18,7 @@ export interface InstallmentRowItem {
   projectName: string;
   dueDate: string;
   amount: number;
-  status: 'Paid' | 'Pending';
+  status: 'Paid' | 'Pending' | 'Pending Bank Reconciliation';
   paidDate?: string;
   paymentMethod?: string;
   reference?: string;
@@ -97,6 +97,7 @@ export default function PaymentsTracker({
   const [recordMethod, setRecordMethod] = useState<string>('Bank Wire (Metrobank Corporate)');
   const [recordRef, setRecordRef] = useState<string>('');
   const [recordNotes, setRecordNotes] = useState<string>('Progress billing installment');
+  const [depositSlipAttached, setDepositSlipAttached] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
@@ -206,17 +207,20 @@ export default function PaymentsTracker({
     }
   }, [availableProjectNames]);
 
-  // Compute live totals from active installments list
-  const totalCollected = installments
-    .filter(i => i.status === 'Paid')
-    .reduce((sum, i) => sum + i.amount, 0);
-
-  const totalPending = installments
-    .filter(i => i.status === 'Pending')
-    .reduce((sum, i) => sum + i.amount, 0);
-
-  const totalTCP = totalCollected + totalPending;
-  const overdueCount = installments.filter(i => i.isOverdue).length;
+  // Resolve active project from selection filter or defaults (e.g. PRJ-4693)
+  const activeProject = useMemo(() => {
+    if (selectedProjectFilter !== 'ALL') {
+      return (projects || []).find(p => 
+        p.name.trim().toLowerCase() === selectedProjectFilter.trim().toLowerCase() ||
+        p.id.toLowerCase() === selectedProjectFilter.toLowerCase()
+      ) || null;
+    }
+    // When 'ALL', default to project that has active installments, or PRJ-4693, or first project
+    const projWithInstallments = (projects || []).find(p => 
+      installments.some(inst => inst.projectName?.trim().toLowerCase() === p.name?.trim().toLowerCase())
+    );
+    return projWithInstallments || (projects || []).find(p => p.id === 'PRJ-4693') || (projects && projects[0]) || null;
+  }, [projects, selectedProjectFilter, installments]);
 
   const filteredInstallments = installments.filter(item => {
     if (selectedProjectFilter !== 'ALL' && item.projectName.trim().toLowerCase() !== selectedProjectFilter.trim().toLowerCase()) {
@@ -231,6 +235,25 @@ export default function PaymentsTracker({
     }
     return true;
   });
+
+  // Compute live funds collected from paid installments for the active project / view
+  const targetInstallments = selectedProjectFilter !== 'ALL' ? filteredInstallments : installments;
+  const totalCollected = targetInstallments
+    .filter(i => i.status === 'Paid')
+    .reduce((sum, i) => sum + i.amount, 0);
+
+  // Compute Total Contract Price (TCP) from active project's true totalContractValue / budget (e.g. ₱3,600,000 for PRJ-4693)
+  const rawProjectBudget = activeProject 
+    ? Number((activeProject as any).totalContractValue || activeProject.budget || 0)
+    : (projects || []).reduce((sum, p) => sum + Number((p as any).totalContractValue || p.budget || 0), 0);
+
+  const totalTCP = rawProjectBudget > 0 
+    ? rawProjectBudget 
+    : (totalCollected + targetInstallments.filter(i => i.status === 'Pending').reduce((sum, i) => sum + i.amount, 0));
+
+  // Pending Receivables = TCP - Total Funds Collected
+  const totalPending = Math.max(0, totalTCP - totalCollected);
+  const overdueCount = targetInstallments.filter(i => i.isOverdue).length;
 
   const handleToggleStatus = (id: string) => {
     let nextStatus: 'Paid' | 'Pending' = 'Paid';
@@ -308,6 +331,11 @@ export default function PaymentsTracker({
     e.preventDefault();
     if (!recordClientId || !recordAmount) return;
 
+    if (!depositSlipAttached) {
+      setFeedbackMsg('Error: Verification required. Please confirm Deposit Slip / Wire Confirmation is attached.');
+      return;
+    }
+
     setIsSubmitting(true);
     setFeedbackMsg(null);
 
@@ -329,12 +357,13 @@ export default function PaymentsTracker({
             amount: Number(recordAmount),
             paymentMethod: recordMethod,
             reference: recordRef,
-            notes: recordNotes
+            notes: recordNotes,
+            status: 'Pending Bank Reconciliation'
           })
         });
       }
 
-      // Mark the first matching pending installment in local state as Paid
+      // Mark the first matching pending installment in local state as Pending Bank Reconciliation
       setInstallments(prev => {
         let found = false;
         return prev.map(item => {
@@ -342,7 +371,7 @@ export default function PaymentsTracker({
             found = true;
             return {
               ...item,
-              status: 'Paid',
+              status: 'Pending Bank Reconciliation' as const,
               isOverdue: false,
               paidDate: new Date().toISOString().split('T')[0],
               reference: recordRef || 'VERIFIED-SETTLED'
@@ -352,10 +381,11 @@ export default function PaymentsTracker({
         });
       });
 
-      setFeedbackMsg('Payment successfully recorded and synced with the ledger!');
+      setFeedbackMsg('Payment successfully recorded! Initial status set to Pending Bank Reconciliation.');
       setTimeout(() => {
         setShowRecordModal(false);
         setFeedbackMsg(null);
+        setDepositSlipAttached(false);
       }, 1200);
     } catch (err: any) {
       setFeedbackMsg(`Error: ${err.message || 'Payment recording failed'}`);
@@ -485,7 +515,7 @@ export default function PaymentsTracker({
             ₱{totalTCP.toLocaleString()}
           </div>
           <div className="text-xs text-slate-400 mt-1">
-            Across {installments.length} installment schedules
+            {activeProject ? `${activeProject.name} (${activeProject.id})` : `Across ${installments.length} installment schedules`}
           </div>
         </div>
 
@@ -498,7 +528,7 @@ export default function PaymentsTracker({
             ₱{totalCollected.toLocaleString()}
           </div>
           <div className="text-xs text-emerald-500/80 mt-1">
-            {totalTCP > 0 ? Math.round((totalCollected / totalTCP) * 100) : 0}% collected to date
+            {totalTCP > 0 ? Math.round((totalCollected / totalTCP) * 100) : 0}% collected of total contract
           </div>
         </div>
 
@@ -511,7 +541,7 @@ export default function PaymentsTracker({
             ₱{totalPending.toLocaleString()}
           </div>
           <div className="text-xs text-amber-500/80 mt-1">
-            Pending milestone billing cycles
+            TCP − Total Funds Collected
           </div>
         </div>
 
@@ -635,6 +665,10 @@ export default function PaymentsTracker({
                         {inst.status === 'Paid' ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-950/80 text-emerald-300 border border-emerald-800">
                             <CheckCircle2 className="w-3 h-3" /> Paid
+                          </span>
+                        ) : inst.status === 'Pending Bank Reconciliation' ? (
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-blue-950/80 text-blue-300 border border-blue-800">
+                            <Clock className="w-3 h-3 text-blue-400" /> Pending Bank Reconciliation
                           </span>
                         ) : inst.isOverdue ? (
                           <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-950/80 text-rose-300 border border-rose-800 animate-pulse">
@@ -975,6 +1009,20 @@ export default function PaymentsTracker({
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
                 />
               </div>
+
+              {/* Required Deposit Slip / Wire Confirmation Checkbox */}
+              <label className="flex items-center gap-2.5 p-3 bg-slate-950/80 border border-slate-800 rounded-xl cursor-pointer hover:border-emerald-500/50 transition select-none">
+                <input
+                  type="checkbox"
+                  required
+                  checked={depositSlipAttached}
+                  onChange={(e) => setDepositSlipAttached(e.target.checked)}
+                  className="w-4 h-4 rounded border-slate-700 bg-slate-900 text-emerald-500 focus:ring-emerald-500 cursor-pointer"
+                />
+                <span className="text-xs text-slate-300 font-medium">
+                  Deposit Slip / Wire Confirmation Attached <span className="text-rose-400 font-bold">*</span>
+                </span>
+              </label>
 
               <div className="pt-3 flex justify-end gap-3">
                 <button

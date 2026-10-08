@@ -6,7 +6,7 @@
 import React, { useState } from 'react';
 import { 
   FileSpreadsheet, Plus, CheckCircle2, XCircle, Clock, 
-  DollarSign, AlertTriangle, Search, Filter, ShieldCheck, 
+  DollarSign, AlertTriangle, Search, Filter, ShieldCheck, ShieldAlert,
   User, Calendar, X, Check, ArrowRight, Building2, FileText, CheckSquare, Download, Printer
 } from 'lucide-react';
 import { ChangeOrder, ProjectProfile } from '../types';
@@ -29,6 +29,8 @@ export default function ChangeOrderManager({
   onSubmitChangeOrder,
   onUpdateChangeOrderStatus
 }: ChangeOrderManagerProps) {
+  const normalizedRole = (userRole || '').toUpperCase();
+  const isExecutiveAdmin = normalizedRole === 'ADMIN' || normalizedRole === 'SUPER_ADMIN';
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
@@ -97,6 +99,9 @@ export default function ChangeOrderManager({
   };
 
   const handleOpenApprove = (order: ChangeOrder, action: 'APPROVED' | 'REJECTED') => {
+    if (action === 'APPROVED' && (Number(order.requestedAmount) || 0) >= 1000000 && !isExecutiveAdmin) {
+      return;
+    }
     setTargetOrder(order);
     setApprovalAction(action);
     setApprovedAmountInput(action === 'APPROVED' ? Number(order.requestedAmount) : 0);
@@ -367,14 +372,34 @@ export default function ChangeOrderManager({
                           </button>
                           {isAdmin && order.status === 'PENDING' && (
                             <>
-                              <button
-                                onClick={() => handleOpenApprove(order, 'APPROVED')}
-                                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1"
-                                title="Approve Variation"
-                              >
-                                <Check className="w-3 h-3" />
-                                <span>Approve</span>
-                              </button>
+                              {(Number(order.requestedAmount) || 0) >= 1000000 && !isExecutiveAdmin ? (
+                                <>
+                                  <span 
+                                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30"
+                                    title="Variations of ₱1,000,000+ require Corporate Executive (ADMIN / SUPER_ADMIN) authorization"
+                                  >
+                                    <ShieldAlert className="w-3 h-3 text-amber-400" />
+                                    Requires Corporate Executive Sign-Off
+                                  </span>
+                                  <button
+                                    disabled
+                                    className="px-2.5 py-1 bg-emerald-950/40 text-emerald-600/50 border border-emerald-900/30 rounded-lg text-xs font-bold cursor-not-allowed opacity-50 flex items-center gap-1"
+                                    title="Direct approval locked: Requires Corporate Executive Sign-Off (₱1M+ variation)"
+                                  >
+                                    <Check className="w-3 h-3" />
+                                    <span>Approve</span>
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => handleOpenApprove(order, 'APPROVED')}
+                                  className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1"
+                                  title="Approve Variation"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  <span>Approve</span>
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleOpenApprove(order, 'REJECTED')}
                                 className="px-2.5 py-1 bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1"
@@ -400,14 +425,14 @@ export default function ChangeOrderManager({
       {showSubmitModal && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 animate-scaleUp">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+            <div className="p-6 pb-4 border-b border-slate-800 flex items-center justify-between">
               <h4 className="text-base font-bold text-white flex items-center gap-2">
                 <FileSpreadsheet className="w-5 h-5 text-amber-400" />
                 Raise Scope Change Order
               </h4>
               <button
                 onClick={() => setShowSubmitModal(false)}
-                className="text-slate-500 hover:text-white cursor-pointer"
+                className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -558,7 +583,7 @@ export default function ChangeOrderManager({
       {selectedOrder && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
+            <div className="p-6 pb-4 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-amber-400 font-bold">{selectedOrder.orderNumber}</span>
                 <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
@@ -567,7 +592,10 @@ export default function ChangeOrderManager({
                   {selectedOrder.status}
                 </span>
               </div>
-              <button onClick={() => setSelectedOrder(null)} className="text-slate-500 hover:text-white cursor-pointer">
+              <button 
+                onClick={() => setSelectedOrder(null)} 
+                className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>

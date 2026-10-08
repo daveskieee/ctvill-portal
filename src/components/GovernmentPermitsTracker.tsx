@@ -19,6 +19,8 @@ interface GovernmentPermitsTrackerProps {
   onUpdatePermitStatus?: (permitId: string, status: GovernmentPermit['status'], notes?: string) => Promise<void>;
   onUpdatePermit?: (permitId: string, updates: Partial<GovernmentPermit>) => Promise<void>;
   onDeletePermit?: (permitId: string) => Promise<void>;
+  /** Hide all mutation actions (Finance read-only audit mode) */
+  readOnly?: boolean;
 }
 
 export default function GovernmentPermitsTracker({
@@ -27,7 +29,8 @@ export default function GovernmentPermitsTracker({
   onAddPermit,
   onUpdatePermitStatus,
   onUpdatePermit,
-  onDeletePermit
+  onDeletePermit,
+  readOnly = false,
 }: GovernmentPermitsTrackerProps) {
   const [projectFilter, setProjectFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
@@ -373,6 +376,7 @@ export default function GovernmentPermitsTracker({
             Export Matrix (CSV)
           </button>
 
+          {!readOnly && (
           <button
             onClick={() => setShowAddModal(true)}
             className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-amber-500/20 text-xs cursor-pointer"
@@ -380,6 +384,7 @@ export default function GovernmentPermitsTracker({
             <Plus className="w-4 h-4" />
             File Permit Application
           </button>
+          )}
         </div>
       </div>
 

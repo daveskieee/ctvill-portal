@@ -560,6 +560,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         finishTier: q.finish_tier,
         projectNotes: q.project_notes,
         status: q.status === 'PENDING' ? 'NEW_INQUIRY' : (q.status || 'NEW_INQUIRY'),
+        convertedProjectId: q.converted_project_id || undefined,
         createdAt: q.created_at ? (q.created_at instanceof Date ? q.created_at.toISOString() : String(q.created_at)) : undefined,
       })),
     };

@@ -18,8 +18,43 @@ import { resolveLocalGeocoding, resolveProjectCoordinatesAsync, resolveProjectCo
 export const AVAILABLE_PMS = [
   { id: 'usr-pm-ricardo', name: 'Engr. Ricardo Ramos (Senior Project Manager)' },
   { id: 'usr-pm-carlos', name: 'Engr. Carlos Mendoza (Civil & Site Operations Lead)' },
-  { id: 'usr-pm-maria', name: 'Engr. Maria Santos (Fit-Out QA & Finishes Lead)' },
+  { id: 'usr-pm-jonathan', name: 'Ar. Jonathan Dela Cruz (Principal Architect & Design Lead)' },
+  { id: 'usr-pm-marco', name: 'Principal Architect Marco Alcantara (Lead Designer)' },
 ];
+
+export function calculateProjectProgress(
+  projectId: string,
+  tasks: ProjectTask[] = [],
+  fallbackProgress: number = 0
+): number {
+  const projectTasks = tasks.filter(t => t.projectId === projectId);
+  if (!projectTasks || projectTasks.length === 0) {
+    return Math.round(fallbackProgress);
+  }
+  // Milestone actual completion deliverables
+  const milestones = projectTasks.filter(
+    t => (t as any).type === 'milestone' || t.category === 'MILESTONE' || ((t as any).duration !== undefined && (t as any).duration === 0)
+  );
+  const items = milestones.length > 0 ? milestones : projectTasks;
+  const sumProgress = items.reduce((sum, item) => {
+    let p = item.progress ?? 0;
+    if (p > 0 && p <= 1) {
+      p = p * 100;
+    }
+    return sum + p;
+  }, 0);
+  return Math.round(sumProgress / items.length);
+}
+
+export function getEffectiveProjectStatus(
+  status: ProjectProfile['status'] | string,
+  progress: number
+): ProjectProfile['status'] {
+  if (progress > 0 && (status === 'PLANNING' || !status)) {
+    return 'IN_PROGRESS';
+  }
+  return (status || 'PLANNING') as ProjectProfile['status'];
+}
 
 interface ProjectProfileHubProps {
   projects: ProjectProfile[];
@@ -155,17 +190,29 @@ export default function ProjectProfileHub({
       .catch(() => {});
   }, []);
 
-  const filteredProjects = localProjects.filter(p => {
+  const synchronizedProjects = React.useMemo(() => {
+    return localProjects.map(p => {
+      const computedProg = calculateProjectProgress(p.id, tasks, p.progressPercentage);
+      const computedStatus = getEffectiveProjectStatus(p.status, computedProg);
+      return {
+        ...p,
+        progressPercentage: computedProg,
+        status: computedStatus
+      };
+    });
+  }, [localProjects, tasks]);
+
+  const filteredProjects = synchronizedProjects.filter(p => {
     if (filterStatus === 'ALL') return true;
     return p.status === filterStatus;
   });
 
-  const totalPortfolioBudget = localProjects.reduce((acc, p) => acc + p.budget, 0);
-  const totalFundsCollected = localProjects.reduce((acc, p) => acc + p.fundsCollected, 0);
+  const totalPortfolioBudget = synchronizedProjects.reduce((acc, p) => acc + p.budget, 0);
+  const totalFundsCollected = synchronizedProjects.reduce((acc, p) => acc + p.fundsCollected, 0);
   const avgPortfolioProgress = Math.round(
-    localProjects.reduce((acc, p) => acc + p.progressPercentage, 0) / (localProjects.length || 1)
+    synchronizedProjects.reduce((acc, p) => acc + p.progressPercentage, 0) / (synchronizedProjects.length || 1)
   );
-  const totalSiteManpower = localProjects.reduce((acc, p) => acc + (p.assignedWorkersCount || 0), 0);
+  const totalSiteManpower = synchronizedProjects.reduce((acc, p) => acc + (p.assignedWorkersCount || 0), 0);
 
   // 3Cs Metrics: RFIs and Change Orders
   const totalOpenRfis = rfis.filter(r => r.status === 'OPEN' || r.status === 'UNDER_REVIEW').length;
@@ -244,8 +291,9 @@ export default function ProjectProfileHub({
     }
     setFormBudget(p.budget);
     setFormCollected(p.fundsCollected);
-    setFormProgress(p.progressPercentage);
-    setFormStatus(p.status);
+    const computedProg = calculateProjectProgress(p.id, tasks, p.progressPercentage);
+    setFormProgress(computedProg);
+    setFormStatus(getEffectiveProjectStatus(p.status, computedProg));
     setFormStartDate(p.startDate);
     setFormEndDate(p.targetHandoverDate);
     setFormWorkers(p.assignedWorkersCount);
@@ -387,7 +435,12 @@ export default function ProjectProfileHub({
       budget: Number(formBudget),
       fundsCollected: selectedProject.fundsCollected ?? Number(formCollected) ?? 0,
       progressPercentage: Number(formProgress),
-      status: (formStatus || selectedProject.status || 'PLANNING') as ProjectProfile['status'],
+      // Auto-advance status: if progress > 0 and status is still PLANNING, bump to IN_PROGRESS
+      status: (() => {
+        const rawStatus = (formStatus || selectedProject.status || 'PLANNING') as ProjectProfile['status'];
+        if (Number(formProgress) > 0 && rawStatus === 'PLANNING') return 'IN_PROGRESS' as ProjectProfile['status'];
+        return rawStatus;
+      })(),
       targetHandoverDate: formEndDate,
       startDate: formStartDate,
       assignedWorkersCount: formAssignedWorkerIds.length || Number(formWorkers),
@@ -484,6 +537,7 @@ export default function ProjectProfileHub({
               <span>Export CSV</span>
             </button>
 
+            {isAdmin && (
             <button
               onClick={openNewModal}
               className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-amber-500/20 cursor-pointer text-xs"
@@ -491,6 +545,7 @@ export default function ProjectProfileHub({
               <Plus className="w-4 h-4" />
               <span>New Project</span>
             </button>
+            )}
           </div>
         </div>
       </div>
@@ -659,6 +714,7 @@ export default function ProjectProfileHub({
                         <span>Reallocate</span>
                       </button>
                     )}
+                    {isAdmin && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -670,6 +726,8 @@ export default function ProjectProfileHub({
                     >
                       <Edit3 className="w-4 h-4" />
                     </button>
+                    )}
+                    {isAdmin && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -680,6 +738,7 @@ export default function ProjectProfileHub({
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
+                    )}
                   </div>
                 </div>
 
@@ -717,7 +776,7 @@ export default function ProjectProfileHub({
                   )}
                 </div>
 
-                {/* Progress Bar with Quick Interactive Slider */}
+                {/* Progress Bar - Auto-Synced from Master CPM Gantt & Task Kanban */}
                 <div className="mt-5 space-y-1.5">
                   <div className="flex justify-between items-center text-xs font-mono">
                     <span className="text-slate-400">Execution Progress</span>
@@ -729,17 +788,9 @@ export default function ProjectProfileHub({
                       style={{ width: `${project.progressPercentage}%` }}
                     />
                   </div>
-                  {/* Interactive Quick Slider */}
-                  <div className="flex items-center gap-2 pt-1">
-                    <Sliders className="w-3 h-3 text-slate-500" />
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      value={project.progressPercentage}
-                      onChange={(e) => handleQuickProgressUpdate(project.id, Number(e.target.value))}
-                      className="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                    />
+                  {/* Read-Only Auto-Sync Indicator */}
+                  <div className="flex items-center gap-1.5 pt-1 text-[11px] text-amber-400 font-mono font-medium">
+                    <span>⚡ Auto-Synced from Master CPM Gantt & Task Kanban</span>
                   </div>
                 </div>
 
@@ -838,12 +889,14 @@ export default function ProjectProfileHub({
 
               <div className="flex flex-col sm:items-end items-start gap-2">
                 <div className="flex items-center gap-2">
+                  {isAdmin && (
                   <button
                     onClick={() => openEditModal(selectedProject)}
                     className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold transition"
                   >
                     <Edit3 className="w-3.5 h-3.5" /> Edit Profile
                   </button>
+                  )}
                   <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
                     selectedProject.status === 'COMPLETED' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' :
                     selectedProject.status === 'PUNCHLIST_QA' ? 'bg-purple-950 text-purple-300 border-purple-800' :
@@ -905,31 +958,22 @@ export default function ProjectProfileHub({
               </div>
             )}
 
-            {/* Execution Progress Bar + Live Interactive Slider */}
+            {/* Execution Progress Bar - Auto-Synced from Master CPM Gantt & Task Kanban */}
             <div className="mt-6 bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
               <div className="flex justify-between items-center">
                 <span className="text-xs font-mono text-slate-300 font-bold uppercase tracking-wider">Overall Site Progress</span>
-                <span className="text-sm font-bold text-amber-400 font-mono">{selectedProject.progressPercentage}% Complete</span>
+                <span className="text-sm font-bold text-amber-400 font-mono">
+                  {calculateProjectProgress(selectedProject.id, tasks, selectedProject.progressPercentage)}% Complete
+                </span>
               </div>
               <div className="w-full bg-slate-900 rounded-full h-3 overflow-hidden border border-slate-800">
                 <div
                   className="bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-400 h-full rounded-full transition-all"
-                  style={{ width: `${selectedProject.progressPercentage}%` }}
+                  style={{ width: `${calculateProjectProgress(selectedProject.id, tasks, selectedProject.progressPercentage)}%` }}
                 />
               </div>
-              <div className="flex items-center gap-3 pt-2">
-                <span className="text-xs text-slate-400 font-mono">Adjust Progress:</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  value={selectedProject.progressPercentage}
-                  onChange={(e) => handleQuickProgressUpdate(selectedProject.id, Number(e.target.value))}
-                  className="flex-1 h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
-                />
-                <span className="text-xs font-mono text-amber-400 font-bold w-12 text-right">
-                  {selectedProject.progressPercentage}%
-                </span>
+              <div className="flex items-center gap-2 pt-1 text-xs text-amber-400 font-mono font-medium">
+                <span>⚡ Auto-Synced from Master CPM Gantt & Task Kanban</span>
               </div>
             </div>
 
@@ -1260,15 +1304,17 @@ export default function ProjectProfileHub({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Progress (%)</label>
+                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">
+                    Progress (%) <span className="text-amber-400 text-[10px]">(Auto-Synced)</span>
+                  </label>
                   <input
                     type="number"
-                    min={0}
-                    max={100}
+                    readOnly
+                    disabled
                     value={formProgress}
-                    onChange={(e) => setFormProgress(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none font-mono"
+                    className="w-full bg-slate-900 border border-slate-800 text-slate-400 rounded-xl px-3 py-2 text-sm font-mono cursor-not-allowed"
                   />
+                  <span className="text-[10px] text-slate-500 font-mono mt-1 block">⚡ Auto-Synced from Master CPM Gantt & Task Kanban</span>
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1">
@@ -1625,15 +1671,17 @@ export default function ProjectProfileHub({
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Progress (%)</label>
+                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">
+                    Progress (%) <span className="text-amber-400 text-[10px]">(Auto-Synced)</span>
+                  </label>
                   <input
                     type="number"
-                    min={0}
-                    max={100}
+                    readOnly
+                    disabled
                     value={formProgress}
-                    onChange={(e) => setFormProgress(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none font-mono"
+                    className="w-full bg-slate-900 border border-slate-800 text-slate-400 rounded-xl px-3 py-2 text-sm font-mono cursor-not-allowed"
                   />
+                  <span className="text-[10px] text-slate-500 font-mono mt-1 block">⚡ Auto-Synced from Master CPM Gantt & Task Kanban</span>
                 </div>
                 <div>
                   <div className="flex items-center justify-between mb-1">

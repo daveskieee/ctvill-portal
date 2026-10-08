@@ -36,6 +36,57 @@ interface ScheduleRow {
   status: 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED';
 }
 
+export const DEFAULT_SEED_DOCUMENTS: ProjectDocument[] = [
+  {
+    id: 'doc-arch-finishes-v2',
+    title: 'Architectural Floor Plan & Interior Finishes Schedule v2.pdf',
+    category: 'ARCHITECTURAL',
+    fileUrl: '/documents/Architectural_Floor_Plan_Interior_Finishes_v2.pdf',
+    fileSize: '12.4 MB',
+    version: '2.0',
+    status: 'APPROVED',
+    uploadedBy: 'Ar. Jonathan Dela Cruz',
+    notes: 'Architectural layout, ceiling reflected plan, and material specifications schedule.',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'doc-mepfs-singleline',
+    title: 'MEPFS Single Line Diagram & Load Calculations.dwg',
+    category: 'STRUCTURAL_PLAN',
+    fileUrl: '/documents/MEPFS_Single_Line_Diagram_Load_Calc.dwg',
+    fileSize: '18.6 MB',
+    version: '1.4',
+    status: 'APPROVED',
+    uploadedBy: 'Engr. Carlos Mendoza',
+    notes: 'Electrical single-line diagram, HVAC load calculations, and sanitary plumbing layout.',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'doc-boq-prj4693',
+    title: 'Detailed Bill of Quantities (BOQ) - PRJ-4693.xlsx',
+    category: 'SPECIFICATIONS',
+    fileUrl: '/documents/Detailed_BOQ_PRJ_4693.xlsx',
+    fileSize: '4.8 MB',
+    version: '3.1',
+    status: 'APPROVED',
+    uploadedBy: 'Engr. Ricardo Ramos',
+    notes: 'Full itemized turnkey fit-out bill of quantities with materials breakdown and labor costings.',
+    createdAt: new Date().toISOString()
+  },
+  {
+    id: 'doc-permit-barangay-clearance',
+    title: 'Barangay & City Hall Building Clearance Endorsement.pdf',
+    category: 'LGU_CLEARANCE',
+    fileUrl: '/documents/Barangay_City_Hall_Clearance_Endorsement.pdf',
+    fileSize: '2.1 MB',
+    version: '1.0',
+    status: 'APPROVED',
+    uploadedBy: 'Mauro R. Principe Jr.',
+    notes: 'Approved local government building clearance and zoning endorsement certificate.',
+    createdAt: new Date().toISOString()
+  }
+];
+
 export default function DocumentManager({ 
   documents, 
   onUploadDocument,
@@ -238,13 +289,24 @@ export default function DocumentManager({
     }
   };
 
+  const effectiveDocuments = useMemo(() => {
+    const list = [...(documents || [])];
+    for (const seed of DEFAULT_SEED_DOCUMENTS) {
+      const exists = list.some(d => d.id === seed.id || d.category === seed.category || d.title.toLowerCase() === seed.title.toLowerCase());
+      if (!exists) {
+        list.push(seed);
+      }
+    }
+    return list;
+  }, [documents]);
+
   const filteredDocs = useMemo(() => {
-    return documents.filter((d) => {
+    return effectiveDocuments.filter((d) => {
       const matchesCategory = activeCategory === 'ALL' || d.category === activeCategory;
       const matchesSearch = !searchQuery || d.title.toLowerCase().includes(searchQuery.toLowerCase()) || (d.notes && d.notes.toLowerCase().includes(searchQuery.toLowerCase()));
       return matchesCategory && matchesSearch;
     });
-  }, [documents, activeCategory, searchQuery]);
+  }, [effectiveDocuments, activeCategory, searchQuery]);
 
   return (
     <div className="space-y-6">
@@ -1040,7 +1102,7 @@ export default function DocumentManager({
                         if (doc.fileUrl && doc.fileUrl.startsWith('http')) {
                           const link = document.createElement('a');
                           link.href = doc.fileUrl;
-                          link.download = doc.fileName || `${doc.title.replace(/\s+/g, '_')}.pdf`;
+                          link.download = (doc as any).fileName || `${doc.title.replace(/\s+/g, '_')}.pdf`;
                           link.target = '_blank';
                           document.body.appendChild(link);
                           link.click();
@@ -1054,7 +1116,7 @@ Document ID:       ${doc.id}
 Category:          ${doc.category}
 Revision / Version: v${doc.version}
 File Size:         ${doc.fileSize || '3.2 MB'}
-Upload Date:       ${doc.uploadDate || new Date().toISOString().split('T')[0]}
+Upload Date:       ${doc.createdAt || (doc as any).uploadDate || new Date().toISOString().split('T')[0]}
 Uploaded By:       ${doc.uploadedBy || 'Engineering Records Officer'}
 Verification:      VERIFIED & SEALED ARCHIVAL COPY
 Security Level:    CONFIDENTIAL - RESTRICTED DISTRIBUTION
