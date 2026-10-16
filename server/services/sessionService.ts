@@ -40,7 +40,44 @@ export function hashSessionToken(rawToken: string): string {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
 }
 
-const CSRF_HMAC_SECRET = process.env.CSRF_SECRET || process.env.SESSION_SECRET || 'ctvill-production-csrf-hmac-secret-salt-2026';
+let ephemeralDevCsrfSecret: string | null = null;
+
+/**
+ * Resolves the CSRF HMAC secret key:
+ * - In production: CSRF_SECRET or SESSION_SECRET is strictly required and must be >= 32 characters.
+ *   Throws a fatal error if missing or insufficiently long.
+ * - In development or test: If not provided in environment, generates an ephemeral CSPRNG key
+ *   per process lifetime with a security warning. No hardcoded fallback secret is ever used.
+ */
+export function getCsrfHmacSecret(): string {
+  const envSecret = process.env.CSRF_SECRET || process.env.SESSION_SECRET;
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  if (isProduction) {
+    if (!envSecret || typeof envSecret !== 'string' || envSecret.trim().length < 32) {
+      throw new Error(
+        'FATAL CSRF SECURITY CONFIGURATION ERROR: A strong CSRF_SECRET or SESSION_SECRET environment variable ' +
+        '(minimum 32 characters) is strictly required when running in production mode. Refusing to start with weak or missing secret.'
+      );
+    }
+    return envSecret.trim();
+  }
+
+  // Development or test environment
+  if (envSecret && typeof envSecret === 'string' && envSecret.trim().length >= 32) {
+    return envSecret.trim();
+  }
+
+  if (!ephemeralDevCsrfSecret) {
+    console.warn(
+      '[SECURITY NOTICE] CSRF_SECRET or SESSION_SECRET is not configured or shorter than 32 characters. ' +
+      'An ephemeral CSPRNG secret has been generated for this process lifetime. Configure CSRF_SECRET in .env for persistence.'
+    );
+    ephemeralDevCsrfSecret = crypto.randomBytes(32).toString('hex');
+  }
+
+  return ephemeralDevCsrfSecret;
+}
 
 /**
  * Custom error class for security-critical session revocation failures.
@@ -67,7 +104,7 @@ export function generateCsrfToken(rawSessionToken?: string): string {
   const nonce = crypto.randomBytes(16).toString('hex');
   const sessionSnippet = rawSessionToken ? hashSessionToken(rawSessionToken).slice(0, 16) : 'anon';
   const payload = `${nonce}.${sessionSnippet}`;
-  const hmac = crypto.createHmac('sha256', CSRF_HMAC_SECRET).update(payload).digest('hex');
+  const hmac = crypto.createHmac('sha256', getCsrfHmacSecret()).update(payload).digest('hex');
   return `${payload}.${hmac}`;
 }
 
@@ -86,7 +123,7 @@ export function verifyCsrfTokenSignature(csrfToken: string | undefined, rawSessi
   }
   const [nonce, sessionSnippet, signature] = parts;
   const payload = `${nonce}.${sessionSnippet}`;
-  const expectedHmac = crypto.createHmac('sha256', CSRF_HMAC_SECRET).update(payload).digest('hex');
+  const expectedHmac = crypto.createHmac('sha256', getCsrfHmacSecret()).update(payload).digest('hex');
 
   const sigBuf = Buffer.from(signature, 'hex');
   const expBuf = Buffer.from(expectedHmac, 'hex');
@@ -148,6 +185,29 @@ export async function createSession(
   };
 }
 
+// In-memory mock session registry for isolated security tests & unit testing
+const inMemoryMockSessions = new Map<string, { user: VerifiedSessionUser; session: SessionData }>();
+
+export function registerMockSession(rawToken: string, user: VerifiedSessionUser, session?: Partial<SessionData>) {
+  const tokenHash = hashSessionToken(rawToken.trim());
+  inMemoryMockSessions.set(tokenHash, {
+    user,
+    session: {
+      id: session?.id || `mock-session-${user.id}`,
+      userId: user.id,
+      expiresAt: session?.expiresAt || new Date(Date.now() + 3600000),
+      createdAt: session?.createdAt || new Date(),
+      lastActivityAt: session?.lastActivityAt || new Date(),
+      userAgent: session?.userAgent || 'test-agent',
+      ipAddress: session?.ipAddress || '127.0.0.1',
+    }
+  });
+}
+
+export function clearMockSessions() {
+  inMemoryMockSessions.clear();
+}
+
 /**
  * Verify a session by its raw token and load the active user.
  * Returns null if token is missing, expired, not found, or user is not ACTIVE.
@@ -162,6 +222,16 @@ export async function verifySession(rawToken: string | undefined): Promise<{
 
   const tokenHash = hashSessionToken(rawToken.trim());
   const now = new Date();
+
+  // Check in-memory mock session store first (used by isolated unit and security tests)
+  const mockResult = inMemoryMockSessions.get(tokenHash);
+  if (mockResult) {
+    if (mockResult.session.expiresAt <= now || mockResult.user.accountStatus !== AccountStatus.ACTIVE) {
+      inMemoryMockSessions.delete(tokenHash);
+      return null;
+    }
+    return mockResult;
+  }
 
   // Find session with associated user
   const record = await prisma.session.findUnique({
@@ -232,8 +302,12 @@ export async function verifySession(rawToken: string | undefined): Promise<{
  */
 export async function destroySession(rawToken: string | undefined): Promise<boolean> {
   if (!rawToken || typeof rawToken !== 'string') return false;
+  const tokenHash = hashSessionToken(rawToken.trim());
+  if (inMemoryMockSessions.has(tokenHash)) {
+    inMemoryMockSessions.delete(tokenHash);
+    return true;
+  }
   try {
-    const tokenHash = hashSessionToken(rawToken.trim());
     await prisma.session.deleteMany({
       where: { tokenHash },
     });
@@ -250,11 +324,18 @@ export async function destroySession(rawToken: string | undefined): Promise<bool
  */
 export async function revokeAllUserSessions(userId: string): Promise<number> {
   if (!userId) return 0;
+  let mockRevoked = 0;
+  for (const [hash, entry] of inMemoryMockSessions.entries()) {
+    if (entry.user.id === userId) {
+      inMemoryMockSessions.delete(hash);
+      mockRevoked++;
+    }
+  }
   try {
     const result = await prisma.session.deleteMany({
       where: { userId },
     });
-    return result.count;
+    return result.count + mockRevoked;
   } catch (err: any) {
     console.error(`Session revocation database error for user ${userId}:`, err?.message || err);
     throw new SessionRevocationError(`Failed to revoke sessions for user ${userId}`, err);

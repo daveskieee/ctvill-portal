@@ -9,7 +9,7 @@ import * as crypto from 'crypto';
 import { prisma, pool } from '../db';
 import { broadcastChange, setCacheInvalidator } from '../events';
 import { getMailTransporter } from '../email';
-import { requireAuth, requireRole } from '../middleware/auth';
+import { requireAuth, requireRole, checkUserProjectAccess } from '../middleware/auth';
 
 export const legacyParcelsRouter = Router();
 
@@ -116,7 +116,7 @@ export async function mapUserToClient(user: any) {
     email: user.email,
     contact: user.contact || '',
     accountStatus: user.accountStatus || 'ACTIVE',
-    inviteToken: user.inviteToken || null,
+    hasPendingInvite: Boolean(user.inviteToken && (!user.inviteTokenExpiry || new Date() <= user.inviteTokenExpiry)),
     inviteTokenExpiry: user.inviteTokenExpiry ? user.inviteTokenExpiry.toISOString() : null,
     slotId: pkg?.slotId || null,
     packageName: pkg?.packageType || '',
@@ -132,13 +132,13 @@ export async function mapUserToClient(user: any) {
   };
 }
 
-// In-Memory Performance Cache for /api/all-data, partitioned by role to prevent cross-role data leaks
-const allDataCacheByRole: Record<string, { payload: any; time: number }> = {};
+// In-Memory Performance Cache for /api/all-data, partitioned per-user and role to prevent cross-user/role data leaks
+const allDataCacheByUser: Record<string, { payload: any; time: number }> = {};
 const ALL_DATA_CACHE_TTL = 1500;
 
 export function invalidateAllDataCache() {
-  for (const k of Object.keys(allDataCacheByRole)) {
-    delete allDataCacheByRole[k];
+  for (const k of Object.keys(allDataCacheByUser)) {
+    delete allDataCacheByUser[k];
   }
 }
 
@@ -151,10 +151,11 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
     const userRole = user?.role || 'UNKNOWN';
     const isFinanceOrAdmin = userRole === 'ADMIN' || userRole === 'FINANCE';
     const isClient = userRole === 'CLIENT';
-    const cacheKey = isClient ? `CLIENT_${user?.id}` : userRole;
+    const userProjectIdsKey = (Array.isArray(user?.projectIds) ? user.projectIds.slice().sort().join(',') : '');
+    const cacheKey = `${user?.id || 'anon'}_${userRole}_${userProjectIdsKey}`;
 
     const bypassCache = req.query.nocache === 'true' || req.headers['cache-control'] === 'no-cache';
-    const cached = allDataCacheByRole[cacheKey];
+    const cached = allDataCacheByUser[cacheKey];
     if (!bypassCache && cached && (Date.now() - cached.time < ALL_DATA_CACHE_TTL)) {
       return res.json(cached.payload);
     }
@@ -321,6 +322,161 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       };
     });
 
+    // Project Authorization & Scoping
+    const allProjects = (dbProjectsRes.rows || []).map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      clientName: p.client_name || '',
+      description: p.description || '',
+      location: p.location || '',
+      budget: Number(p.budget || 0),
+      fundsCollected: Number(p.funds_collected || 0),
+      progressPercentage: Number(p.progress_percentage || 0),
+      status: p.status || 'IN_PROGRESS',
+      targetHandoverDate: p.target_handover_date ? (p.target_handover_date instanceof Date ? p.target_handover_date.toISOString().split('T')[0] : String(p.target_handover_date).split('T')[0]) : '2026-12-31',
+      startDate: p.start_date ? (p.start_date instanceof Date ? p.start_date.toISOString().split('T')[0] : String(p.start_date).split('T')[0]) : '2026-01-01',
+      assignedWorkersCount: Number(p.assigned_workers_count || 0),
+      assignedContractorIds: Array.isArray(p.assigned_contractor_ids) ? p.assigned_contractor_ids : [],
+      tasksCount: Number(p.tasks_count || 0),
+      milestonesCount: Number(p.milestones_count || 0),
+      isPrivateAccounting: Boolean(p.is_private_accounting),
+      assignedProjectManagerId: p.assigned_project_manager_id || '',
+      assignedProjectManagerName: p.assigned_project_manager_name || '',
+      latitude: p.latitude !== null && p.latitude !== undefined ? Number(p.latitude) : undefined,
+      longitude: p.longitude !== null && p.longitude !== undefined ? Number(p.longitude) : undefined,
+      weatherSuspended: Boolean(p.weather_suspended),
+      createdAt: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at)) : new Date().toISOString()
+    }));
+
+    const projects = isFinanceOrAdmin 
+      ? allProjects 
+      : allProjects.filter(p => checkUserProjectAccess(user, p.id));
+
+    const authorizedProjectIds = new Set(projects.map(p => p.id));
+
+    const allMappedTasks = dbTasks.map(t => ({
+      id: t.id,
+      projectId: t.projectId,
+      title: t.title || t.text,
+      description: t.description || t.text,
+      assigneeName: t.assigneeName || t.assignedContractor?.name || '',
+      assigneeRole: t.assigneeRole || t.assignedContractor?.roleTitle || '',
+      priority: t.priority || 'MEDIUM',
+      status: t.status || ((t.progress || 0) >= 1 ? 'COMPLETED' : (t.progress || 0) > 0 ? 'IN_PROGRESS' : 'TODO'),
+      dueDate: t.dueDate ? t.dueDate.toISOString().split('T')[0] : (t.endDate ? t.endDate.toISOString().split('T')[0] : ''),
+      startDate: t.startDate ? t.startDate.toISOString().split('T')[0] : '',
+      estimatedHours: (t.duration || 1) * 8,
+      actualHours: Math.round((t.progress || 0) * 100),
+      category: t.category || (t.type === 'milestone' ? 'QA' : 'CIVIL_WORKS'),
+      milestonePhase: t.milestonePhase || t.wbsCode || '',
+      subtasks: t.subtasksJson ? JSON.parse(t.subtasksJson) : [],
+      tags: t.tags ? (typeof t.tags === 'string' ? t.tags.split(',') : t.tags) : [t.wbsCode || '', t.type || 'task'],
+      createdAt: t.createdAt.toISOString(),
+    }));
+
+    const tasks = isFinanceOrAdmin
+      ? allMappedTasks
+      : allMappedTasks.filter(t => t.projectId ? authorizedProjectIds.has(t.projectId) : false);
+
+    const allMappedPermits = (dbPermitsRes.rows || []).map((p: any) => ({
+      id: p.id,
+      projectId: p.project_id,
+      projectName: p.project_name,
+      permitName: p.permit_name,
+      permitType: p.permit_type,
+      issuingAgency: p.issuing_agency,
+      referenceNo: p.reference_no,
+      status: p.status,
+      applicationDate: p.application_date ? (p.application_date instanceof Date ? p.application_date.toISOString().split('T')[0] : String(p.application_date).split('T')[0]) : null,
+      approvalDate: p.approval_date ? (p.approval_date instanceof Date ? p.approval_date.toISOString().split('T')[0] : String(p.approval_date).split('T')[0]) : null,
+      expiryDate: p.expiry_date ? (p.expiry_date instanceof Date ? p.expiry_date.toISOString().split('T')[0] : String(p.expiry_date).split('T')[0]) : null,
+      notes: p.notes || '',
+      documentUrl: p.document_url || '',
+      createdAt: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at)) : new Date().toISOString(),
+    }));
+
+    const permits = isFinanceOrAdmin
+      ? allMappedPermits
+      : allMappedPermits.filter((p: any) => !p.projectId || authorizedProjectIds.has(p.projectId));
+
+    const allMappedEvents = (dbEventsRes.rows || []).map((e: any) => ({
+      id: e.id,
+      projectId: e.project_id,
+      projectName: e.project_name,
+      title: e.title,
+      eventType: e.event_type,
+      eventDate: e.event_date ? (e.event_date instanceof Date ? e.event_date.toISOString().split('T')[0] : String(e.event_date).split('T')[0]) : new Date().toISOString().split('T')[0],
+      startTime: e.start_time || '09:00',
+      endTime: e.end_time || '10:00',
+      location: e.location || 'Site Office',
+      attendees: e.attendees || '',
+      notes: e.notes || '',
+      status: e.status || 'SCHEDULED',
+      createdAt: e.created_at ? (e.created_at instanceof Date ? e.created_at.toISOString() : String(e.created_at)) : new Date().toISOString(),
+    }));
+
+    const scheduleEvents = isFinanceOrAdmin
+      ? allMappedEvents
+      : allMappedEvents.filter((e: any) => !e.projectId || authorizedProjectIds.has(e.projectId));
+
+    const allMappedRfis = (dbRfisRes.rows || []).map((r: any) => ({
+      id: r.id,
+      rfiNumber: r.rfi_number,
+      projectId: r.project_id,
+      projectName: r.project_name,
+      subject: r.subject,
+      discipline: r.discipline,
+      priority: r.priority,
+      status: r.status,
+      question: r.question,
+      suggestedSolution: r.suggested_solution || '',
+      officialAnswer: r.official_answer || '',
+      submittedBy: r.submitted_by,
+      assignedTo: r.assigned_to,
+      dateSubmitted: r.date_submitted ? (r.date_submitted instanceof Date ? r.date_submitted.toISOString().split('T')[0] : String(r.date_submitted).split('T')[0]) : new Date().toISOString().split('T')[0],
+      dateAnswered: r.date_answered ? (r.date_answered instanceof Date ? r.date_answered.toISOString().split('T')[0] : String(r.date_answered).split('T')[0]) : null,
+      costImpact: Boolean(r.cost_impact),
+      scheduleImpactDays: Number(r.schedule_impact_days || 0),
+      attachments: Array.isArray(r.attachments) ? r.attachments : [],
+      createdAt: r.created_at ? (r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at)) : new Date().toISOString()
+    }));
+
+    const rfis = isFinanceOrAdmin
+      ? allMappedRfis
+      : allMappedRfis.filter((r: any) => !r.projectId || authorizedProjectIds.has(r.projectId));
+
+    const allMappedRecs = (dbRecRes.rows || []).map((r: any) => ({
+      id: r.id,
+      title: r.title,
+      targetLots: r.target_project_name || r.target_lots,
+      targetSector: r.target_project_name || r.target_lots,
+      contractorId: r.contractor_id,
+      contractorName: r.contractor_name,
+      currentHeadcount: Number(r.current_headcount),
+      recommendedHeadcount: Number(r.recommended_headcount),
+      rationale: r.rationale,
+      suggestedScope: r.rationale,
+      priority: r.priority,
+      impact: 'High Velocity Schedule Protection',
+      applied: Boolean(r.applied),
+      dismissed: Boolean(r.dismissed),
+      donorProjectId: r.donor_project_id,
+      donorProjectName: r.donor_project_name || 'General Standby Pool',
+      targetProjectId: r.target_project_id,
+      targetProjectName: r.target_project_name || r.target_lots,
+      workerId: r.worker_id || r.contractor_id,
+      workerName: r.worker_name || r.contractor_name,
+      tradeType: r.trade_type || 'Artisan'
+    }));
+
+    const aiRecommendations = isFinanceOrAdmin
+      ? allMappedRecs
+      : allMappedRecs.filter((r: any) => {
+          const targetOk = !r.targetProjectId || authorizedProjectIds.has(r.targetProjectId);
+          const donorOk = !r.donorProjectId || authorizedProjectIds.has(r.donorProjectId);
+          return targetOk && donorOk;
+        });
+
     const responsePayload = {
       parcels,
       slots,
@@ -386,24 +542,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         status: p.status === PayrollStatus.DISBURSED ? 'Disbursed' : 'Pending',
         paymentMethod: p.paymentMethod,
       })) : [],
-      tasks: dbTasks.map(t => ({
-        id: t.id,
-        title: t.title || t.text,
-        description: t.description || t.text,
-        assigneeName: t.assigneeName || t.assignedContractor?.name || '',
-        assigneeRole: t.assigneeRole || t.assignedContractor?.roleTitle || '',
-        priority: t.priority || 'MEDIUM',
-        status: t.status || ((t.progress || 0) >= 1 ? 'COMPLETED' : (t.progress || 0) > 0 ? 'IN_PROGRESS' : 'TODO'),
-        dueDate: t.dueDate ? t.dueDate.toISOString().split('T')[0] : (t.endDate ? t.endDate.toISOString().split('T')[0] : ''),
-        startDate: t.startDate ? t.startDate.toISOString().split('T')[0] : '',
-        estimatedHours: (t.duration || 1) * 8,
-        actualHours: Math.round((t.progress || 0) * 100),
-        category: t.category || (t.type === 'milestone' ? 'QA' : 'CIVIL_WORKS'),
-        milestonePhase: t.milestonePhase || t.wbsCode || '',
-        subtasks: t.subtasksJson ? JSON.parse(t.subtasksJson) : [],
-        tags: t.tags ? (typeof t.tags === 'string' ? t.tags.split(',') : t.tags) : [t.wbsCode || '', t.type || 'task'],
-        createdAt: t.createdAt.toISOString(),
-      })),
+      tasks,
       siteLogs: dbSiteLogs,
       documents: dbDocs,
       risks: dbRisks,
@@ -419,61 +558,9 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         approvedBy: c.approvedBy || '',
         createdAt: c.createdAt.toISOString()
       })),
-      permits: (dbPermitsRes.rows || []).map((p: any) => ({
-        id: p.id,
-        projectId: p.project_id,
-        projectName: p.project_name,
-        permitName: p.permit_name,
-        permitType: p.permit_type,
-        issuingAgency: p.issuing_agency,
-        referenceNo: p.reference_no,
-        status: p.status,
-        applicationDate: p.application_date ? (p.application_date instanceof Date ? p.application_date.toISOString().split('T')[0] : String(p.application_date).split('T')[0]) : null,
-        approvalDate: p.approval_date ? (p.approval_date instanceof Date ? p.approval_date.toISOString().split('T')[0] : String(p.approval_date).split('T')[0]) : null,
-        expiryDate: p.expiry_date ? (p.expiry_date instanceof Date ? p.expiry_date.toISOString().split('T')[0] : String(p.expiry_date).split('T')[0]) : null,
-        notes: p.notes || '',
-        documentUrl: p.document_url || '',
-        createdAt: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at)) : new Date().toISOString(),
-      })),
-      scheduleEvents: (dbEventsRes.rows || []).map((e: any) => ({
-        id: e.id,
-        projectId: e.project_id,
-        projectName: e.project_name,
-        title: e.title,
-        eventType: e.event_type,
-        eventDate: e.event_date ? (e.event_date instanceof Date ? e.event_date.toISOString().split('T')[0] : String(e.event_date).split('T')[0]) : new Date().toISOString().split('T')[0],
-        startTime: e.start_time || '09:00',
-        endTime: e.end_time || '10:00',
-        location: e.location || 'Site Office',
-        attendees: e.attendees || '',
-        notes: e.notes || '',
-        status: e.status || 'SCHEDULED',
-        createdAt: e.created_at ? (e.created_at instanceof Date ? e.created_at.toISOString() : String(e.created_at)) : new Date().toISOString(),
-      })),
-      projects: (dbProjectsRes.rows || []).map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        clientName: p.client_name || '',
-        description: p.description || '',
-        location: p.location || '',
-        budget: Number(p.budget || 0),
-        fundsCollected: Number(p.funds_collected || 0),
-        progressPercentage: Number(p.progress_percentage || 0),
-        status: p.status || 'IN_PROGRESS',
-        targetHandoverDate: p.target_handover_date ? (p.target_handover_date instanceof Date ? p.target_handover_date.toISOString().split('T')[0] : String(p.target_handover_date).split('T')[0]) : '2026-12-31',
-        startDate: p.start_date ? (p.start_date instanceof Date ? p.start_date.toISOString().split('T')[0] : String(p.start_date).split('T')[0]) : '2026-01-01',
-        assignedWorkersCount: Number(p.assigned_workers_count || 0),
-        assignedContractorIds: Array.isArray(p.assigned_contractor_ids) ? p.assigned_contractor_ids : [],
-        tasksCount: Number(p.tasks_count || 0),
-        milestonesCount: Number(p.milestones_count || 0),
-        isPrivateAccounting: Boolean(p.is_private_accounting),
-        assignedProjectManagerId: p.assigned_project_manager_id || '',
-        assignedProjectManagerName: p.assigned_project_manager_name || '',
-        latitude: p.latitude !== null && p.latitude !== undefined ? Number(p.latitude) : undefined,
-        longitude: p.longitude !== null && p.longitude !== undefined ? Number(p.longitude) : undefined,
-        weatherSuspended: Boolean(p.weather_suspended),
-        createdAt: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at)) : new Date().toISOString()
-      })),
+      permits,
+      scheduleEvents,
+      projects,
       extendedPayroll: isFinanceOrAdmin ? (dbExtPayrollRes.rows || []).map((p: any) => ({
         id: p.id,
         workerName: p.worker_name,
@@ -503,29 +590,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         notes: r.notes || '',
         updatedAt: r.updated_at ? (r.updated_at instanceof Date ? r.updated_at.toISOString().split('T')[0] : String(r.updated_at).split('T')[0]) : new Date().toISOString().split('T')[0]
       })),
-      aiRecommendations: (dbRecRes.rows || []).map((r: any) => ({
-        id: r.id,
-        title: r.title,
-        targetLots: r.target_project_name || r.target_lots,
-        targetSector: r.target_project_name || r.target_lots,
-        contractorId: r.contractor_id,
-        contractorName: r.contractor_name,
-        currentHeadcount: Number(r.current_headcount),
-        recommendedHeadcount: Number(r.recommended_headcount),
-        rationale: r.rationale,
-        suggestedScope: r.rationale,
-        priority: r.priority,
-        impact: 'High Velocity Schedule Protection',
-        applied: Boolean(r.applied),
-        dismissed: Boolean(r.dismissed),
-        donorProjectId: r.donor_project_id,
-        donorProjectName: r.donor_project_name || 'General Standby Pool',
-        targetProjectId: r.target_project_id,
-        targetProjectName: r.target_project_name || r.target_lots,
-        workerId: r.worker_id || r.contractor_id,
-        workerName: r.worker_name || r.contractor_name,
-        tradeType: r.trade_type || 'Artisan'
-      })),
+      aiRecommendations,
       manpowerAudits: ((Array.isArray(dbManpowerAudits) ? dbManpowerAudits : (dbManpowerAudits as any)?.rows) || []).map((a: any) => ({
         id: a.id,
         date: a.date ? (a.date instanceof Date ? a.date.toISOString().split('T')[0] : String(a.date).split('T')[0]) : new Date().toISOString().split('T')[0],
@@ -544,27 +609,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         remarks: a.remarks || '',
         productivityIndex: Number(a.productivityIndex ?? a.productivity_index ?? 90)
       })),
-      rfis: (dbRfisRes.rows || []).map((r: any) => ({
-        id: r.id,
-        rfiNumber: r.rfi_number,
-        projectId: r.project_id,
-        projectName: r.project_name,
-        subject: r.subject,
-        discipline: r.discipline,
-        priority: r.priority,
-        status: r.status,
-        question: r.question,
-        suggestedSolution: r.suggested_solution || '',
-        officialAnswer: r.official_answer || '',
-        submittedBy: r.submitted_by,
-        assignedTo: r.assigned_to,
-        dateSubmitted: r.date_submitted ? (r.date_submitted instanceof Date ? r.date_submitted.toISOString().split('T')[0] : String(r.date_submitted).split('T')[0]) : new Date().toISOString().split('T')[0],
-        dateAnswered: r.date_answered ? (r.date_answered instanceof Date ? r.date_answered.toISOString().split('T')[0] : String(r.date_answered).split('T')[0]) : null,
-        costImpact: Boolean(r.cost_impact),
-        scheduleImpactDays: Number(r.schedule_impact_days || 0),
-        attachments: Array.isArray(r.attachments) ? r.attachments : [],
-        createdAt: r.created_at ? (r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at)) : new Date().toISOString()
-      })),
+      rfis,
       quotations: (dbQuotationsRes.rows || []).map((q: any) => ({
         id: q.id,
         clientName: q.client_name,
@@ -583,7 +628,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       })),
     };
 
-    allDataCacheByRole[cacheKey] = {
+    allDataCacheByUser[cacheKey] = {
       payload: responsePayload,
       time: Date.now()
     };

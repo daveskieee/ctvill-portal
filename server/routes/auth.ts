@@ -700,7 +700,24 @@ authRouter.patch('/staff/:id', requireAuth, requireRole(['ADMIN']), async (req: 
     }).catch(() => {});
     broadcastChange('auditLogs');
 
-    res.json({ success: true, user: updated });
+    const sanitizedUser = {
+      id: updated.id,
+      email: updated.email,
+      name: updated.name,
+      role: updated.role === Role.ADMIN ? 'Admin'
+        : (updated.role === Role.ENGINEER || updated.role === Role.PROJECT_MANAGER) ? 'Engineer'
+        : updated.role === Role.TIMEKEEPER ? 'Timekeeper'
+        : updated.role === Role.FINANCE ? 'Finance'
+        : 'Client',
+      rawRole: updated.role,
+      accountStatus: updated.accountStatus,
+      contact: updated.contact || '',
+      projectIds: updated.projectIds || [],
+      createdAt: updated.createdAt.toISOString(),
+      updatedAt: updated.updatedAt.toISOString(),
+    };
+
+    res.json({ success: true, user: sanitizedUser });
   } catch (error) {
     console.error('Error updating staff account:', error);
     res.status(500).json({ error: 'Failed to update staff account' });

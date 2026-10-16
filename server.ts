@@ -112,6 +112,7 @@ app.use('/api', documentsRouter);
 app.use('/api/documents', documentsRouter);
 app.use('/api', siteDiaryRouter);
 app.use('/api', financeRouter);
+app.use('/api/finance', financeRouter);
 app.use('/api', workforceRouter);
 app.use('/api', legacyParcelsRouter);
 app.use('/api/attendance', attendanceRouter);
