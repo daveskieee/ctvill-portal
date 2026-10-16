@@ -820,8 +820,8 @@ export default function ProjectProfileHub({
                       <span className="text-sm font-bold text-emerald-400 font-mono">₱{project.fundsCollected.toLocaleString()} ({collectionRate}%)</span>
                     </div>
                     <div className="col-span-2 sm:col-span-1">
-                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Expenses</span>
-                      <span className="text-sm font-bold text-sky-400 font-mono">₱{(project.totalExpenses || 0).toLocaleString()}</span>
+                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Expenses (Paid)</span>
+                      <span className="text-sm font-bold text-sky-400 font-mono">₱{(project.paidExpenses ?? project.totalExpenses ?? 0).toLocaleString()}</span>
                     </div>
                   </div>
                 )}
@@ -959,13 +959,18 @@ export default function ProjectProfileHub({
                     <span className="text-[10px] text-amber-500/80">Progress billing installment schedule</span>
                   </div>
                   <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <span className="text-xs text-slate-400 font-mono uppercase">Disbursed Expenses</span>
+                    <span className="text-xs text-slate-400 font-mono uppercase">Disbursed (Paid) Expenses</span>
                     <div className="text-xl font-bold text-sky-400 font-mono mt-1">
-                      ₱{(selectedProject.totalExpenses || (selectedProject.laborExpenses || 0) + (selectedProject.subcontractorExpenses || 0)).toLocaleString()}
+                      ₱{(selectedProject.paidExpenses ?? selectedProject.totalExpenses ?? 0).toLocaleString()}
                     </div>
                     <span className="text-[10px] text-sky-500/80">
-                      Labor: ₱{(selectedProject.laborExpenses || 0).toLocaleString()} | AP: ₱{(selectedProject.subcontractorExpenses || 0).toLocaleString()}
+                      Labor: ₱{(selectedProject.paidLaborExpenses ?? selectedProject.laborExpenses ?? 0).toLocaleString()} | AP: ₱{(selectedProject.paidSubcontractorExpenses ?? selectedProject.subcontractorExpenses ?? 0).toLocaleString()}
                     </span>
+                    {(selectedProject.approvedExpenses ?? 0) > 0 && (
+                      <span className="text-[10px] text-amber-400/80 block mt-0.5 font-mono">
+                        Approved/Pending: ₱{selectedProject.approvedExpenses?.toLocaleString()}
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>

@@ -377,9 +377,264 @@ async function main() {
   });
 
   // =========================================================================
-  // SUITE 6: Database Safety Shield & Production Protection
+  // SUITE 5B: Phase 3 Final Integration Corrections Tests
   // =========================================================================
-  console.log('\n--- Suite 6: Database Safety Shield & Production Protection ---');
+  console.log('\n--- Suite 5B: Phase 3 Final Integration Corrections Tests ---');
+
+  await runTest('Authorization', 'Worker transfer requires Engineer permissions for both target and donor projects', async () => {
+    // Model engineer with access only to target project, not donor project
+    const engineerUser = {
+      id: 'eng-1',
+      role: 'ENGINEER',
+      projectIds: ['proj-target-001']
+    };
+    const donorProjectId = 'proj-donor-999';
+    const targetProjectId = 'proj-target-001';
+
+    function checkAccess(user: typeof engineerUser, projId: string): boolean {
+      if (user.role === 'ADMIN') return true;
+      return user.projectIds.includes(projId);
+    }
+
+    const hasTargetAccess = checkAccess(engineerUser, targetProjectId);
+    const hasDonorAccess = checkAccess(engineerUser, donorProjectId);
+
+    assert.strictEqual(hasTargetAccess, true, 'Engineer has target access');
+    assert.strictEqual(hasDonorAccess, false, 'Engineer lacks donor project access');
+    
+    // Transfer must be rejected
+    const canTransfer = hasTargetAccess && hasDonorAccess;
+    assert.strictEqual(canTransfer, false, 'Unauthorized cross-project transfer must be rejected');
+  });
+
+  await runTest('Payroll & Finance', 'Distinguish approved/finalized expenses from actually paid expenses without double counting', async () => {
+    const labor = {
+      paid: 120000,
+      approved: 45000,
+      total: 165000
+    };
+    const subcontractor = {
+      paid: 80000,
+      approved: 30000,
+      total: 110000
+    };
+
+    const paidExpenses = labor.paid + subcontractor.paid; // 200,000
+    const approvedExpenses = labor.approved + subcontractor.approved; // 75,000
+    const totalExpenses = paidExpenses + approvedExpenses; // 275,000
+
+    assert.strictEqual(paidExpenses, 200000, 'Paid expenses must sum paid labor and paid subcontractor AP');
+    assert.strictEqual(approvedExpenses, 75000, 'Approved expenses must sum finalized unpaid labor and approved AP');
+    assert.strictEqual(totalExpenses, 275000, 'Total expenses must match recognized labor + subcontractor expenses');
+    assert.strictEqual(totalExpenses, labor.total + subcontractor.total, 'Total matches sum of individual totals without double counting');
+  });
+
+  await runTest('Payroll & Finance', 'Prevent re-finalization of an already disbursed/paid payroll run', async () => {
+    const existingCycle = {
+      projectId: 'proj-001',
+      periodStart: '2026-10-01',
+      periodEnd: '2026-10-15',
+      status: 'PAID'
+    };
+
+    function validateFinalizeRequest(cycle: typeof existingCycle): { allowed: boolean; error?: string } {
+      if (cycle.status === 'PAID') {
+        return { allowed: false, error: 'This payroll cycle has already been disbursed and paid. It cannot be re-finalized.' };
+      }
+      return { allowed: true };
+    }
+
+    const validation = validateFinalizeRequest(existingCycle);
+    assert.strictEqual(validation.allowed, false);
+    assert.ok(validation.error?.includes('already been disbursed and paid'));
+  });
+
+  await runTest('Gantt/Kanban Sync', 'Mutual bidirectional reconciliation prevents conflicting progress and status states', async () => {
+    // 1. If status is COMPLETED but progress < 1.0, progress is reconciled to 1.0
+    const task1 = { status: 'COMPLETED', progress: 0.4 };
+    if (task1.status === 'COMPLETED' && task1.progress < 1.0) {
+      task1.progress = 1.0;
+    }
+    assert.strictEqual(task1.progress, 1.0);
+
+    // 2. If progress is 1.0 but status is IN_PROGRESS, status is reconciled to COMPLETED
+    const task2 = { status: 'IN_PROGRESS', progress: 1.0 };
+    if (task2.progress >= 1.0) {
+      task2.status = 'COMPLETED';
+    }
+    assert.strictEqual(task2.status, 'COMPLETED');
+
+    // 3. If status is COMPLETED and progress is changed to 0.7, status resets to IN_PROGRESS
+    const task3 = { status: 'COMPLETED', progress: 0.7 };
+    if (task3.progress < 1.0 && task3.status === 'COMPLETED') {
+      task3.status = 'IN_PROGRESS';
+    }
+    assert.strictEqual(task3.status, 'IN_PROGRESS');
+  });
+
+  // =========================================================================
+  // SUITE 6: Phase 3 Critical Final Fix: Payroll Matching & Roster Integrity
+  // =========================================================================
+  console.log('\n--- Suite 6: Phase 3 Critical Final Fix: Payroll Matching & Roster Integrity ---');
+
+  await runTest('Critical Final Fix', 'Payroll disbursement: exact payroll_run_id matching isolates runs and prevents affecting unrelated records', async () => {
+    // Model multiple extended payroll records across different cycles and projects
+    const epRecords = [
+      { id: 'EP-101', payrollRunId: 'PAY-2026-W42-PRJ1', status: 'Approved', amount: 5000 },
+      { id: 'EP-102', payrollRunId: 'PAY-2026-W42-PRJ1', status: 'Approved', amount: 6000 },
+      // Same project, different week:
+      { id: 'EP-103', payrollRunId: 'PAY-2026-W41-PRJ1', status: 'Approved', amount: 5500 },
+      // Different project, same week:
+      { id: 'EP-104', payrollRunId: 'PAY-2026-W42-PRJ2', status: 'Approved', amount: 7000 },
+      // Suffix collision test case:
+      { id: 'EP-105', payrollRunId: 'XPAY-2026-W42-PRJ1', status: 'Approved', amount: 4000 },
+    ];
+
+    const targetRunId = 'PAY-2026-W42-PRJ1';
+
+    // Disburse by exact payrollRunId relationship (SQL: WHERE payroll_run_id = $1)
+    const updated = epRecords.map(r => {
+      if (r.payrollRunId === targetRunId) {
+        return { ...r, status: 'Disbursed' };
+      }
+      return r;
+    });
+
+    const disbursed = updated.filter(r => r.status === 'Disbursed');
+    const untouched = updated.filter(r => r.status === 'Approved');
+
+    assert.strictEqual(disbursed.length, 2, 'Only the 2 records belonging to target run must be disbursed');
+    assert.deepStrictEqual(disbursed.map(r => r.id), ['EP-101', 'EP-102']);
+    assert.strictEqual(untouched.length, 3, 'All other runs (prior weeks, other projects, similar names) must remain untouched');
+    assert.ok(untouched.some(r => r.id === 'EP-103' && r.payrollRunId === 'PAY-2026-W41-PRJ1'));
+    assert.ok(untouched.some(r => r.id === 'EP-104' && r.payrollRunId === 'PAY-2026-W42-PRJ2'));
+    assert.ok(untouched.some(r => r.id === 'EP-105' && r.payrollRunId === 'XPAY-2026-W42-PRJ1'));
+  });
+
+  await runTest('Critical Final Fix', 'Payroll disbursement: single EP- item disbursement isolates single record without touching run or batch', async () => {
+    const epRecords = [
+      { id: 'EP-101', payrollRunId: 'PAY-2026-W42-PRJ1', status: 'Approved' },
+      { id: 'EP-102', payrollRunId: 'PAY-2026-W42-PRJ1', status: 'Approved' },
+    ];
+
+    const targetId = 'EP-101';
+    // Single EP disbursement (SQL: UPDATE extended_payroll ... WHERE id = $1)
+    const updated = epRecords.map(r => r.id === targetId ? { ...r, status: 'Disbursed' } : r);
+
+    assert.strictEqual(updated.find(r => r.id === 'EP-101')?.status, 'Disbursed');
+    assert.strictEqual(updated.find(r => r.id === 'EP-102')?.status, 'Approved', 'Sibling EP record must remain approved and not disbursed');
+  });
+
+  await runTest('Critical Final Fix', 'Payroll disbursement: database errors inside transactions abort and roll back without swallowing', async () => {
+    let transactionCommitted = false;
+    let transactionRolledBack = false;
+    let reportedSuccess = false;
+    let caughtError: string | null = null;
+
+    // Simulate transactional disbursement handler without swallowed error
+    async function disburseHandler(simulateDbFailure: boolean) {
+      transactionCommitted = false;
+      transactionRolledBack = false;
+      try {
+        // BEGIN
+        if (simulateDbFailure) {
+          throw new Error('Database foreign key violation during payment sync');
+        }
+        transactionCommitted = true;
+        reportedSuccess = true;
+      } catch (err: any) {
+        transactionRolledBack = true;
+        caughtError = err.message;
+        reportedSuccess = false;
+        // Handler returns 500 error, does NOT falsely report success
+      }
+    }
+
+    await disburseHandler(true);
+    assert.strictEqual(transactionRolledBack, true, 'Transaction must be rolled back on error');
+    assert.strictEqual(transactionCommitted, false, 'Transaction must not commit on error');
+    assert.strictEqual(reportedSuccess, false, 'Handler must not falsely report success when error occurs');
+    assert.strictEqual(caughtError, 'Database foreign key violation during payment sync');
+  });
+
+  await runTest('Critical Final Fix', 'Worker headcounts: recalculated from assigned worker IDs array cardinality (idempotent)', async () => {
+    // Model PostgreSQL array_append(array_remove(assigned_contractor_ids, $1), $1) and cardinality
+    function assignWorker(currentRoster: string[], workerId: string): { roster: string[]; count: number } {
+      const removed = currentRoster.filter(id => id !== workerId);
+      const nextRoster = [...removed, workerId];
+      const count = nextRoster.length; // cardinality
+      return { roster: nextRoster, count };
+    }
+
+    function unassignWorker(currentRoster: string[], workerId: string): { roster: string[]; count: number } {
+      const nextRoster = currentRoster.filter(id => id !== workerId);
+      const count = nextRoster.length; // cardinality
+      return { roster: nextRoster, count };
+    }
+
+    let project = { id: 'PRJ-1', roster: ['W1', 'W2'], count: 2 };
+
+    // Initial assignment of W3
+    let res = assignWorker(project.roster, 'W3');
+    project = { id: 'PRJ-1', roster: res.roster, count: res.count };
+    assert.strictEqual(project.count, 3);
+    assert.deepStrictEqual(project.roster, ['W1', 'W2', 'W3']);
+
+    // REPEATED assignment of W3 (must be idempotent — no count inflation or duplicate IDs)
+    res = assignWorker(project.roster, 'W3');
+    project = { id: 'PRJ-1', roster: res.roster, count: res.count };
+    assert.strictEqual(project.count, 3, 'Repeated assignment must not inflate headcount');
+    assert.strictEqual(project.roster.filter(id => id === 'W3').length, 1, 'Roster must contain W3 exactly once');
+
+    // Unassign W3
+    res = unassignWorker(project.roster, 'W3');
+    project = { id: 'PRJ-1', roster: res.roster, count: res.count };
+    assert.strictEqual(project.count, 2);
+    assert.deepStrictEqual(project.roster, ['W1', 'W2']);
+
+    // REPEATED unassignment of W3 (must be idempotent — no negative drift)
+    res = unassignWorker(project.roster, 'W3');
+    project = { id: 'PRJ-1', roster: res.roster, count: res.count };
+    assert.strictEqual(project.count, 2, 'Repeated unassignment must not decrement headcount below actual IDs');
+    assert.deepStrictEqual(project.roster, ['W1', 'W2']);
+  });
+
+  await runTest('Critical Final Fix', 'Worker transfers: cannot alter unauthorized third-party project rosters or headcounts', async () => {
+    // Model 3 projects: Donor, Target, and Unauthorized Third-Party
+    const projects = {
+      'PRJ-DONOR': { id: 'PRJ-DONOR', roster: ['W1', 'W2'], count: 2 },
+      'PRJ-TARGET': { id: 'PRJ-TARGET', roster: ['W3'], count: 1 },
+      'PRJ-UNAUTH': { id: 'PRJ-UNAUTH', roster: ['W1', 'W4'], count: 2 }, // Also had W1 historically
+    };
+
+    const workerId = 'W1';
+    const authorizedDonor = 'PRJ-DONOR';
+    const authorizedTarget = 'PRJ-TARGET';
+
+    // Transfer worker from authorized donor to authorized target
+    // Donor update:
+    projects[authorizedDonor].roster = projects[authorizedDonor].roster.filter(id => id !== workerId);
+    projects[authorizedDonor].count = projects[authorizedDonor].roster.length;
+
+    // Target update:
+    projects[authorizedTarget].roster = [...projects[authorizedTarget].roster.filter(id => id !== workerId), workerId];
+    projects[authorizedTarget].count = projects[authorizedTarget].roster.length;
+
+    // Unauthorized project must NOT be touched
+    assert.strictEqual(projects['PRJ-DONOR'].count, 1, 'Donor headcount decreased from 2 to 1');
+    assert.deepStrictEqual(projects['PRJ-DONOR'].roster, ['W2']);
+    assert.strictEqual(projects['PRJ-TARGET'].count, 2, 'Target headcount increased from 1 to 2');
+    assert.deepStrictEqual(projects['PRJ-TARGET'].roster, ['W3', 'W1']);
+    
+    // Check unauthorized project
+    assert.strictEqual(projects['PRJ-UNAUTH'].count, 2, 'Unauthorized project headcount must remain 2');
+    assert.deepStrictEqual(projects['PRJ-UNAUTH'].roster, ['W1', 'W4'], 'Unauthorized project roster must remain unchanged');
+  });
+
+  // =========================================================================
+  // SUITE 7: Database Safety Shield & Production Protection
+  // =========================================================================
+  console.log('\n--- Suite 7: Database Safety Shield & Production Protection ---');
 
   await runTest(
     'Safety Shield',

@@ -394,10 +394,11 @@ workersRouter.delete('/:id', requireRole(['ADMIN']), async (req: Request, res: R
 });
 
 // ============================================================================
-// POST /api/workers/:id/assign — Assign worker to project
+// POST /api/workers/:id/assign — Assign worker to project (Transactional & Dual-Auth)
 // Allowed: ADMIN, ENGINEER
 // ============================================================================
 workersRouter.post('/:id/assign', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
+  const client = await pool.connect();
   try {
     const { id: workerId } = req.params;
     const { projectId, project_id } = req.body;
@@ -408,7 +409,7 @@ workersRouter.post('/:id/assign', requireRole(['ADMIN', 'ENGINEER']), async (req
     }
 
     // Resolve target project by ID or Name
-    const pMatch = await pool.query(
+    const pMatch = await client.query(
       'SELECT id, name, assigned_contractor_ids FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) LIMIT 1',
       [targetProject]
     );
@@ -418,51 +419,98 @@ workersRouter.post('/:id/assign', requireRole(['ADMIN', 'ENGINEER']), async (req
     const targetProj = pMatch.rows[0];
     const resolvedProjectId = targetProj.id;
 
+    // Verify Engineer permission for TARGET project
     if (!checkUserProjectAccess(req.user, resolvedProjectId)) {
-      return res.status(403).json({ error: 'You do not have access to assign workers to this project.' });
+      return res.status(403).json({ error: 'You do not have access to assign workers to this target project.' });
     }
 
-    // 1. Remove conflicting active assignments for this worker in other projects (prevent duplicate assignments)
-    await pool.query('DELETE FROM project_worker_assignments WHERE worker_id = $1 AND project_id != $2', [workerId, resolvedProjectId]);
+    await client.query('BEGIN');
+
+    // Fetch worker record and check for existing donor project
+    const workerRes = await client.query(
+      'SELECT id, assigned_project_id, status FROM workers WHERE id = $1 FOR UPDATE',
+      [workerId]
+    );
+
+    // If not found in workers table, check contractors table
+    if (workerRes.rows.length === 0) {
+      const contRes = await client.query('SELECT id, "activeProjectSite" FROM contractors WHERE id = $1', [workerId]);
+      if (contRes.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ error: 'Worker not found.' });
+      }
+    }
+
+    // Determine current active donor project from workers or project_worker_assignments
+    let donorProjectId: string | null = workerRes.rows[0]?.assigned_project_id || null;
+    if (!donorProjectId) {
+      const curAssignRes = await client.query(
+        'SELECT project_id FROM project_worker_assignments WHERE worker_id = $1 AND status = \'ACTIVE\' LIMIT 1',
+        [workerId]
+      );
+      if (curAssignRes.rows.length > 0) {
+        donorProjectId = curAssignRes.rows[0].project_id;
+      }
+    }
+
+    // Verify Engineer permission for DONOR project if transferring from another project
+    if (donorProjectId && donorProjectId !== resolvedProjectId) {
+      if (!checkUserProjectAccess(req.user, donorProjectId)) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ 
+          error: 'Forbidden: You do not have permission to transfer a worker from their current project.' 
+        });
+      }
+    }
+
+    // 1. Remove conflicting active assignments for this worker in other projects (prevent duplicate deployments)
+    await client.query(
+      'DELETE FROM project_worker_assignments WHERE worker_id = $1 AND project_id != $2',
+      [workerId, resolvedProjectId]
+    );
 
     const assignId = `PWA-${resolvedProjectId.slice(-4)}-${workerId.slice(-4)}`;
 
-    // 2. Upsert assignment in project_worker_assignments
-    await pool.query(`
+    // 2. Upsert assignment in project_worker_assignments for target project
+    await client.query(`
       INSERT INTO project_worker_assignments (id, project_id, worker_id, assigned_at, status)
       VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 'ACTIVE')
       ON CONFLICT (project_id, worker_id) DO UPDATE SET status = 'ACTIVE'
     `, [assignId, resolvedProjectId, workerId]);
 
     // 3. Update workers table assigned_project_id
-    await pool.query(
+    await client.query(
       'UPDATE workers SET assigned_project_id = $1, status = \'Active\', updated_at = CURRENT_TIMESTAMP WHERE id = $2',
       [resolvedProjectId, workerId]
     );
 
     // 4. Update contractors table activeProjectSite
-    await pool.query(
+    await client.query(
       'UPDATE contractors SET "activeProjectSite" = $1, "status" = \'ACTIVE\' WHERE id = $2',
       [targetProj.name, workerId]
     ).catch(() => {});
 
-    // 5. Update commercial_projects assigned_contractor_ids on target project
-    const curIds: string[] = targetProj.assigned_contractor_ids || [];
-    if (!curIds.includes(workerId)) {
-      const nextIds = [...curIds, workerId];
-      await pool.query(
-        'UPDATE commercial_projects SET assigned_contractor_ids = $1, assigned_workers_count = $2 WHERE id = $3',
-        [nextIds, nextIds.length, resolvedProjectId]
-      );
+    // 5. Update donor commercial_project roster and headcount if transferred (only if authorized)
+    if (donorProjectId && donorProjectId !== resolvedProjectId) {
+      await client.query(`
+        UPDATE commercial_projects 
+        SET assigned_contractor_ids = array_remove(COALESCE(assigned_contractor_ids, ARRAY[]::TEXT[]), $1),
+            assigned_workers_count = COALESCE(cardinality(array_remove(COALESCE(assigned_contractor_ids, ARRAY[]::TEXT[]), $1)), 0)
+        WHERE id = $2
+      `, [workerId, donorProjectId]);
     }
 
-    // 6. Remove worker from other commercial projects' assigned_contractor_ids
-    await pool.query(`
+    // 6. Update target commercial_project assigned_contractor_ids and assigned_workers_count
+    await client.query(`
       UPDATE commercial_projects 
-      SET assigned_contractor_ids = array_remove(assigned_contractor_ids, $1),
-          assigned_workers_count = GREATEST(0, assigned_workers_count - 1)
-      WHERE id != $2 AND $1 = ANY(assigned_contractor_ids)
+      SET assigned_contractor_ids = array_append(array_remove(COALESCE(assigned_contractor_ids, ARRAY[]::TEXT[]), $1), $1),
+          assigned_workers_count = COALESCE(cardinality(array_append(array_remove(COALESCE(assigned_contractor_ids, ARRAY[]::TEXT[]), $1), $1)), 0)
+      WHERE id = $2
     `, [workerId, resolvedProjectId]);
+
+    // Note: Do not alter unauthorized third-party projects; transfers strictly update authorized donor and target projects.
+
+    await client.query('COMMIT');
 
     broadcastChange('workers');
     broadcastChange('contractors');
@@ -471,21 +519,25 @@ workersRouter.post('/:id/assign', requireRole(['ADMIN', 'ENGINEER']), async (req
 
     res.json({ success: true, message: 'Worker assigned to project.', projectId: resolvedProjectId });
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Error assigning worker:', error);
     res.status(500).json({ error: 'Failed to assign worker' });
+  } finally {
+    client.release();
   }
 });
 
 // ============================================================================
-// DELETE /api/workers/:id/assign/:projectId — Unassign worker from project
+// DELETE /api/workers/:id/assign/:projectId — Unassign worker from project (Transactional)
 // Allowed: ADMIN, ENGINEER
 // ============================================================================
 workersRouter.delete('/:id/assign/:projectId', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
+  const client = await pool.connect();
   try {
     const { id: workerId, projectId } = req.params;
 
     // Resolve target project by ID or Name
-    const pMatch = await pool.query(
+    const pMatch = await client.query(
       'SELECT id, name FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) LIMIT 1',
       [projectId]
     );
@@ -496,33 +548,37 @@ workersRouter.delete('/:id/assign/:projectId', requireRole(['ADMIN', 'ENGINEER']
       return res.status(403).json({ error: 'You do not have access to unassign workers from this project.' });
     }
 
-    // 1. Delete assignment
-    await pool.query(
+    await client.query('BEGIN');
+
+    // 1. Delete assignment from project_worker_assignments
+    await client.query(
       `DELETE FROM project_worker_assignments WHERE worker_id = $1 AND project_id = $2`,
       [workerId, targetProjectId]
     );
 
-    // 2. Clear worker's assigned_project_id if it matched this project
-    await pool.query(
+    // 2. Clear worker's assigned_project_id if it matches this project
+    await client.query(
       `UPDATE workers SET assigned_project_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND assigned_project_id = $2`,
       [workerId, targetProjectId]
     );
 
     // 3. Clear contractor's activeProjectSite if pointing to this project
     if (targetProjName) {
-      await pool.query(
+      await client.query(
         `UPDATE contractors SET "activeProjectSite" = NULL WHERE id = $1 AND ("activeProjectSite" = $2 OR "activeProjectSite" = $3)`,
         [workerId, targetProjName, targetProjectId]
       ).catch(() => {});
     }
 
-    // 4. Remove from commercial_projects assigned_contractor_ids
-    await pool.query(`
+    // 4. Remove from commercial_projects assigned_contractor_ids and recalculate headcount from actual assigned IDs
+    await client.query(`
       UPDATE commercial_projects 
-      SET assigned_contractor_ids = array_remove(assigned_contractor_ids, $1),
-          assigned_workers_count = GREATEST(0, assigned_workers_count - 1)
+      SET assigned_contractor_ids = array_remove(COALESCE(assigned_contractor_ids, ARRAY[]::TEXT[]), $1),
+          assigned_workers_count = COALESCE(cardinality(array_remove(COALESCE(assigned_contractor_ids, ARRAY[]::TEXT[]), $1)), 0)
       WHERE id = $2
     `, [workerId, targetProjectId]);
+
+    await client.query('COMMIT');
 
     broadcastChange('workers');
     broadcastChange('contractors');
@@ -531,8 +587,11 @@ workersRouter.delete('/:id/assign/:projectId', requireRole(['ADMIN', 'ENGINEER']
 
     res.json({ success: true, message: 'Worker unassigned from project.' });
   } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Error unassigning worker:', error);
     res.status(500).json({ error: 'Failed to unassign worker' });
+  } finally {
+    client.release();
   }
 });
 

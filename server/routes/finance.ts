@@ -433,63 +433,126 @@ financeRouter.get('/payroll-records', requireRole(['FINANCE', 'ADMIN']), async (
   }
 });
 
-// POST /api/payroll/disburse
+// POST /api/payroll/disburse — Transactional single and batch disbursements
 financeRouter.post('/payroll/disburse', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
+  const { id, all } = req.body;
+  if (!all && !id) {
+    return res.status(400).json({ error: 'Missing payroll id or all parameter for disbursement.' });
+  }
+
+  const client = await pool.connect();
   try {
-    const { id, all } = req.body;
+    await client.query('BEGIN');
 
     if (all) {
-      await prisma.payrollRecord.updateMany({
-        where: { status: PayrollStatus.PENDING },
-        data: { status: PayrollStatus.DISBURSED }
-      });
-
-      await pool.query(`
+      await client.query(`
         UPDATE extended_payroll 
         SET status = 'Disbursed', disbursement_date = CURRENT_DATE 
         WHERE status IN ('Pending', 'Approved')
       `);
 
-      await pool.query(`
+      await client.query(`
         UPDATE payroll_runs 
         SET status = 'PAID', updated_at = CURRENT_TIMESTAMP 
         WHERE status = 'FINALIZED'
       `);
 
-      await prisma.processAuditLog.create({
-        data: {
-          entityType: 'PAYROLL',
-          entityId: 'ALL_BATCH',
-          action: 'PAYROLL_BATCH_DISBURSED',
-          actorName: req.user?.name || 'Finance Controller',
-          actorRole: req.user?.role || 'FINANCE',
-          details: 'Disbursed all pending contractor and site worker payroll records.',
-        }
-      }).catch(() => {});
-    } else if (id) {
-      const targetId = String(id);
-      if (targetId.startsWith('PAY-')) {
-        await pool.query(`UPDATE payroll_runs SET status = 'PAID', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [targetId]);
-        await pool.query(`UPDATE extended_payroll SET status = 'Disbursed', disbursement_date = CURRENT_DATE WHERE id LIKE $1`, [`EP-${targetId.slice(-6)}%`]);
-      } else if (targetId.startsWith('EP-')) {
-        await pool.query(`UPDATE extended_payroll SET status = 'Disbursed', disbursement_date = CURRENT_DATE WHERE id = $1`, [targetId]);
-      } else {
-        await prisma.payrollRecord.update({
-          where: { id: targetId },
-          data: { status: PayrollStatus.DISBURSED }
-        }).catch(() => {});
-      }
+      await client.query(`
+        UPDATE payroll_records 
+        SET status = 'DISBURSED', "updatedAt" = CURRENT_TIMESTAMP 
+        WHERE status = 'PENDING'
+      `);
 
-      await prisma.processAuditLog.create({
-        data: {
-          entityType: 'PAYROLL',
-          entityId: targetId,
-          action: 'PAYROLL_RECORD_DISBURSED',
-          actorName: req.user?.name || 'Finance Controller',
-          actorRole: req.user?.role || 'FINANCE',
-          details: `Disbursed payroll wage record ${targetId}.`,
+      await client.query(`
+        INSERT INTO process_audit_logs (id, "entityType", "entityId", action, "actorName", "actorRole", details, "createdAt")
+        VALUES ($1, 'PAYROLL', 'ALL_BATCH', 'PAYROLL_BATCH_DISBURSED', $2, $3, $4, CURRENT_TIMESTAMP)
+      `, [
+        `AUDIT-${Date.now()}`,
+        req.user?.name || 'Finance Controller',
+        req.user?.role || 'FINANCE',
+        'Disbursed all pending contractor and site worker payroll records.'
+      ]);
+
+      await client.query('COMMIT');
+    } else if (id) {
+      const targetId = String(id).trim();
+
+      if (targetId.startsWith('PAY-')) {
+        const runRes = await client.query('SELECT id, status FROM payroll_runs WHERE id = $1 FOR UPDATE', [targetId]);
+        if (runRes.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: `Payroll run ${targetId} not found.` });
         }
-      }).catch(() => {});
+
+        await client.query(`UPDATE payroll_runs SET status = 'PAID', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [targetId]);
+
+        // Exact payroll_run_id relationship matching — no LIKE wildcards
+        await client.query(`
+          UPDATE extended_payroll 
+          SET status = 'Disbursed', disbursement_date = CURRENT_DATE 
+          WHERE payroll_run_id = $1
+        `, [targetId]);
+
+        // Synchronize corresponding payment record with explicit parameter
+        await client.query(
+          `UPDATE payroll_records SET status = 'DISBURSED', "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1`,
+          [targetId]
+        );
+
+        await client.query(`
+          INSERT INTO process_audit_logs (id, "entityType", "entityId", action, "actorName", "actorRole", details, "createdAt")
+          VALUES ($1, 'PAYROLL', $2, 'PAYROLL_RECORD_DISBURSED', $3, $4, $5, CURRENT_TIMESTAMP)
+        `, [
+          `AUDIT-${Date.now()}`,
+          targetId,
+          req.user?.name || 'Finance Controller',
+          req.user?.role || 'FINANCE',
+          `Disbursed weekly payroll run ${targetId}.`
+        ]);
+
+        await client.query('COMMIT');
+      } else if (targetId.startsWith('EP-')) {
+        const epRes = await client.query('SELECT id, status FROM extended_payroll WHERE id = $1 FOR UPDATE', [targetId]);
+        if (epRes.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: `Extended payroll record ${targetId} not found.` });
+        }
+
+        // Exact extended payroll single item disbursement
+        await client.query(`UPDATE extended_payroll SET status = 'Disbursed', disbursement_date = CURRENT_DATE WHERE id = $1`, [targetId]);
+
+        await client.query(`
+          INSERT INTO process_audit_logs (id, "entityType", "entityId", action, "actorName", "actorRole", details, "createdAt")
+          VALUES ($1, 'PAYROLL', $2, 'PAYROLL_RECORD_DISBURSED', $3, $4, $5, CURRENT_TIMESTAMP)
+        `, [
+          `AUDIT-${Date.now()}`,
+          targetId,
+          req.user?.name || 'Finance Controller',
+          req.user?.role || 'FINANCE',
+          `Disbursed extended payroll record ${targetId}.`
+        ]);
+
+        await client.query('COMMIT');
+      } else {
+        const pRec = await client.query('SELECT id FROM payroll_records WHERE id = $1 FOR UPDATE', [targetId]);
+        if (pRec.rows.length > 0) {
+          await client.query(`UPDATE payroll_records SET status = 'DISBURSED', "updatedAt" = CURRENT_TIMESTAMP WHERE id = $1`, [targetId]);
+          await client.query(`
+            INSERT INTO process_audit_logs (id, "entityType", "entityId", action, "actorName", "actorRole", details, "createdAt")
+            VALUES ($1, 'PAYROLL', $2, 'PAYROLL_RECORD_DISBURSED', $3, $4, $5, CURRENT_TIMESTAMP)
+          `, [
+            `AUDIT-${Date.now()}`,
+            targetId,
+            req.user?.name || 'Finance Controller',
+            req.user?.role || 'FINANCE',
+            `Disbursed payroll wage record ${targetId}.`
+          ]);
+          await client.query('COMMIT');
+        } else {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ error: `Payroll record ${targetId} not found.` });
+        }
+      }
     }
 
     broadcastChange('payroll');
@@ -497,10 +560,13 @@ financeRouter.post('/payroll/disburse', requireRole(['FINANCE', 'ADMIN']), async
     broadcastChange('extendedPayroll');
     broadcastChange('projects');
     broadcastChange('auditLogs');
-    res.json({ success: true });
-  } catch (error) {
+    res.json({ success: true, message: 'Payroll disbursed successfully.' });
+  } catch (error: any) {
+    await client.query('ROLLBACK').catch(() => {});
     console.error('Error disbursing payroll:', error);
-    res.status(500).json({ error: 'Internal Server Error' });
+    res.status(500).json({ error: error?.message || 'Failed to disburse payroll' });
+  } finally {
+    client.release();
   }
 });
 

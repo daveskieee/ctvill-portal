@@ -48,28 +48,44 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
       dbProjectsQuery = 'SELECT * FROM commercial_projects WHERE id = ANY($1) ORDER BY created_at ASC';
       params.push(req.user.projectIds);
     }
-    // Pre-aggregate labor expenses from finalized or paid payroll runs
+    // Pre-aggregate labor expenses from finalized or paid payroll runs (distinguishing paid vs approved)
     const laborRes = await pool.query(
-      `SELECT project_id, COALESCE(SUM(total_gross), 0) as total_labor
+      `SELECT 
+         project_id, 
+         COALESCE(SUM(CASE WHEN status = 'PAID' THEN total_gross ELSE 0 END), 0) as paid_labor,
+         COALESCE(SUM(CASE WHEN status = 'FINALIZED' THEN total_gross ELSE 0 END), 0) as approved_labor,
+         COALESCE(SUM(total_gross), 0) as total_labor
        FROM payroll_runs 
        WHERE status IN ('FINALIZED', 'PAID') 
        GROUP BY project_id`
     ).catch(() => ({ rows: [] }));
-    const laborMap = new Map<string, number>();
+    const laborMap = new Map<string, { paid: number; approved: number; total: number }>();
     for (const r of laborRes.rows) {
-      laborMap.set(r.project_id, Number(r.total_labor || 0));
+      laborMap.set(r.project_id, {
+        paid: Number(r.paid_labor || 0),
+        approved: Number(r.approved_labor || 0),
+        total: Number(r.total_labor || 0)
+      });
     }
 
-    // Pre-aggregate subcontractor payables from approved or paid contractor billings
+    // Pre-aggregate subcontractor payables from approved or paid contractor billings (distinguishing paid vs approved)
     const subRes = await pool.query(
-      `SELECT project_site, COALESCE(SUM(COALESCE(disbursed_amount, approved_amount, billed_amount)), 0) as total_sub
+      `SELECT 
+         project_site, 
+         COALESCE(SUM(CASE WHEN status = 'PAID' THEN COALESCE(disbursed_amount, approved_amount, billed_amount) ELSE 0 END), 0) as paid_sub,
+         COALESCE(SUM(CASE WHEN status = 'APPROVED' THEN COALESCE(approved_amount, billed_amount) ELSE 0 END), 0) as approved_sub,
+         COALESCE(SUM(COALESCE(disbursed_amount, approved_amount, billed_amount)), 0) as total_sub
        FROM subcontractor_payables 
        WHERE status IN ('APPROVED', 'PAID') 
        GROUP BY project_site`
     ).catch(() => ({ rows: [] }));
-    const subMap = new Map<string, number>();
+    const subMap = new Map<string, { paid: number; approved: number; total: number }>();
     for (const r of subRes.rows) {
-      subMap.set(String(r.project_site).trim().toLowerCase(), Number(r.total_sub || 0));
+      subMap.set(String(r.project_site).trim().toLowerCase(), {
+        paid: Number(r.paid_sub || 0),
+        approved: Number(r.approved_sub || 0),
+        total: Number(r.total_sub || 0)
+      });
     }
 
     const dbProjects = await pool.query(dbProjectsQuery, params);
@@ -87,9 +103,11 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
           .catch(err => console.warn(`Failed to backfill coords for project ${p.id}:`, err));
       }
 
-      const laborExp = laborMap.get(p.id) || 0;
-      const subExp = subMap.get((p.name || '').trim().toLowerCase()) || subMap.get(p.id.toLowerCase()) || 0;
-      const totalExp = Number((laborExp + subExp).toFixed(2));
+      const laborInfo = laborMap.get(p.id) || { paid: 0, approved: 0, total: 0 };
+      const subInfo = subMap.get((p.name || '').trim().toLowerCase()) || subMap.get(p.id.toLowerCase()) || { paid: 0, approved: 0, total: 0 };
+      const paidExp = Number((laborInfo.paid + subInfo.paid).toFixed(2));
+      const approvedExp = Number((laborInfo.approved + subInfo.approved).toFixed(2));
+      const totalExp = Number((laborInfo.total + subInfo.total).toFixed(2));
 
       return {
         id: p.id,
@@ -99,8 +117,14 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
         location: p.location || '',
         budget: Number(p.budget || 0),
         fundsCollected: Number(p.funds_collected || 0),
-        laborExpenses: laborExp,
-        subcontractorExpenses: subExp,
+        laborExpenses: laborInfo.total,
+        paidLaborExpenses: laborInfo.paid,
+        approvedLaborExpenses: laborInfo.approved,
+        subcontractorExpenses: subInfo.total,
+        paidSubcontractorExpenses: subInfo.paid,
+        approvedSubcontractorExpenses: subInfo.approved,
+        paidExpenses: paidExp,
+        approvedExpenses: approvedExp,
         totalExpenses: totalExp,
         progressPercentage: Number(p.progress_percentage || 0),
         status: (Number(p.progress_percentage || 0) > 0 && p.status === 'PLANNING') ? 'IN_PROGRESS' : (p.status || 'IN_PROGRESS'),
@@ -713,21 +737,24 @@ projectsRouter.patch('/tasks/:id', requireRole(['ADMIN', 'ENGINEER']), async (re
     if (wbsCode !== undefined) data.wbsCode = wbsCode;
 
     if (progress !== undefined) {
-      const p = Number(progress);
-      data.progress = p;
-      if (status === undefined) {
-        if (p >= 1.0) data.status = 'COMPLETED';
-        else if (p > 0) data.status = 'IN_PROGRESS';
-        else data.status = 'TODO';
-      }
+      data.progress = Math.max(0, Math.min(1, Number(progress)));
     }
     if (status !== undefined) {
       data.status = status;
-      if (progress === undefined) {
-        if (status === 'COMPLETED') data.progress = 1.0;
-        else if (status === 'IN_PROGRESS') data.progress = 0.5;
-        else if (status === 'TODO' || status === 'BACKLOG') data.progress = 0.0;
-      }
+    }
+
+    // Bidirectionally reconcile status and progress
+    if (data.status === 'COMPLETED' && (data.progress === undefined || data.progress < 1.0)) {
+      data.progress = 1.0;
+    } else if (data.progress !== undefined && data.progress >= 1.0) {
+      data.status = 'COMPLETED';
+    } else if (data.progress !== undefined && data.progress < 1.0 && data.status === 'COMPLETED') {
+      data.status = data.progress > 0 ? 'IN_PROGRESS' : 'TODO';
+    } else if (data.status === undefined && data.progress !== undefined) {
+      data.status = data.progress > 0 ? 'IN_PROGRESS' : 'TODO';
+    } else if (data.progress === undefined && data.status !== undefined) {
+      if (data.status === 'IN_PROGRESS') data.progress = 0.5;
+      else if (data.status === 'TODO' || data.status === 'BACKLOG') data.progress = 0.0;
     }
 
     const task = await prisma.projectTask.update({

@@ -332,10 +332,14 @@ export async function initializeDatabaseTables() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
         CONSTRAINT uq_payroll_item UNIQUE (payroll_run_id, worker_id)
       );
+
+      -- Extended Payroll column enhancements for exact payroll_run_id matching
+      ALTER TABLE extended_payroll ADD COLUMN IF NOT EXISTS payroll_run_id TEXT;
     `);
 
     // High-performance database indexing (executed individually for schema resilience)
     const indexStatements = [
+      'CREATE INDEX IF NOT EXISTS idx_extended_payroll_run_id ON extended_payroll(payroll_run_id)',
       'CREATE INDEX IF NOT EXISTS idx_project_tasks_project_id ON project_tasks("projectId")',
       'CREATE INDEX IF NOT EXISTS idx_project_tasks_parent_id ON project_tasks("parentTaskId")',
       'CREATE INDEX IF NOT EXISTS idx_project_tasks_assigned_contractor ON project_tasks("assignedContractorId")',

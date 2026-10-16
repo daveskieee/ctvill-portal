@@ -651,7 +651,13 @@ export interface ProjectProfile {
   tasksCount: number;
   milestonesCount: number;
   laborExpenses?: number;
+  paidLaborExpenses?: number;
+  approvedLaborExpenses?: number;
   subcontractorExpenses?: number;
+  paidSubcontractorExpenses?: number;
+  approvedSubcontractorExpenses?: number;
+  paidExpenses?: number;
+  approvedExpenses?: number;
   totalExpenses?: number;
 }
 

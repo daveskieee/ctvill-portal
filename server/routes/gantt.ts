@@ -163,8 +163,15 @@ export function createGanttRouter(prisma: PrismaClient) {
               const startDate = startRaw ? new Date(startRaw) : new Date();
               const duration = Math.max(0, parseInt(String(effectiveData?.duration ?? 1), 10));
               const endDate = endRaw ? new Date(endRaw) : addWorkingDays(startDate, duration);
-              const progress = Math.max(0, Math.min(1, parseFloat(String(effectiveData?.progress ?? 0))));
-              const status = effectiveData?.status || (progress >= 1.0 ? 'COMPLETED' : progress > 0 ? 'IN_PROGRESS' : 'TODO');
+              let progress = Math.max(0, Math.min(1, parseFloat(String(effectiveData?.progress ?? 0))));
+              let status = effectiveData?.status;
+              if (status === 'COMPLETED' && (!effectiveData?.progress || progress < 1.0)) {
+                progress = 1.0;
+              } else if (progress >= 1.0) {
+                status = 'COMPLETED';
+              } else if (status === undefined) {
+                status = progress > 0 ? 'IN_PROGRESS' : 'TODO';
+              }
               const parentId = effectiveData?.parent && effectiveData.parent !== 0 && effectiveData.parent !== '0' 
                 ? String(effectiveData.parent) 
                 : (effectiveData?.parentTaskId ? String(effectiveData.parentTaskId) : null);
@@ -212,10 +219,17 @@ export function createGanttRouter(prisma: PrismaClient) {
                 const duration = effectiveData?.duration !== undefined ? Math.max(0, parseInt(String(effectiveData.duration), 10)) : 1;
                 const endDate = endRaw ? new Date(endRaw) : addWorkingDays(startDate, duration);
                 const hasExplicitProgress = effectiveData?.progress !== undefined;
-                const progress = hasExplicitProgress ? Math.max(0, Math.min(1, parseFloat(String(effectiveData.progress)))) : undefined;
-                const derivedStatus = progress !== undefined 
-                  ? (progress >= 1.0 ? 'COMPLETED' : (effectiveData?.status === 'COMPLETED' && progress < 1.0) ? (progress > 0 ? 'IN_PROGRESS' : 'TODO') : (effectiveData?.status || (progress > 0 ? 'IN_PROGRESS' : 'TODO'))) 
-                  : (effectiveData?.status !== undefined ? effectiveData.status : undefined);
+                let progress = hasExplicitProgress ? Math.max(0, Math.min(1, parseFloat(String(effectiveData.progress)))) : undefined;
+                let derivedStatus = effectiveData?.status;
+                if (derivedStatus === 'COMPLETED' && (progress === undefined || progress < 1.0)) {
+                  progress = 1.0;
+                } else if (progress !== undefined && progress >= 1.0) {
+                  derivedStatus = 'COMPLETED';
+                } else if (progress !== undefined && progress < 1.0 && derivedStatus === 'COMPLETED') {
+                  derivedStatus = progress > 0 ? 'IN_PROGRESS' : 'TODO';
+                } else if (derivedStatus === undefined && progress !== undefined) {
+                  derivedStatus = progress > 0 ? 'IN_PROGRESS' : 'TODO';
+                }
                 const parentId = effectiveData?.parent !== undefined 
                   ? (effectiveData.parent && effectiveData.parent !== 0 && effectiveData.parent !== '0' ? String(effectiveData.parent) : null) 
                   : (effectiveData?.parentTaskId !== undefined ? effectiveData.parentTaskId : undefined);

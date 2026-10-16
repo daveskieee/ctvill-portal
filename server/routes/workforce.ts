@@ -1963,10 +1963,12 @@ workforceRouter.post('/workforce/reallocate', requireRole(['ADMIN', 'ENGINEER'])
     });
 
     if (targetProjectId) {
-      await pool.query(
-        'UPDATE commercial_projects SET assigned_workers_count = assigned_workers_count + 1 WHERE id = $1',
-        [targetProjectId]
-      ).catch(() => {});
+      await pool.query(`
+        UPDATE commercial_projects 
+        SET assigned_contractor_ids = array_append(array_remove(COALESCE(assigned_contractor_ids, ARRAY[]::TEXT[]), $1), $1),
+            assigned_workers_count = COALESCE(cardinality(array_append(array_remove(COALESCE(assigned_contractor_ids, ARRAY[]::TEXT[]), $1), $1)), 0)
+        WHERE id = $2
+      `, [workerId, targetProjectId]).catch(() => {});
     }
 
     await prisma.processAuditLog.create({

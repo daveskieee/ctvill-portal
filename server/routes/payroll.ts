@@ -440,6 +440,18 @@ payrollRouter.post('/finalize', requireExactRole(['FINANCE']), async (req: Reque
       return res.status(403).json({ error: 'You do not have access to finalize payroll for this project.' });
     }
 
+    // Verify that this payroll run has not already been finalized and disbursed/paid
+    const existingRun = await pool.query(
+      `SELECT id, status FROM payroll_runs 
+       WHERE project_id = $1 AND period_start = $2::DATE AND period_end = $3::DATE LIMIT 1`,
+      [targetProject, startDate, endDate]
+    );
+    if (existingRun.rows.length > 0 && existingRun.rows[0].status === 'PAID') {
+      return res.status(400).json({ 
+        error: 'This payroll cycle has already been disbursed and paid. It cannot be re-finalized.' 
+      });
+    }
+
     // Strict Cycle Date Bounds Query Definition
     const attendanceQuery = {
       projectId: targetProject,
@@ -594,7 +606,7 @@ payrollRouter.post('/finalize', requireExactRole(['FINANCE']), async (req: Reque
 
       // 4b. Synchronize with extended_payroll ledger for executive payroll dashboard
       for (const item of calc.items) {
-        const epId = `EP-${runId.slice(-6)}-${item.workerId.slice(-4)}`;
+        const epId = `EP-${runId.replace(/^PAY-/, '')}-${item.workerId}`;
         const workerMatch = workers.find(w => w.id === item.workerId);
         const workerName = workerMatch ? `${workerMatch.firstName || ''} ${workerMatch.lastName || ''}`.trim() : 'Artisan';
         const role = workerMatch?.position || 'Artisan';
@@ -608,9 +620,10 @@ payrollRouter.post('/finalize', requireExactRole(['FINANCE']), async (req: Reque
 
         await client.query(`
           INSERT INTO extended_payroll 
-            (id, worker_name, contractor_company, project_name, role, hours_worked, days_worked, daily_rate, overtime_hours, gross_pay, deductions, net_pay, status, disbursement_date, payment_method, created_at)
-          VALUES ($1, $2, 'CTVill In-House Artisan Crew', $3, $4, $5, $6, $7, $8, $9, $10, $11, 'Approved', NULL, 'Bank Transfer', CURRENT_TIMESTAMP)
+            (id, payroll_run_id, worker_name, contractor_company, project_name, role, hours_worked, days_worked, daily_rate, overtime_hours, gross_pay, deductions, net_pay, status, disbursement_date, payment_method, created_at)
+          VALUES ($1, $2, $3, 'CTVill In-House Artisan Crew', $4, $5, $6, $7, $8, $9, $10, $11, $12, 'Approved', NULL, 'Bank Transfer', CURRENT_TIMESTAMP)
           ON CONFLICT (id) DO UPDATE SET
+            payroll_run_id = EXCLUDED.payroll_run_id,
             worker_name = EXCLUDED.worker_name,
             project_name = EXCLUDED.project_name,
             role = EXCLUDED.role,
@@ -622,7 +635,7 @@ payrollRouter.post('/finalize', requireExactRole(['FINANCE']), async (req: Reque
             deductions = EXCLUDED.deductions,
             net_pay = EXCLUDED.net_pay,
             status = EXCLUDED.status
-        `, [epId, workerName, projectName, role, hoursWorked, daysWorked, dailyRate, otHours, grossPay, deductions, netPay]);
+        `, [epId, runId, workerName, projectName, role, hoursWorked, daysWorked, dailyRate, otHours, grossPay, deductions, netPay]);
       }
 
       // 5. Create Process Audit Log
