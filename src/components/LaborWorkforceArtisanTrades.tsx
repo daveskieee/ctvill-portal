@@ -27,10 +27,10 @@ export interface LaborWorkforceArtisanTradesProps {
   projects: ProjectProfile[];
   aiRecommendations: AIManpowerRecommendation[];
   isAiScanning: boolean;
-  aiScanMessage: string;
+  aiScanMessage: string | null;
   handleTriggerAiScan: () => void;
-  onApplyAIRecommendation?: (recId: string) => void;
-  onDismissAIRecommendation?: (recId: string) => void;
+  onApplyAIRecommendation?: (recId: string) => Promise<any> | void;
+  onDismissAIRecommendation?: (recId: string) => Promise<any> | void;
   showAppliedRecsHistory: boolean;
   setShowAppliedRecsHistory: React.Dispatch<React.SetStateAction<boolean>>;
   totalManpower: number;
@@ -631,14 +631,18 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                 return 'Trade Deficit Offset';
               };
 
-              const handleDismissCard = (rec: AIManpowerRecommendation) => {
+              const handleDismissCard = async (rec: AIManpowerRecommendation) => {
                 const targetId = rec.id;
-                // Auto-replenish: remove dismissed item from queue
-                setRecommendationQueue(prev => prev.filter(r => r.id !== targetId));
-                if (onDismissAIRecommendation) {
-                  onDismissAIRecommendation(targetId);
+                try {
+                  if (onDismissAIRecommendation) {
+                    await onDismissAIRecommendation(targetId);
+                  }
+                  setRecommendationQueue(prev => prev.filter(r => r.id !== targetId));
+                  notify('Recommendation dismissed.');
+                } catch (err: any) {
+                  console.error('Failed to dismiss recommendation:', err);
+                  notify(`Failed to dismiss: ${err?.message || 'Server error'}`);
                 }
-                notify('AI recommendation dismissed. Feedback logged.');
               };
 
               const handleApproveCard = async (rec: AIManpowerRecommendation) => {
@@ -648,17 +652,17 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                   if (onApplyAIRecommendation) {
                     await onApplyAIRecommendation(targetId);
                   }
-                  // Append to history and remove from queue to auto-replenish next in line
+                  // Append to history and remove from queue ONLY after verified success
                   const acceptedItem: AIManpowerRecommendation = { ...rec, applied: true };
                   setAppliedTransfersHistory(prev => [acceptedItem, ...prev.filter(r => r.id !== targetId)]);
                   setRecommendationQueue(prev => prev.filter(r => r.id !== targetId));
 
                   const targetDisplay = rec.targetProjectName || rec.targetLots || 'Commercial Site';
                   const workerDisplay = rec.workerName || rec.contractorName;
-                  notify(`AI transfer approved: ${workerDisplay} reallocated to "${targetDisplay}".`);
-                } catch (err) {
+                  notify(`Workforce transfer approved: ${workerDisplay} reallocated to "${targetDisplay}".`);
+                } catch (err: any) {
                   console.error('Failed to approve reallocation:', err);
-                  notify('Failed to reallocate worker.');
+                  notify(`Failed to reallocate: ${err?.message || 'Database error'}`);
                 } finally {
                   setReallocatingId(null);
                 }
@@ -709,8 +713,8 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                                 ? 'bg-rose-950/70 text-rose-300 border-rose-800/80'
                                 : 'bg-indigo-950/70 text-indigo-300 border-indigo-800/80';
 
-                        // Fit/Confidence score
-                        const fitScore = (rec as any).fitScore || (isHigh ? 96 : isMed ? 92 : 88);
+                        // Fit/Confidence score (calculated by documented scoring method)
+                        const fitScore = typeof rec.confidenceScore === 'number' ? rec.confidenceScore : null;
 
                         // Origin & Target subtitles
                         const originSubtitle = rec.donorProjectName ? 'Standby Pool • Idle' : 'Standby Pool • Idle';
@@ -727,6 +731,18 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                               {/* 1. CARD HEADER */}
                               <div className="flex items-center justify-between gap-2">
                                 <div className="flex items-center gap-1.5 flex-wrap min-w-0">
+                                  {/* AI Transparency Badge */}
+                                  {rec.source === 'GEMINI_AI' ? (
+                                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border bg-indigo-950/80 text-indigo-300 border-indigo-700/80 flex items-center gap-1 shadow-xs">
+                                      <Sparkles className="w-3 h-3 text-indigo-400" />
+                                      <span>Gemini AI ({rec.aiModel || 'gemini-3.8-flash'})</span>
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border bg-slate-900 text-amber-300 border-amber-800/80 flex items-center gap-1 shadow-xs">
+                                      <Zap className="w-3 h-3 text-amber-400" />
+                                      <span>Rule-Based Fallback</span>
+                                    </span>
+                                  )}
                                   <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border tracking-wider ${priorityBadgeClass}`}>
                                     {priorityLabel}
                                   </span>
@@ -735,10 +751,15 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                                   </span>
                                 </div>
 
-                                <div className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 border border-emerald-800/80 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 shadow-xs">
-                                  <Sparkles className="w-3 h-3 text-emerald-400" />
-                                  <span>{fitScore}% Fit Score</span>
-                                </div>
+                                {fitScore !== null && (
+                                  <div 
+                                    className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 border border-emerald-800/80 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 shadow-xs"
+                                    title="Rule-based workforce fit score (0-100) derived from trade skill matching and site schedule urgency"
+                                  >
+                                    <Sparkles className="w-3 h-3 text-emerald-400" />
+                                    <span>Rule-Based Fit: {fitScore}/100</span>
+                                  </div>
+                                )}
                               </div>
 
                               {/* 2. WORKER PROFILE & ROUTE VISUALIZER */}
@@ -890,6 +911,10 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                                   <span className="truncate max-w-[45%] text-slate-300">{donorDisplay}</span>
                                   <ArrowRight className="w-3 h-3 text-emerald-400 shrink-0" />
                                   <span className="truncate max-w-[45%] text-teal-300 font-semibold">{targetDisplay}</span>
+                                </div>
+                                <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-1.5 border-t border-emerald-900/40">
+                                  <span className="text-emerald-400/80">{rec.source === 'GEMINI_AI' ? 'Source: Gemini AI' : 'Source: Rule-Based'}</span>
+                                  <span className="text-slate-400 truncate max-w-[50%]">{rec.approvedByUserName ? `By: ${rec.approvedByUserName}` : 'Approved'}</span>
                                 </div>
                               </div>
                             );

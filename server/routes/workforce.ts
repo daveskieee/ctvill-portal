@@ -566,9 +566,171 @@ workforceRouter.post('/labor-allocations', requireRole(['ADMIN', 'ENGINEER']), a
 // AI MANPOWER OPTIMIZATION & REALLOCATION
 // ============================================================================
 
+// Construction trade skill clusters for objective trade compatibility validation
+export function checkTradeCompatibility(workerSpecialtyOrRole: string, requiredTrade: string): boolean {
+  if (!workerSpecialtyOrRole || !workerSpecialtyOrRole.trim()) {
+    return false; // Reject unverified or missing worker skills
+  }
+  const w = workerSpecialtyOrRole.toLowerCase().trim();
+  if (w === 'unspecified' || w === 'unknown' || w === 'none' || w === 'general') {
+    return false; // Reject unverified or generic skills
+  }
+  if (!requiredTrade || !requiredTrade.trim()) {
+    return true; // Verified worker skill present with no specific trade constraint
+  }
+  const r = requiredTrade.toLowerCase().trim();
+
+  // Direct substring match
+  if (w.includes(r) || r.includes(w)) return true;
+
+  // Recognized trade taxonomy clusters
+  const clusters: { name: string; keywords: string[] }[] = [
+    { name: 'electrical', keywords: ['electric', 'wiring', 'cable', 'transformer', 'conduit', 'power'] },
+    { name: 'plumbing', keywords: ['plumb', 'pipe', 'drain', 'sanitary', 'valve', 'fixture'] },
+    { name: 'carpentry', keywords: ['carpent', 'millwork', 'cabinet', 'wood', 'framing', 'joiner'] },
+    { name: 'masonry', keywords: ['mason', 'brick', 'block', 'concrete', 'plaster', 'cement', 'civil'] },
+    { name: 'painting', keywords: ['paint', 'coating', 'varnish', 'finishing', 'primer', 'epoxy'] },
+    { name: 'welding', keywords: ['weld', 'steel', 'iron', 'fabricat', 'metal', 'rebar'] },
+    { name: 'tile', keywords: ['tile', 'flooring', 'grout', 'marble', 'granite'] },
+    { name: 'hvac', keywords: ['hvac', 'duct', 'aircon', 'mechanical', 'chiller', 'ventilation'] }
+  ];
+
+  for (const cluster of clusters) {
+    const workerInCluster = cluster.keywords.some(k => w.includes(k));
+    const reqInCluster = cluster.keywords.some(k => r.includes(k));
+    if (workerInCluster && reqInCluster) return true;
+    if (workerInCluster && !reqInCluster) {
+      // Worker belongs to this trade cluster, but requirement explicitly demands a different trade
+      const otherCluster = clusters.find(c => c.name !== cluster.name && c.keywords.some(k => r.includes(k)));
+      if (otherCluster) {
+        return false; // Mismatched trades (e.g. Electrician recommended for Masonry)
+      }
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Documented Manpower Recommendation Fit Scoring Methodology (0 - 100):
+ * - Base trade skill match: 70 points (verified trade qualification)
+ * - Schedule urgency: +15 points if target project is behind schedule
+ * - Idle labor recovery: +10 points if worker is in standby pool
+ * - Timeline compression: +5 points if donor project progress >= 80%
+ */
+export function calculateRecommendationFitScore(params: {
+  tradeMatch: boolean;
+  targetBehindSchedule: boolean;
+  isFromStandby: boolean;
+  donorProgress?: number;
+}): number {
+  let score = params.tradeMatch ? 70 : 50;
+  if (params.targetBehindSchedule) score += 15;
+  if (params.isFromStandby) score += 10;
+  if (params.donorProgress !== undefined && params.donorProgress >= 80) score += 5;
+  return Math.min(100, Math.max(50, score));
+}
+
+// Helper to validate a recommendation candidate's accuracy, trade compatibility, and ground-truth assignments
+export function validateRecommendationCandidate(
+  candidate: {
+    workerId: string;
+    targetProjectId: string;
+    donorProjectId?: string | null;
+    workerTrade?: string;
+  },
+  workerMap: Map<string, any>,
+  projectMap: Map<string, any>,
+  dismissedPairs: Set<string>
+): { valid: boolean; reason?: string } {
+  const { workerId, targetProjectId, donorProjectId, workerTrade } = candidate;
+
+  // 1. Worker Existence & Eligibility
+  const worker = workerMap.get(workerId);
+  if (!worker) {
+    return { valid: false, reason: `Worker ID "${workerId}" not found or inactive` };
+  }
+  const workerStatus = (worker.status || '').toUpperCase();
+  if (workerStatus === 'INACTIVE' || workerStatus === 'ON_LEAVE' || workerStatus === 'SUSPENDED') {
+    return { valid: false, reason: `Worker ${worker.name} is ${workerStatus}` };
+  }
+  if (!isEligibleForArtisanReallocation(worker)) {
+    return { valid: false, reason: `Worker ${worker.name} is corporate/PM/safety and not eligible for artisan trade reallocation` };
+  }
+
+  // 2. Verified Trade Skill Validation
+  const workerTradeStr = `${worker.specialty || ''} ${worker.roleTitle || ''}`.trim();
+  if (!workerTradeStr || workerTradeStr.toLowerCase() === 'unspecified' || workerTradeStr.toLowerCase() === 'none') {
+    return { valid: false, reason: `Worker ${worker.name} has unverified or missing trade skills` };
+  }
+  if (workerTrade) {
+    if (!checkTradeCompatibility(workerTradeStr, workerTrade)) {
+      return { 
+        valid: false, 
+        reason: `Worker trade skill (${worker.specialty || 'General'}) is incompatible with required trade (${workerTrade})` 
+      };
+    }
+  }
+
+  // 3. Target Project Existence & Status
+  const targetProj = projectMap.get(targetProjectId);
+  if (!targetProj) {
+    return { valid: false, reason: `Target project ID "${targetProjectId}" not found` };
+  }
+  const targetStatus = (targetProj.status || '').toUpperCase();
+  if (targetStatus === 'COMPLETED' || targetStatus === 'HANDED_OVER') {
+    return { valid: false, reason: `Target project "${targetProj.name}" is already ${targetStatus}` };
+  }
+
+  // 4. Prevent Self-Transfer / Circular Assignment
+  if (donorProjectId && donorProjectId === targetProjectId) {
+    return { valid: false, reason: 'Donor and target project are identical' };
+  }
+
+  // 5. Current Assignment & Donor Project Consistency
+  if (donorProjectId) {
+    const donorProj = projectMap.get(donorProjectId);
+    if (!donorProj) {
+      return { valid: false, reason: `Donor project ID "${donorProjectId}" does not exist in ground-truth active projects` };
+    }
+    if (worker.activeProjectSite && donorProj.name) {
+      const active = worker.activeProjectSite.toLowerCase().trim();
+      const donor = donorProj.name.toLowerCase().trim();
+      const donorIds: string[] = donorProj.assigned_contractor_ids || [];
+      if (!donorIds.includes(workerId) && !active.includes(donor) && !donor.includes(active)) {
+        return { valid: false, reason: `Worker ${worker.name} is currently assigned to "${worker.activeProjectSite}", not donor project "${donorProj.name}"` };
+      }
+    }
+  }
+
+  // 6. Prevent Redundant Assignment: Worker is already at target site
+  const assignedWorkerIds: string[] = targetProj.assigned_contractor_ids || [];
+  if (assignedWorkerIds.includes(workerId)) {
+    return { valid: false, reason: `Worker ${worker.name} is already assigned to target project "${targetProj.name}"` };
+  }
+  const activeSite = (worker.activeProjectSite || '').trim().toLowerCase();
+  const targetName = (targetProj.name || '').trim().toLowerCase();
+  if (activeSite && targetName && (activeSite === targetName || targetName.includes(activeSite))) {
+    return { valid: false, reason: `Worker ${worker.name} active site is already "${targetProj.name}"` };
+  }
+
+  // 7. Dismissal History Check
+  const pairKey = `${(worker.name || '').toLowerCase()}|${(targetProj.name || '').toLowerCase()}`;
+  if (dismissedPairs.has(pairKey)) {
+    return { valid: false, reason: `Recommendation for ${worker.name} to "${targetProj.name}" was previously dismissed` };
+  }
+
+  return { valid: true };
+}
+
 // GET /api/ai-recommendations
 workforceRouter.get('/ai-recommendations', async (req: Request, res: Response) => {
   try {
+    // Clients have zero access to workforce recommendations
+    if (req.user?.role === 'CLIENT') {
+      return res.json([]);
+    }
+
     const result = await pool.query('SELECT * FROM ai_manpower_recommendations WHERE dismissed = false ORDER BY created_at DESC');
     const recs = (result.rows || []).map(r => {
       // Derive concise category tag
@@ -601,12 +763,19 @@ workforceRouter.get('/ai-recommendations', async (req: Request, res: Response) =
         targetProjectName: r.target_project_name || r.target_lots,
         workerId: r.worker_id || r.contractor_id,
         workerName: r.worker_name || r.contractor_name,
-        tradeType: r.trade_type || 'Artisan'
+        tradeType: r.trade_type || 'Artisan',
+        source: (r.source === 'GEMINI_AI' ? 'GEMINI_AI' : 'RULE_BASED_FALLBACK') as 'GEMINI_AI' | 'RULE_BASED_FALLBACK',
+        aiModel: r.ai_model || (r.source === 'GEMINI_AI' ? 'gemini-3.8-flash' : 'heuristic-v1'),
+        ruleBasedFitScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,
+        confidenceScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,
+        approvedByUserId: r.approved_by_user_id || null,
+        approvedByUserName: r.approved_by_user_name || null,
+        appliedAt: r.applied_at ? (r.applied_at instanceof Date ? r.applied_at.toISOString() : String(r.applied_at)) : null
       };
     });
 
     // Exclude corporate office staff, PMs, and permanent safety inspectors (EHSO)
-    const filteredRecs = recs.filter(r => {
+    let filteredRecs = recs.filter(r => {
       const trade = (r.tradeType || '').toLowerCase();
       const worker = (r.workerName || '').toLowerCase();
       if (
@@ -626,6 +795,28 @@ workforceRouter.get('/ai-recommendations', async (req: Request, res: Response) =
       return true;
     });
 
+    // Role-based project scoping for engineers:
+    // Engineers must have permission for BOTH target and REAL donor projects
+    if (req.user?.role === 'ENGINEER') {
+      const workerProjectsRes = await pool.query(`
+        SELECT cp.id as project_id, unnest(cp.assigned_contractor_ids) as worker_id
+        FROM commercial_projects cp
+      `);
+      const workerRealProjectMap = new Map<string, string>();
+      for (const row of workerProjectsRes.rows) {
+        if (row.worker_id && row.project_id) {
+          workerRealProjectMap.set(row.worker_id, row.project_id);
+        }
+      }
+
+      filteredRecs = filteredRecs.filter(r => {
+        const hasTargetAccess = Boolean(r.targetProjectId && checkUserProjectAccess(req.user, r.targetProjectId));
+        const realDonorProjId = (r.workerId && workerRealProjectMap.get(r.workerId)) || r.donorProjectId;
+        const hasDonorAccess = !realDonorProjId || checkUserProjectAccess(req.user, realDonorProjId);
+        return hasTargetAccess && hasDonorAccess;
+      });
+    }
+
     res.json(filteredRecs);
   } catch (error) {
     console.error('Error fetching AI recommendations:', error);
@@ -634,59 +825,170 @@ workforceRouter.get('/ai-recommendations', async (req: Request, res: Response) =
 });
 
 // POST /api/labor-allocations/apply-ai-rec
+// ATOMIC TRANSACTION: Uses a dedicated PostgreSQL client with BEGIN/COMMIT/ROLLBACK and row-level locking (FOR UPDATE)
 workforceRouter.post('/labor-allocations/apply-ai-rec', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
+  const { recId } = req.body;
+  if (!recId) {
+    return res.status(400).json({ error: 'recId is required' });
+  }
+
+  const client = await pool.connect();
+
   try {
-    const { recId } = req.body;
-    const recRes = await pool.query('SELECT * FROM ai_manpower_recommendations WHERE id = $1', [recId]);
+    await client.query('BEGIN');
+
+    // 1. Lock the recommendation row to prevent concurrent race conditions or duplicate approvals
+    const recRes = await client.query(
+      'SELECT * FROM ai_manpower_recommendations WHERE id = $1 FOR UPDATE',
+      [recId]
+    );
+
     if (recRes.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Recommendation not found' });
     }
     const rec = recRes.rows[0];
-    await pool.query('UPDATE ai_manpower_recommendations SET applied = true WHERE id = $1', [recId]);
+
+    // Prevent duplicate application
+    if (rec.applied) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Recommendation has already been approved and applied' });
+    }
 
     const targetProjId = rec.target_project_id;
     const donorProjId = rec.donor_project_id;
     const targetWorkerId = rec.worker_id || rec.contractor_id;
 
-    if (targetProjId && targetWorkerId) {
-      const targetProjRes = await pool.query('SELECT * FROM commercial_projects WHERE id = $1', [targetProjId]);
-      if (targetProjRes.rows.length > 0) {
-        const targetProj = targetProjRes.rows[0];
-        const curIds: string[] = targetProj.assigned_contractor_ids || [];
-        if (!curIds.includes(targetWorkerId)) {
-          const nextIds = [...curIds, targetWorkerId];
-          await pool.query(
-            'UPDATE commercial_projects SET assigned_contractor_ids = $1, assigned_workers_count = $2 WHERE id = $3',
-            [nextIds, nextIds.length, targetProj.id]
-          );
-        }
-        await pool.query(
-          'UPDATE contractors SET "activeProjectSite" = $1, "status" = \'ACTIVE\' WHERE id = $2',
-          [targetProj.name, targetWorkerId]
-        );
-      }
+    if (!targetProjId || !targetWorkerId) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Recommendation is missing target project or worker ID' });
+    }
 
-      if (donorProjId && donorProjId !== targetProjId) {
-        const donorProjRes = await pool.query('SELECT * FROM commercial_projects WHERE id = $1', [donorProjId]);
-        if (donorProjRes.rows.length > 0) {
-          const donorProj = donorProjRes.rows[0];
-          const donorIds = (donorProj.assigned_contractor_ids || []).filter((id: string) => id !== targetWorkerId);
-          await pool.query(
-            'UPDATE commercial_projects SET assigned_contractor_ids = $1, assigned_workers_count = $2 WHERE id = $3',
-            [donorIds, donorIds.length, donorProj.id]
-          );
-        }
+    // 2. Validate worker exists in database and is active (with row lock)
+    const workerRes = await client.query('SELECT * FROM contractors WHERE id = $1 FOR UPDATE', [targetWorkerId]);
+    if (workerRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Worker no longer exists in database' });
+    }
+    const worker = workerRes.rows[0];
+    const workerStatus = (worker.status || '').toUpperCase();
+    if (workerStatus === 'INACTIVE' || workerStatus === 'ON_LEAVE' || workerStatus === 'SUSPENDED') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Worker ${worker.name} is currently ${workerStatus} and cannot be reallocated.` });
+    }
+    if (!isEligibleForArtisanReallocation(worker)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Worker ${worker.name} is not eligible for field artisan reallocation.` });
+    }
+
+    // Reject unverified or missing worker trade skills
+    const workerSkill = `${worker.specialty || ''} ${worker.roleTitle || ''}`.trim();
+    if (!workerSkill || workerSkill.toLowerCase() === 'unspecified' || workerSkill.toLowerCase() === 'none' || workerSkill.toLowerCase() === 'general') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Worker ${worker.name} has unverified trade skills and cannot be reallocated.` });
+    }
+    const requiredTrade = rec.trade_type || '';
+    if (requiredTrade && !checkTradeCompatibility(workerSkill, requiredTrade)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Worker trade skill (${worker.specialty || 'General'}) is incompatible with required trade (${requiredTrade}).` });
+    }
+
+    // 3. Derive worker's REAL donor project from ground-truth database records
+    const realDonorRes = await client.query(
+      `SELECT id, name FROM commercial_projects 
+       WHERE $1 = ANY(assigned_contractor_ids) 
+          OR (LOWER(name) = LOWER($2) AND LOWER($2) NOT IN ('standby', 'general standby pool', 'unassigned', '')) 
+       LIMIT 1`,
+      [targetWorkerId, (worker.activeProjectSite || '').trim()]
+    );
+    const realDonorProject = realDonorRes.rows[0] || null;
+    const effectiveDonorProjId = realDonorProject ? realDonorProject.id : (donorProjId || null);
+    const effectiveDonorProjName = realDonorProject ? realDonorProject.name : (rec.donor_project_name || 'General Standby Pool');
+
+    // 4. Role-based project authorization check for Engineers:
+    // Engineers must have explicit permission for BOTH target and REAL donor projects
+    if (req.user?.role === 'ENGINEER') {
+      if (!checkUserProjectAccess(req.user, targetProjId)) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Forbidden: You do not have authorization to approve workforce reallocations for target project.' });
+      }
+      if (effectiveDonorProjId && !checkUserProjectAccess(req.user, effectiveDonorProjId)) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: `Forbidden: You do not have authorization to reallocate workers from donor project "${effectiveDonorProjName}".` });
+      }
+      if (donorProjId && donorProjId !== effectiveDonorProjId && !checkUserProjectAccess(req.user, donorProjId)) {
+        await client.query('ROLLBACK');
+        return res.status(403).json({ error: 'Forbidden: You do not have authorization to reallocate workers from donor project.' });
       }
     }
 
-    await pool.query(`
+    // 5. Validate target project exists in database and is active (with row lock)
+    const targetProjRes = await client.query('SELECT * FROM commercial_projects WHERE id = $1 FOR UPDATE', [targetProjId]);
+    if (targetProjRes.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Target project no longer exists in database' });
+    }
+    const targetProj = targetProjRes.rows[0];
+    const targetStatus = (targetProj.status || '').toUpperCase();
+    if (targetStatus === 'COMPLETED' || targetStatus === 'HANDED_OVER') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ error: `Target project "${targetProj.name}" is already ${targetStatus}.` });
+    }
+
+    const approvingUserId = req.user?.id || 'admin';
+    const approvingUserName = req.user?.name || 'Administrator';
+    const approvingUserRole = req.user?.role || 'ADMIN';
+    const appliedTimestamp = new Date();
+
+    // 6. Mark recommendation as applied with approving user details
+    await client.query(
+      `UPDATE ai_manpower_recommendations 
+       SET applied = true, approved_by_user_id = $1, approved_by_user_name = $2, applied_at = $3 
+       WHERE id = $4`,
+      [approvingUserId, approvingUserName, appliedTimestamp, recId]
+    );
+
+    // 7. Apply allocation changes to target project
+    const curIds: string[] = targetProj.assigned_contractor_ids || [];
+    if (!curIds.includes(targetWorkerId)) {
+      const nextIds = [...curIds, targetWorkerId];
+      await client.query(
+        'UPDATE commercial_projects SET assigned_contractor_ids = $1, assigned_workers_count = $2 WHERE id = $3',
+        [nextIds, nextIds.length, targetProj.id]
+      );
+    }
+    await client.query(
+      'UPDATE contractors SET "activeProjectSite" = $1, "status" = \'ACTIVE\' WHERE id = $2',
+      [targetProj.name, targetWorkerId]
+    );
+
+    // 8. If worker had an active donor project, remove them from donor project's assigned list
+    if (effectiveDonorProjId && effectiveDonorProjId !== targetProjId) {
+      const donorProjRes = await client.query('SELECT * FROM commercial_projects WHERE id = $1 FOR UPDATE', [effectiveDonorProjId]);
+      if (donorProjRes.rows.length > 0) {
+        const donorProj = donorProjRes.rows[0];
+        const donorIds = (donorProj.assigned_contractor_ids || []).filter((id: string) => id !== targetWorkerId);
+        await client.query(
+          'UPDATE commercial_projects SET assigned_contractor_ids = $1, assigned_workers_count = $2 WHERE id = $3',
+          [donorIds, donorIds.length, donorProj.id]
+        );
+      }
+    }
+
+    // 9. Record audit entry in ai_workforce_learning_history within the same transaction
+    await client.query(`
       INSERT INTO ai_workforce_learning_history 
-      (id, recommendation_id, action, donor_project_name, target_project_name, worker_name, trade_type, headcount_change, rationale)
-      VALUES ($1, $2, 'ACCEPTED', $3, $4, $5, $6, $7, $8)
+      (id, recommendation_id, action, recommendation_source, approving_user_id, approving_user_name, approving_user_role, applied_at, donor_project_name, target_project_name, worker_name, trade_type, headcount_change, rationale)
+      VALUES ($1, $2, 'ACCEPTED', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     `, [
       `HIST-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       rec.id,
-      rec.donor_project_name || 'General Standby Pool',
+      rec.source || 'RULE_BASED_FALLBACK',
+      approvingUserId,
+      approvingUserName,
+      approvingUserRole,
+      appliedTimestamp,
+      effectiveDonorProjName,
       rec.target_project_name || rec.target_lots,
       rec.worker_name || rec.contractor_name,
       rec.trade_type || 'Artisan',
@@ -694,14 +996,47 @@ workforceRouter.post('/labor-allocations/apply-ai-rec', requireRole(['ADMIN', 'E
       rec.rationale
     ]);
 
+    // 10. Record system-wide process audit log within the transaction (MUST be atomic)
+    await client.query(`
+      INSERT INTO process_audit_logs (id, "entityType", "entityId", action, "actorName", "actorRole", details, "createdAt")
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `, [
+      `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      'WORKFORCE_REALLOCATION',
+      rec.id,
+      'AI_RECOMMENDATION_APPROVED',
+      approvingUserName,
+      approvingUserRole,
+      `Approved ${rec.source || 'AI'} workforce reallocation: transferred ${worker.name} (${rec.trade_type || worker.specialty}) from "${effectiveDonorProjName}" to "${targetProj.name}".`,
+      appliedTimestamp
+    ]);
+
+    // 11. Commit transaction atomically
+    await client.query('COMMIT');
+
     broadcastChange('projects');
     broadcastChange('contractors');
     broadcastChange('laborAllocations');
     broadcastChange('aiRecommendations');
-    res.json({ success: true });
+    broadcastChange('auditLogs');
+
+    res.json({ 
+      success: true, 
+      message: `Workforce reallocation successfully approved and recorded for ${worker.name}.`,
+      recommendation: {
+        id: rec.id,
+        applied: true,
+        approvedByUserId: approvingUserId,
+        approvedByUserName: approvingUserName,
+        appliedAt: appliedTimestamp.toISOString()
+      }
+    });
   } catch (error) {
-    console.error('Error applying AI recommendation:', error);
-    res.status(500).json({ error: 'Failed to apply recommendation' });
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('Error applying AI recommendation in transaction:', error);
+    res.status(500).json({ error: 'Failed to apply recommendation: transaction rolled back' });
+  } finally {
+    client.release();
   }
 });
 
@@ -709,20 +1044,65 @@ workforceRouter.post('/labor-allocations/apply-ai-rec', requireRole(['ADMIN', 'E
 workforceRouter.post('/ai-recommendations/dismiss', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { recId, reason } = req.body;
+    if (!recId) {
+      return res.status(400).json({ error: 'recId is required' });
+    }
+
     const recRes = await pool.query('SELECT * FROM ai_manpower_recommendations WHERE id = $1', [recId]);
     if (recRes.rows.length === 0) {
       return res.status(404).json({ error: 'Recommendation not found' });
     }
     const rec = recRes.rows[0];
+
+    // Cannot dismiss an already applied recommendation
+    if (rec.applied) {
+      return res.status(409).json({ error: 'Cannot dismiss a recommendation that has already been approved and applied' });
+    }
+
+    // Role-based project scoping for engineers on dismiss (derive real donor project)
+    if (req.user?.role === 'ENGINEER') {
+      const targetWorkerId = rec.worker_id || rec.contractor_id;
+      let realDonorProjId: string | null = rec.donor_project_id || null;
+      if (targetWorkerId) {
+        const workerRes = await pool.query('SELECT * FROM contractors WHERE id = $1', [targetWorkerId]).catch(() => ({ rows: [] }));
+        const worker = workerRes.rows[0];
+        const siteName = worker ? (worker.activeProjectSite || worker.active_project_site || '').trim() : '';
+        const realDonorRes = await pool.query(
+          `SELECT id FROM commercial_projects 
+           WHERE $1 = ANY(assigned_contractor_ids) 
+              OR (LOWER(name) = LOWER($2) AND LOWER($2) NOT IN ('standby', 'general standby pool', 'unassigned', '')) 
+           LIMIT 1`,
+          [targetWorkerId, siteName]
+        ).catch(() => ({ rows: [] }));
+        if (realDonorRes.rows.length > 0) {
+          realDonorProjId = realDonorRes.rows[0].id;
+        }
+      }
+
+      const hasTargetAccess = Boolean(rec.target_project_id && checkUserProjectAccess(req.user, rec.target_project_id));
+      const hasDonorAccess = !realDonorProjId || checkUserProjectAccess(req.user, realDonorProjId);
+      if (!hasTargetAccess || !hasDonorAccess) {
+        return res.status(403).json({ error: 'Forbidden: You do not have authorization to dismiss recommendations for this project.' });
+      }
+    }
+
     await pool.query('UPDATE ai_manpower_recommendations SET dismissed = true WHERE id = $1', [recId]);
+
+    const dismissingUserId = req.user?.id || 'admin';
+    const dismissingUserName = req.user?.name || 'Administrator';
+    const dismissingUserRole = req.user?.role || 'ADMIN';
 
     await pool.query(`
       INSERT INTO ai_workforce_learning_history 
-      (id, recommendation_id, action, donor_project_name, target_project_name, worker_name, trade_type, headcount_change, rationale, manager_notes)
-      VALUES ($1, $2, 'DISMISSED', $3, $4, $5, $6, $7, $8, $9)
+      (id, recommendation_id, action, recommendation_source, approving_user_id, approving_user_name, approving_user_role, applied_at, donor_project_name, target_project_name, worker_name, trade_type, headcount_change, rationale, manager_notes)
+      VALUES ($1, $2, 'DISMISSED', $3, $4, $5, $6, CURRENT_TIMESTAMP, $7, $8, $9, $10, $11, $12, $13)
     `, [
       `HIST-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       rec.id,
+      rec.source || 'RULE_BASED_FALLBACK',
+      dismissingUserId,
+      dismissingUserName,
+      dismissingUserRole,
       rec.donor_project_name || 'General Standby Pool',
       rec.target_project_name || rec.target_lots,
       rec.worker_name || rec.contractor_name,
@@ -733,7 +1113,7 @@ workforceRouter.post('/ai-recommendations/dismiss', requireRole(['ADMIN', 'ENGIN
     ]);
 
     broadcastChange('aiRecommendations');
-    res.json({ success: true });
+    res.json({ success: true, message: 'Recommendation dismissed.' });
   } catch (error) {
     console.error('Error dismissing AI recommendation:', error);
     res.status(500).json({ error: 'Failed to dismiss recommendation' });
@@ -743,15 +1123,49 @@ workforceRouter.post('/ai-recommendations/dismiss', requireRole(['ADMIN', 'ENGIN
 // POST /api/ai-recommendations/scan
 workforceRouter.post('/ai-recommendations/scan', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
-    // Ensure category_tag column exists
-    await pool.query('ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS category_tag TEXT;').catch(() => {});
+    // Ensure all required columns exist in database
+    await pool.query(`
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'RULE_BASED_FALLBACK';
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS ai_model TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS confidence_score NUMERIC DEFAULT 90;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS approved_by_user_id TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS approved_by_user_name TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS category_tag TEXT;
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS recommendation_source TEXT DEFAULT 'RULE_BASED_FALLBACK';
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_id TEXT;
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_name TEXT;
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_role TEXT;
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+    `).catch(() => {});
 
-    const dbProjectsRes = await pool.query('SELECT * FROM commercial_projects ORDER BY created_at ASC');
-    const dbContractors = await prisma.contractor.findMany({ where: { status: { not: 'INACTIVE' } } });
+    // Query active projects and available workforce
+    const dbProjectsRes = await pool.query(`
+      SELECT * FROM commercial_projects 
+      WHERE status NOT IN ('COMPLETED', 'HANDED_OVER') 
+      ORDER BY created_at ASC
+    `);
+    const dbContractors = await prisma.contractor.findMany({ 
+      where: { 
+        status: { notIn: ['INACTIVE', 'ON_LEAVE', 'SUSPENDED'] } 
+      } 
+    });
     const dbHistoryRes = await pool.query('SELECT * FROM ai_workforce_learning_history ORDER BY created_at DESC LIMIT 50');
 
-    const projects = dbProjectsRes.rows || [];
+    let projects = dbProjectsRes.rows || [];
     const learningHistory = dbHistoryRes.rows || [];
+
+    // Role-based project scoping for engineers:
+    // Engineers only scan and analyze projects they are explicitly assigned to
+    if (req.user?.role === 'ENGINEER') {
+      const allowed = new Set(req.user.projectIds || []);
+      projects = projects.filter((p: any) => allowed.has(p.id));
+      if (projects.length === 0) {
+        return res.status(403).json({ 
+          error: 'Forbidden: You have no assigned active projects to scan for recommendations.' 
+        });
+      }
+    }
 
     const dismissedPairs = new Set(
       learningHistory
@@ -759,17 +1173,32 @@ workforceRouter.post('/ai-recommendations/scan', requireRole(['ADMIN', 'ENGINEER
         .map((h: any) => `${(h.worker_name || '').toLowerCase()}|${(h.target_project_name || '').toLowerCase()}`)
     );
 
-    let newRecommendations: any[] = [];
-
     // Filter strictly for eligible trade artisans (excluding corporate staff, PMs, permanent safety inspectors)
     const eligibleWorkers = dbContractors.filter((c: any) => isEligibleForArtisanReallocation(c));
 
-    if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 20) {
+    // Fast lookup maps for strict validation
+    const workerMap = new Map<string, any>(eligibleWorkers.map(w => [w.id, w]));
+    const projectMap = new Map<string, any>(projects.map(p => [p.id, p]));
+
+    let newRecommendations: any[] = [];
+    let scanSource: 'GEMINI_AI' | 'RULE_BASED_FALLBACK' = 'RULE_BASED_FALLBACK';
+    const configuredModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+    let usedAiModel: string = 'heuristic-v1';
+    let aiErrorMessage: string | null = null;
+
+    // STEP 1: Attempt Gemini AI Recommendation Generation
+    if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 20 && projects.length > 0 && eligibleWorkers.length > 0) {
       try {
         const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         const prompt = `You are an expert Commercial Construction Workforce Optimization AI for CTVill Builders Corporation.
-Analyze active fit-out projects and artisan workforce to generate 6 to 12 targeted, actionable labor reallocation recommendations.
+Analyze active commercial fit-out projects and artisan workforce to generate 4 to 8 targeted, actionable labor reallocation recommendations.
 Only include field trade artisans and laborers. Strictly EXCLUDE corporate executives, office staff, finance, HR, legal, project managers (PMs), and permanent safety officers (EHSO).
+
+CRITICAL ACCURACY RULES:
+1. You MUST ONLY select workerId from the provided WORKFORCE ROSTER. Never invent or hallucinate worker IDs.
+2. You MUST ONLY select targetProjectId and donorProjectId from the provided ACTIVE PROJECTS list. Never invent project IDs.
+3. Never reallocate a worker to the site they are already working on.
+4. donorProjectId can be null if the worker is in standby or unassigned.
 
 ACTIVE PROJECTS:
 ${JSON.stringify(projects.map((p: any) => ({
@@ -782,7 +1211,7 @@ ${JSON.stringify(projects.map((p: any) => ({
   weatherSuspended: Boolean(p.weather_suspended)
 })))}
 
-WORKFORCE ROSTER (ARTISANS ONLY):
+WORKFORCE ROSTER (ELIGIBLE ARTISANS ONLY):
 ${JSON.stringify(eligibleWorkers.map((c: any) => ({
   id: c.id,
   name: c.name,
@@ -805,40 +1234,98 @@ Return a strict JSON array of objects with fields:
 - categoryTag: "Trade Deficit Offset" | "Idle Labor Mitigation" | "Timeline Compression" | "Critical Path Expedite"
 - priority: "HIGH" | "MEDIUM"
 `;
-        const response = await ai.models.generateContent({
-          model: 'gemini-3.6-flash',
-          contents: prompt,
-          config: { responseMimeType: 'application/json' }
-        });
-        if (response.text) {
-          const parsed = JSON.parse(response.text);
+        let responseText: string | null = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            const response = await ai.models.generateContent({
+              model: configuredModel,
+              contents: prompt,
+              config: { responseMimeType: 'application/json' }
+            });
+            if (response && response.text) {
+              responseText = response.text;
+              break;
+            }
+          } catch (callErr: any) {
+            const errStr = callErr?.message || String(callErr);
+            if (attempt < 3 && (errStr.includes('503') || errStr.includes('UNAVAILABLE') || errStr.includes('high demand'))) {
+              await new Promise(r => setTimeout(r, 1200 * attempt));
+              continue;
+            }
+            throw callErr;
+          }
+        }
+
+        if (responseText) {
+          const parsed = JSON.parse(responseText);
           if (Array.isArray(parsed) && parsed.length > 0) {
-            newRecommendations = parsed.map((item: any) => ({
-              id: `REC-GEMINI-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-              title: `Deploy ${item.workerName} (${item.tradeType}) to "${item.targetProjectName}"`,
-              donorProjectId: item.donorProjectId || null,
-              donorProjectName: item.donorProjectName || 'General Standby Pool',
-              targetProjectId: item.targetProjectId,
-              targetProjectName: item.targetProjectName,
-              workerId: item.workerId,
-              workerName: item.workerName,
-              tradeType: item.tradeType,
-              contractorId: item.workerId,
-              contractorName: item.workerName,
-              currentHeadcount: Number(item.currentHeadcount || 1),
-              recommendedHeadcount: Number(item.recommendedHeadcount || 3),
-              rationale: item.rationale,
-              categoryTag: item.categoryTag || 'Trade Deficit Offset',
-              priority: item.priority || 'MEDIUM'
-            }));
+            // Validate each Gemini-generated recommendation against ground-truth database
+            for (const item of parsed) {
+              const validation = validateRecommendationCandidate(
+                {
+                  workerId: item.workerId,
+                  targetProjectId: item.targetProjectId,
+                  donorProjectId: item.donorProjectId,
+                  workerTrade: item.tradeType
+                },
+                workerMap,
+                projectMap,
+                dismissedPairs
+              );
+
+              if (validation.valid) {
+                const verifiedWorker = workerMap.get(item.workerId)!;
+                const verifiedTarget = projectMap.get(item.targetProjectId)!;
+                const verifiedDonor = item.donorProjectId ? projectMap.get(item.donorProjectId) : null;
+
+                newRecommendations.push({
+                  id: `REC-GEMINI-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+                  title: `Deploy ${verifiedWorker.name} (${item.tradeType || verifiedWorker.specialty}) to "${verifiedTarget.name}"`,
+                  donorProjectId: verifiedDonor ? verifiedDonor.id : null,
+                  donorProjectName: verifiedDonor ? verifiedDonor.name : (item.donorProjectName || 'General Standby Pool'),
+                  targetProjectId: verifiedTarget.id,
+                  targetProjectName: verifiedTarget.name,
+                  workerId: verifiedWorker.id,
+                  workerName: verifiedWorker.name,
+                  tradeType: item.tradeType || verifiedWorker.specialty || 'Artisan',
+                  contractorId: verifiedWorker.id,
+                  contractorName: verifiedWorker.company || verifiedWorker.name,
+                  currentHeadcount: Number(item.currentHeadcount || verifiedWorker.activeManpower || 1),
+                  recommendedHeadcount: Number(item.recommendedHeadcount || (verifiedWorker.activeManpower || 1)),
+                  rationale: item.rationale || `Deploying ${verifiedWorker.name} reinforces critical fit-out timeline at ${verifiedTarget.name}.`,
+                  categoryTag: item.categoryTag || 'Trade Deficit Offset',
+                  priority: item.priority === 'HIGH' ? 'HIGH' : 'MEDIUM',
+                  source: 'GEMINI_AI',
+                  aiModel: configuredModel,
+                  confidenceScore: calculateRecommendationFitScore({
+                    tradeMatch: true,
+                    targetBehindSchedule: Boolean(verifiedTarget.weather_suspended || verifiedTarget.status === 'BEHIND_SCHEDULE'),
+                    isFromStandby: Boolean(!verifiedDonor || (verifiedDonor.name || '').toLowerCase().includes('standby')),
+                    donorProgress: verifiedDonor ? Number(verifiedDonor.progress_percentage || 0) : undefined
+                  })
+                });
+              } else {
+                console.log(`[Gemini Recommendation Discarded]: ${validation.reason}`);
+              }
+            }
+
+            if (newRecommendations.length > 0) {
+              scanSource = 'GEMINI_AI';
+              usedAiModel = configuredModel;
+            }
           }
         }
       } catch (geminiError: any) {
-        console.log('Gemini API bypassed, running local heuristic engine:', geminiError?.message || geminiError);
+        aiErrorMessage = geminiError?.message || String(geminiError);
+        console.log('Gemini API call failed, falling back to heuristic engine:', aiErrorMessage);
       }
     }
 
+    // STEP 2: Rule-Based Fallback Engine (when Gemini is unavailable or yields zero valid recommendations)
     if (newRecommendations.length === 0 && projects.length > 0 && eligibleWorkers.length > 0) {
+      scanSource = 'RULE_BASED_FALLBACK';
+      usedAiModel = 'heuristic-v1';
+
       const recipientProjects = projects.filter((p: any) => 
         p.status !== 'COMPLETED' && 
         p.status !== 'HANDED_OVER' &&
@@ -850,9 +1337,8 @@ Return a strict JSON array of objects with fields:
         return Number(a.progress_percentage || 0) - Number(b.progress_percentage || 0);
       });
 
-      // Generate a rich queue of 6-12 cross-project recommendations across eligible artisans
       const candidatePool = [...eligibleWorkers];
-      const maxQueueItems = Math.min(12, Math.max(6, candidatePool.length));
+      const maxQueueItems = Math.min(10, Math.max(4, candidatePool.length));
 
       for (let i = 0; i < candidatePool.length && newRecommendations.length < maxQueueItems; i++) {
         const worker = candidatePool[i] as any;
@@ -860,27 +1346,43 @@ Return a strict JSON array of objects with fields:
         const isStandby = !worker.activeProjectSite || worker.activeProjectSite === 'STANDBY' || worker.allocationStatus === 'STANDBY';
 
         // Find matching recipient project that is NOT the worker's current active site
-        const targetProj = recipientProjects.find((p: any) => 
-          !worker.activeProjectSite || p.name.toLowerCase().trim() !== worker.activeProjectSite.toLowerCase().trim()
-        ) || recipientProjects[i % Math.max(1, recipientProjects.length)];
+        const targetProj = recipientProjects.find((p: any) => {
+          if (!p || !p.id) return false;
+          if (worker.activeProjectSite && p.name.toLowerCase().trim() === worker.activeProjectSite.toLowerCase().trim()) {
+            return false;
+          }
+          const assignedIds: string[] = p.assigned_contractor_ids || [];
+          if (assignedIds.includes(worker.id)) {
+            return false;
+          }
+          return true;
+        }) || recipientProjects[i % Math.max(1, recipientProjects.length)];
 
         if (!targetProj) continue;
 
-        const pairKey = `${(worker.name || '').toLowerCase()}|${(targetProj.name || '').toLowerCase()}`;
-        if (dismissedPairs.has(pairKey)) {
-          continue;
-        }
-
+        // Strict validation check
         const donorProj = projects.find((p: any) => 
           worker.activeProjectSite && p.name && p.name.toLowerCase().trim() === worker.activeProjectSite.toLowerCase().trim()
         );
+        const donorId = donorProj ? donorProj.id : null;
+
+        const validation = validateRecommendationCandidate(
+          {
+            workerId: worker.id,
+            targetProjectId: targetProj.id,
+            donorProjectId: donorId,
+            workerTrade: trade
+          },
+          workerMap,
+          projectMap,
+          dismissedPairs
+        );
+
+        if (!validation.valid) continue;
 
         const donorName = donorProj ? donorProj.name : 'General Standby Pool';
-        const donorId = donorProj ? donorProj.id : null;
-        const targetProgress = Math.round(Number(targetProj.progress_percentage || 0));
         const isTargetBehind = targetProj.weather_suspended || targetProj.status === 'BEHIND_SCHEDULE';
 
-        // Concise Category Tags: "Idle Labor Mitigation" | "Timeline Compression" | "Critical Path Expedite" | "Trade Deficit Offset"
         let categoryTag = 'Trade Deficit Offset';
         let rationale = '';
 
@@ -924,19 +1426,40 @@ Return a strict JSON array of objects with fields:
           recommendedHeadcount: isCrew ? Math.max(2, (worker.activeManpower || 1) + 2) : 1,
           rationale,
           categoryTag,
-          priority
+          priority,
+          source: 'RULE_BASED_FALLBACK',
+          aiModel: 'heuristic-v1',
+          confidenceScore: calculateRecommendationFitScore({
+            tradeMatch: true,
+            targetBehindSchedule: Boolean(isTargetBehind),
+            isFromStandby: Boolean(isStandby),
+            donorProgress: donorProj ? Number(donorProj.progress_percentage || 0) : undefined
+          })
         });
       }
     }
 
-    await pool.query('DELETE FROM ai_manpower_recommendations WHERE applied = false OR dismissed = true');
+    // STEP 3: Clear unapplied recommendations within authorized scope only
+    if (req.user?.role === 'ADMIN') {
+      // Administrators may refresh the company-wide unapplied recommendation queue
+      await pool.query('DELETE FROM ai_manpower_recommendations WHERE applied = false OR dismissed = true');
+    } else if (req.user?.role === 'ENGINEER') {
+      // Engineers are strictly restricted from deleting or replacing company-wide recommendations
+      // They may only update unapplied recommendations for their assigned projects
+      const engProjectIds = req.user.projectIds || [];
+      await pool.query(
+        'DELETE FROM ai_manpower_recommendations WHERE (applied = false OR dismissed = true) AND target_project_id = ANY($1::text[])',
+        [engProjectIds]
+      );
+    }
 
     for (const rec of newRecommendations) {
       await pool.query(`
         INSERT INTO ai_manpower_recommendations 
         (id, title, target_lots, contractor_id, contractor_name, current_headcount, recommended_headcount, rationale, priority, applied, dismissed,
-         donor_project_id, donor_project_name, target_project_id, target_project_name, worker_id, worker_name, trade_type, category_tag)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, false, $10, $11, $12, $13, $14, $15, $16, $17)
+         donor_project_id, donor_project_name, target_project_id, target_project_name, worker_id, worker_name, trade_type, category_tag,
+         source, ai_model, confidence_score)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, false, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           target_lots = EXCLUDED.target_lots,
@@ -949,7 +1472,10 @@ Return a strict JSON array of objects with fields:
           worker_id = EXCLUDED.worker_id,
           worker_name = EXCLUDED.worker_name,
           trade_type = EXCLUDED.trade_type,
-          category_tag = EXCLUDED.category_tag
+          category_tag = EXCLUDED.category_tag,
+          source = EXCLUDED.source,
+          ai_model = EXCLUDED.ai_model,
+          confidence_score = EXCLUDED.confidence_score
       `, [
         rec.id,
         rec.title,
@@ -967,7 +1493,10 @@ Return a strict JSON array of objects with fields:
         rec.workerId,
         rec.workerName,
         rec.tradeType,
-        rec.categoryTag || 'Trade Deficit Offset'
+        rec.categoryTag || 'Trade Deficit Offset',
+        rec.source || 'RULE_BASED_FALLBACK',
+        rec.aiModel || 'heuristic-v1',
+        rec.confidenceScore || 88
       ]);
     }
 
@@ -995,11 +1524,25 @@ Return a strict JSON array of objects with fields:
       targetProjectName: r.target_project_name || r.target_lots,
       workerId: r.worker_id || r.contractor_id,
       workerName: r.worker_name || r.contractor_name,
-      tradeType: r.trade_type || 'Artisan'
+      tradeType: r.trade_type || 'Artisan',
+      source: (r.source === 'GEMINI_AI' ? 'GEMINI_AI' : 'RULE_BASED_FALLBACK') as 'GEMINI_AI' | 'RULE_BASED_FALLBACK',
+      aiModel: r.ai_model || (r.source === 'GEMINI_AI' ? configuredModel : 'heuristic-v1'),
+      ruleBasedFitScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,
+      confidenceScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,
+      approvedByUserId: r.approved_by_user_id || null,
+      approvedByUserName: r.approved_by_user_name || null,
+      appliedAt: r.applied_at ? (r.applied_at instanceof Date ? r.applied_at.toISOString() : String(r.applied_at)) : null
     }));
+
+    const statusMessage = scanSource === 'GEMINI_AI'
+      ? `Live AI Labor Optimization: ${returnedRecs.length} recommendations generated via Gemini AI (${usedAiModel}).`
+      : `Gemini AI service unavailable (${aiErrorMessage || 'rate limited / quota'}). ${returnedRecs.length} recommendations generated via Rule-Based Fallback engine.`;
 
     res.json({
       success: true,
+      source: scanSource,
+      aiModel: usedAiModel,
+      message: statusMessage,
       count: returnedRecs.length,
       recommendations: returnedRecs
     });

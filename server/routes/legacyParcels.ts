@@ -538,7 +538,14 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       targetProjectName: r.target_project_name || r.target_lots,
       workerId: r.worker_id || r.contractor_id,
       workerName: r.worker_name || r.contractor_name,
-      tradeType: r.trade_type || 'Artisan'
+      tradeType: r.trade_type || 'Artisan',
+      source: r.source || 'RULE_BASED_FALLBACK',
+      aiModel: r.ai_model || 'heuristic-v1',
+      ruleBasedFitScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,
+      confidenceScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,
+      approvedByUserId: r.approved_by_user_id || null,
+      approvedByUserName: r.approved_by_user_name || null,
+      appliedAt: r.applied_at ? (r.applied_at instanceof Date ? r.applied_at.toISOString() : String(r.applied_at)) : null
     }));
 
     const aiRecommendations = isFinanceOrAdmin

@@ -23,7 +23,7 @@ import {
   SESSION_INACTIVITY_LIMIT_MS 
 } from './utils/session';
 import { useInactivityTimeout } from './hooks/useInactivityTimeout';
-import { setupSecureFetch } from './utils/apiClient';
+import { setupSecureFetch, secureFetch, getCsrfToken } from './utils/apiClient';
 
 export default function App() {
   // --- DATABASE STATE MODULES ---
@@ -1054,90 +1054,58 @@ export default function App() {
     }
   };
 
-  // 16. Apply AI Labor Optimization Recommendation
-  const handleApplyAIRecommendation = async (recId: string) => {
+  // 16. Apply AI Labor Optimization Recommendation (Verified DB Application via Secure Client)
+  const handleApplyAIRecommendation = async (recId: string): Promise<boolean> => {
     const rec = aiRecommendations.find(r => r.id === recId);
-    if (!rec) return;
-
-    // Apply allocation changes
-    setLaborAllocations(prev => {
-      const match = prev.find(a => a.sectorName === rec.targetSector || a.contractorId === rec.contractorId);
-      if (match) {
-        return prev.map(a => a.id === match.id ? {
-          ...a,
-          assignedHeadcount: rec.recommendedHeadcount,
-          targetLots: rec.targetLots,
-          workScope: rec.suggestedScope,
-          notes: `Optimized via AI Assistant: ${rec.title}`,
-          updatedAt: new Date().toISOString().split('T')[0]
-        } : a);
-      } else {
-        const newAlloc: LaborAllocation = {
-          id: `ALLOC-${Date.now()}`,
-          contractorId: rec.contractorId,
-          contractorName: rec.contractorName,
-          sectorName: rec.targetSector,
-          targetLots: rec.targetLots,
-          assignedHeadcount: rec.recommendedHeadcount,
-          workScope: rec.suggestedScope,
-          status: 'ACTIVE',
-          notes: `Optimized via AI Assistant: ${rec.title}`,
-          updatedAt: new Date().toISOString().split('T')[0]
-        };
-        return [...prev, newAlloc];
-      }
-    });
-
-    // Mark AI recommendation as applied
-    setAiRecommendations(prev => prev.map(r => r.id === recId ? { ...r, applied: true } : r));
-
-    // Update contractor activeProjectSite and headcount in real-time
-    const targetWorkerId = rec.workerId || rec.contractorId;
-    if (rec.targetProjectName && targetWorkerId) {
-      setContractors(prev => prev.map(c => c.id === targetWorkerId ? {
-        ...c,
-        activeProjectSite: rec.targetProjectName,
-        status: 'ACTIVE',
-        activeManpower: rec.recommendedHeadcount || c.activeManpower
-      } : c));
-
-      if (rec.targetProjectId) {
-        setProjects(prev => prev.map(p => {
-          if (p.id === rec.targetProjectId) {
-            const curIds = p.assignedContractorIds || [];
-            const nextIds = curIds.includes(targetWorkerId) ? curIds : [...curIds, targetWorkerId];
-            return { ...p, assignedContractorIds: nextIds, assignedWorkersCount: nextIds.length };
-          }
-          if (rec.donorProjectId && p.id === rec.donorProjectId) {
-            const nextIds = (p.assignedContractorIds || []).filter(id => id !== targetWorkerId);
-            return { ...p, assignedContractorIds: nextIds, assignedWorkersCount: nextIds.length };
-          }
-          return p;
-        }));
-      }
-    }
+    if (!rec) return false;
 
     try {
-      await fetch('/api/labor-allocations/apply-ai-rec', {
+      const csrfToken = getCsrfToken();
+      const res = await secureFetch('/api/labor-allocations/apply-ai-rec', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
+        },
+        credentials: 'include',
         body: JSON.stringify({ recId })
       });
-    } catch (err) {
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to apply recommendation');
+      }
+
+      // Refresh actual database records rather than fabricating frontend allocation state
+      await reloadAllData();
+      return true;
+    } catch (err: any) {
       console.error('Failed to sync AI recommendation to database:', err);
+      throw err;
     }
   };
 
-  const handleDismissAIRecommendation = async (recId: string) => {
-    setAiRecommendations(prev => prev.filter(r => r.id !== recId));
+  const handleDismissAIRecommendation = async (recId: string): Promise<boolean> => {
     try {
-      await fetch('/api/ai-recommendations/dismiss', {
+      const csrfToken = getCsrfToken();
+      const res = await secureFetch('/api/ai-recommendations/dismiss', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
+        },
+        credentials: 'include',
         body: JSON.stringify({ recId })
       });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to dismiss recommendation');
+      }
+      // Refresh actual database state from server
+      await reloadAllData();
+      return true;
     } catch (err) {
       console.error('Failed to dismiss AI recommendation:', err);
+      throw err;
     }
   };
 
@@ -1830,18 +1798,33 @@ export default function App() {
     }
   };
 
-  const handleTriggerAiLaborScan = async () => {
+  const handleTriggerAiLaborScan = async (): Promise<{ success: boolean; message: string; source?: string }> => {
     try {
-      const res = await fetch('/api/ai-recommendations/scan', { method: 'POST' });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.recommendations && Array.isArray(data.recommendations)) {
-          setAiRecommendations(data.recommendations);
-        }
+      const csrfToken = getCsrfToken();
+      const res = await secureFetch('/api/ai-recommendations/scan', { 
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
+        },
+        credentials: 'include'
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'AI scan failed');
       }
-      reloadAllData();
-    } catch (err) {
+      if (data.recommendations && Array.isArray(data.recommendations)) {
+        setAiRecommendations(data.recommendations);
+      }
+      await reloadAllData();
+      return {
+        success: true,
+        message: data.message || `AI Optimization scan completed: ${data.count || 0} recommendations generated.`,
+        source: data.source
+      };
+    } catch (err: any) {
       console.error('Failed to trigger live AI labor scan:', err);
+      throw err;
     }
   };
 

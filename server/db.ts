@@ -121,6 +121,56 @@ export async function initializeDatabaseTables() {
         created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
       );
 
+      CREATE TABLE IF NOT EXISTS ai_manpower_recommendations (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        target_lots TEXT NOT NULL,
+        contractor_id TEXT NOT NULL,
+        contractor_name TEXT NOT NULL,
+        current_headcount INTEGER NOT NULL DEFAULT 1,
+        recommended_headcount INTEGER NOT NULL DEFAULT 1,
+        rationale TEXT NOT NULL,
+        priority TEXT DEFAULT 'MEDIUM',
+        applied BOOLEAN DEFAULT FALSE,
+        dismissed BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS ai_workforce_learning_history (
+        id TEXT PRIMARY KEY,
+        recommendation_id TEXT,
+        action TEXT NOT NULL,
+        donor_project_name TEXT,
+        target_project_name TEXT,
+        worker_name TEXT,
+        trade_type TEXT,
+        headcount_change INTEGER DEFAULT 0,
+        rationale TEXT,
+        manager_notes TEXT,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+      );
+
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'RULE_BASED_FALLBACK';
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS ai_model TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS confidence_score NUMERIC DEFAULT 90;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS approved_by_user_id TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS approved_by_user_name TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP WITH TIME ZONE;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS donor_project_id TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS donor_project_name TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS target_project_id TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS target_project_name TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS worker_id TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS worker_name TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS trade_type TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS category_tag TEXT;
+
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS recommendation_source TEXT DEFAULT 'RULE_BASED_FALLBACK';
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_id TEXT;
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_name TEXT;
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_role TEXT;
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
+
       ALTER TABLE contractors ADD COLUMN IF NOT EXISTS active_presence TEXT DEFAULT 'ONLINE';
 
       -- Extend Role enum with ENGINEER and TIMEKEEPER if needed

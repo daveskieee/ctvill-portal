@@ -426,6 +426,13 @@ export interface AIManpowerRecommendation {
   workerId?: string;
   workerName?: string;
   tradeType?: string;
+  source?: 'GEMINI_AI' | 'RULE_BASED_FALLBACK';
+  aiModel?: string;
+  ruleBasedFitScore?: number;
+  confidenceScore?: number;
+  approvedByUserId?: string;
+  approvedByUserName?: string;
+  appliedAt?: string;
 }
 
 export type ConstructionRole = 'Admin' | 'Engineer' | 'Timekeeper' | 'Finance';

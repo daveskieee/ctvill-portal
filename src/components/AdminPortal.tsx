@@ -30,6 +30,7 @@ import {
   isOfficeOrExecutive, isIndividualStaffOrEngineer, isTradeGroupOrOutsourcedContractor
 } from '../types';
 import { updateStoredSession } from '../utils/session';
+import { secureFetch, getCsrfToken } from '../utils/apiClient';
 import { 
   CTVILL_ORGANIZATION_HIERARCHY, ALL_CTVILL_DEPARTMENTS, 
   getRolesForDepartment, getDefaultDailyRate, getDepartmentBadge 
@@ -116,8 +117,8 @@ interface AdminPortalProps {
   onAddPayroll: (record: PayrollRecord) => void;
   onCreateManpowerAudit?: (auditData: any) => void;
   onSaveAllocation?: (alloc: LaborAllocation) => void;
-  onApplyAIRecommendation?: (recId: string) => void;
-  onDismissAIRecommendation?: (recId: string) => void;
+  onApplyAIRecommendation?: (recId: string) => Promise<any> | void;
+  onDismissAIRecommendation?: (recId: string) => Promise<any> | void;
   onAddTask?: (task: Omit<ProjectTask, 'id' | 'createdAt' | 'updatedAt'>) => void;
   onUpdateTaskStatus?: (taskId: string, status: TaskStatus) => void;
   onDeleteTask?: (taskId: string) => void;
@@ -153,7 +154,7 @@ interface AdminPortalProps {
   onAnswerRfi?: (id: string, answer: string, status: 'OPEN' | 'UNDER_REVIEW' | 'ANSWERED' | 'CLOSED') => Promise<void> | void;
   onUpdateQuotationStatus?: (id: string, status: any, notes?: string) => Promise<void> | void;
   onConvertQuotationToProject?: (quotation: FitoutQuotationItem) => Promise<void> | void;
-  onTriggerAiLaborScan?: () => Promise<void> | void;
+  onTriggerAiLaborScan?: () => Promise<any> | void;
   onLogManpowerAudit?: (auditData: any) => Promise<void> | void;
   onLogout: () => void;
   onUpdateSession?: (updated: any) => void;
@@ -1661,22 +1662,34 @@ export default function AdminPortal({
     setIsAiScanning(true);
     try {
       if (onTriggerAiLaborScan) {
-        await onTriggerAiLaborScan();
-        setAiScanMessage('Live AI Labor Optimization scan completed.');
-      } else {
-        const res = await fetch('/api/ai-recommendations/scan', { method: 'POST' });
-        if (res.ok) {
-          const data = await res.json();
-          setAiScanMessage(`Live AI Labor Scan completed: ${data.recommendationsGenerated || 3} optimization opportunities identified across ${data.scannedProjects || 4} projects.`);
+        const res: any = await onTriggerAiLaborScan();
+        if (res && res.message) {
+          setAiScanMessage(res.message);
         } else {
-          setAiScanMessage('AI Workforce Scan completed: Optimization models updated.');
+          setAiScanMessage('AI Workforce scan completed.');
+        }
+      } else {
+        const csrfToken = getCsrfToken();
+        const res = await secureFetch('/api/ai-recommendations/scan', { 
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
+          },
+          credentials: 'include'
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setAiScanMessage(data.message || `AI Labor Scan completed: ${data.count || 0} recommendations generated.`);
+        } else {
+          setAiScanMessage(`AI Scan failed: ${data.error || 'Server error'}`);
         }
       }
-    } catch {
-      setAiScanMessage('AI Workforce Scan completed.');
+    } catch (err: any) {
+      setAiScanMessage(`AI Scan failed: ${err?.message || 'Server connection error'}`);
     } finally {
       setIsAiScanning(false);
-      setTimeout(() => setAiScanMessage(null), 6000);
+      setTimeout(() => setAiScanMessage(null), 8000);
     }
   };
 
