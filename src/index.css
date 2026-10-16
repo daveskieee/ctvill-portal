@@ -385,25 +385,94 @@ html.light ::-webkit-scrollbar-thumb:hover {
 
 @keyframes pulseGlow {
   0%, 100% {
-    opacity: 0.4;
-    transform: scale(1);
+    opacity: 0.9;
   }
   50% {
-    opacity: 0.8;
-    transform: scale(1.05);
+    opacity: 1;
   }
 }
 
 .animate-fadeIn {
-  animation: fadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: fadeIn 0.2s ease-out forwards;
 }
 
 .animate-slideUp {
-  animation: slideUp 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: slideUp 0.25s ease-out forwards;
 }
 
 .animate-pulseGlow {
-  animation: pulseGlow 4s ease-in-out infinite;
+  animation: pulseGlow 3s ease-in-out infinite;
+}
+
+/* Minimalist ERP Component Utilities */
+.erp-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+html.dark .erp-card,
+html:not(.light) .erp-card {
+  background-color: #020617;
+  border-color: #1e293b;
+  box-shadow: none;
+}
+
+.erp-card:hover {
+  border-color: #cbd5e1;
+}
+
+html.dark .erp-card:hover,
+html:not(.light) .erp-card:hover {
+  border-color: #334155;
+}
+
+.erp-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 0.75rem;
+}
+
+.erp-table th {
+  padding: 0.625rem 0.75rem;
+  font-weight: 600;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #64748b;
+  border-bottom: 1px solid #e2e8f0;
+  background-color: #f8fafc;
+}
+
+html.dark .erp-table th,
+html:not(.light) .erp-table th {
+  color: #94a3b8;
+  border-color: #1e293b;
+  background-color: rgba(15, 23, 42, 0.6);
+}
+
+.erp-table td {
+  padding: 0.625rem 0.75rem;
+  border-bottom: 1px solid #f1f5f9;
+  color: #334155;
+}
+
+html.dark .erp-table td,
+html:not(.light) .erp-table td {
+  border-color: #1e293b;
+  color: #cbd5e1;
+}
+
+.erp-table tr:hover td {
+  background-color: #f8fafc;
+}
+
+html.dark .erp-table tr:hover td,
+html:not(.light) .erp-table tr:hover td {
+  background-color: rgba(15, 23, 42, 0.4);
 }
 
 /* Custom Sleek Scrollbar */

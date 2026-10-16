@@ -309,9 +309,9 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
             <button
               type="button"
               onClick={onRegisterClick}
-              className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl text-xs font-bold font-mono transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-md shadow-teal-600/20"
+              className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-semibold transition-colors inline-flex items-center gap-1.5 cursor-pointer"
             >
-              <Plus className="w-4 h-4" />
+              <Plus className="w-3.5 h-3.5" />
               <span>Register Worker</span>
             </button>
           </div>

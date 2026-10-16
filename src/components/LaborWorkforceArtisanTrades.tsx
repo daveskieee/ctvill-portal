@@ -157,22 +157,17 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
       {!isDedicatedAuditView && (
         <>
           {/* Top Header */}
-          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse"></span>
-                <span className="text-[10px] font-mono text-teal-400 font-bold uppercase tracking-wider">LIVE WORKFORCE OPERATIONS</span>
-              </div>
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                <Users className="w-6 h-6 text-teal-400" />
+              <h3 className="text-base font-bold text-white flex items-center gap-2">
+                <Users className="w-5 h-5 text-amber-400" />
                 Labor Workforce &amp; Artisan Trades
               </h3>
-              <p className="text-xs text-slate-400 mt-1">Verified site artisans, trade specialties, daily wage rates, active site deployments, and live attendance tracking.</p>
+              <p className="text-xs text-slate-400 mt-0.5">Verified site artisans, trade specialties, wage rates, active deployments, and attendance tracking.</p>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="bg-teal-950 border border-teal-800 text-teal-300 text-xs font-mono px-3 py-2 rounded-xl font-bold flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                <span>{totalManpower} Workers On-Site</span>
+            <div className="flex items-center gap-2">
+              <span className="bg-slate-900 border border-slate-800 text-slate-300 text-xs font-mono px-3 py-1.5 rounded-lg font-medium">
+                {totalManpower} Workers On-Site
               </span>
             </div>
           </div>

@@ -392,28 +392,22 @@ export default function TimekeeperAttendanceDashboard({
       )}
 
       {/* Top Banner / Attendance Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-amber-950/30 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <div className={`p-2 rounded-xl border ${
-              isTimekeeper 
-                ? 'bg-teal-500/10 border-teal-500/20 text-teal-400' 
-                : isPM 
-                ? 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400' 
-                : 'bg-amber-500/10 border-amber-500/20 text-amber-400'
-            }`}>
+            <div className="p-2 rounded-lg bg-slate-900 border border-slate-800 text-amber-400">
               <ClipboardCheck className="w-5 h-5" />
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg font-bold text-white tracking-tight">
-                  Daily In-House Artisan Roll-Call &amp; Timesheet (Direct Payroll)
+                <h1 className="text-base font-bold text-white tracking-tight">
+                  Daily In-House Artisan Roll-Call &amp; Timesheet
                 </h1>
-                <span className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded-full font-bold border ${
+                <span className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-medium border ${
                   isFinance
                     ? 'bg-blue-500/10 text-blue-300 border-blue-500/30'
                     : isDateLocked
-                    ? 'bg-slate-800 text-slate-400 border-slate-700/80 shadow-xs'
+                    ? 'bg-slate-800 text-slate-400 border-slate-700/80'
                     : isTimekeeper
                     ? 'bg-teal-500/10 text-teal-300 border-teal-500/30'
                     : isPM
@@ -421,33 +415,32 @@ export default function TimekeeperAttendanceDashboard({
                     : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
                 }`}>
                   {isFinance
-                    ? 'AUDIT & READ-ONLY (FINANCE)'
+                    ? 'AUDIT & READ-ONLY'
                     : isDateLocked
-                    ? 'OM OVERRIDE & AUDIT (FINALIZED & LOCKED)'
+                    ? 'LOCKED & FINALIZED'
                     : isTimekeeper
-                    ? 'TIMEKEEPER PORTAL'
+                    ? 'TIMEKEEPER'
                     : isPM
-                    ? 'PM ENDORSEMENT MODE'
-                    : 'OM OVERRIDE & AUDIT'}
+                    ? 'PM VERIFICATION'
+                    : 'OM OVERVIEW'}
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
                 {isTimekeeper
-                  ? 'Fast in-house artisan roll-call logging • Direct automated link to weekly payroll processing'
+                  ? 'Daily artisan roll-call logging • Verified timesheet records for weekly direct payroll'
                   : isPM
                   ? 'Review, verify, and endorse in-house artisan attendance logs for weekly direct payroll'
-                  : 'Company-wide in-house artisan attendance review, administrative back-fill, and payroll audit oversight'}
+                  : 'Company-wide in-house artisan attendance review, administrative back-fill, and payroll oversight'}
               </p>
             </div>
           </div>
         </div>
 
         {/* User Session Info Pill */}
-        <div className="flex items-center gap-3 self-end md:self-auto bg-slate-950/60 border border-slate-800 px-3.5 py-2 rounded-xl text-xs">
-          <div className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></div>
+        <div className="flex items-center gap-2.5 self-end md:self-auto bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-lg text-xs">
           <div className="text-right">
-            <div className="font-semibold text-white">{session?.name || (isTimekeeper ? 'Site Timekeeper' : isPM ? 'Site Project Manager' : 'Operations Manager')}</div>
-            <div className="text-[10px] text-slate-400 font-mono">Logged by: {session?.email || (isTimekeeper ? 'timekeeper@ctvill.com' : 'user@ctvill.com')}</div>
+            <div className="font-medium text-white">{session?.name || (isTimekeeper ? 'Site Timekeeper' : isPM ? 'Site Project Manager' : 'Operations Manager')}</div>
+            <div className="text-[10px] text-slate-400 font-mono">{session?.email || (isTimekeeper ? 'timekeeper@ctvill.com' : 'user@ctvill.com')}</div>
           </div>
         </div>
       </div>

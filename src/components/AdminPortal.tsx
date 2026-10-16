@@ -72,6 +72,119 @@ import {
   SiteDiarySkeleton,
 } from './skeletons';
 
+export const TAB_METADATA: Record<string, { title: string; subtitle: string; department: string }> = {
+  'dashboard': {
+    title: 'Executive Portfolio',
+    subtitle: 'Real-time overview of active fit-out sites, field workforce, and financial performance',
+    department: 'Projects & Planning'
+  },
+  'projects': {
+    title: 'Commercial Sites Hub',
+    subtitle: 'Manage commercial fit-out projects, scope, contracts, and assigned project teams',
+    department: 'Projects & Planning'
+  },
+  'gantt': {
+    title: 'Master Gantt & Timeline',
+    subtitle: 'Critical path schedule, phase dependencies, and completion milestone tracking',
+    department: 'Projects & Planning'
+  },
+  'kanban': {
+    title: 'Field Execution Kanban',
+    subtitle: 'Jobsite work breakdown structure, task status flow, and contractor assignments',
+    department: 'Projects & Planning'
+  },
+  'schedule': {
+    title: 'Company Schedule Calendar',
+    subtitle: 'Coordination calendar for site visits, inspections, milestones, and client handovers',
+    department: 'Projects & Planning'
+  },
+  'site-diary': {
+    title: 'Site Diary & Weather',
+    subtitle: 'Daily site observations, weather telemetry, safety notes, and on-site logs',
+    department: 'Field Operations'
+  },
+  'rfis': {
+    title: 'Engineering RFIs Register',
+    subtitle: 'Technical queries, architectural clarifications, and design coordination logs',
+    department: 'Field Operations'
+  },
+  'change-orders': {
+    title: 'Commercial Change Orders',
+    subtitle: 'Contract variations, client amendments, cost impact assessments, and approvals',
+    department: 'Field Operations'
+  },
+  'risks': {
+    title: 'Jobsite Safety & Risk Matrix',
+    subtitle: 'Proactive hazard identification, mitigation plans, and safety compliance audits',
+    department: 'Field Operations'
+  },
+  'contractors': {
+    title: 'Labor Workforce & Artisan Trades',
+    subtitle: 'Deploy and monitor trade groups, craft specialists, and equipment teams across sites',
+    department: 'Workforce & Labor'
+  },
+  'worker-masterlist': {
+    title: 'Worker Masterlist & Rates',
+    subtitle: 'Unified artisan roster, daily wage rates, overtime formulas, and project assignments',
+    department: 'Workforce & Labor'
+  },
+  'timekeeper-attendance': {
+    title: 'In-House Artisan Roll-Call',
+    subtitle: 'Daily site attendance logs, overtime tracking, and verified timesheet ledger',
+    department: 'Workforce & Labor'
+  },
+  'subcontractor-audits': {
+    title: 'Subcontractor Roll-Call Audits',
+    subtitle: 'Audited headcount verification against subcontractor billing claims',
+    department: 'Workforce & Labor'
+  },
+  'finance-payroll': {
+    title: 'Weekly Payroll & Disbursal',
+    subtitle: 'Automated wage calculation, deductions, statutory withholdings, and payout releases',
+    department: 'Finance & Commercial'
+  },
+  'subcontractor-payables': {
+    title: 'Subcontractor Payables',
+    subtitle: 'Contractor progress billings, retention balances, and disbursement vouchers',
+    department: 'Finance & Commercial'
+  },
+  'payments': {
+    title: 'Progress Billings & Receipts',
+    subtitle: 'Client payment milestones, billing collection pace, and commercial cashflow',
+    department: 'Finance & Commercial'
+  },
+  'quotation-leads': {
+    title: 'Fit-Out Estimates & Leads',
+    subtitle: 'Client project estimates, cost breakdowns, bill of quantities, and inquiries CRM',
+    department: 'Finance & Commercial'
+  },
+  'documents': {
+    title: 'Detailed Engineering & CAD',
+    subtitle: 'Central repository for architectural blueprints, structural plans, and MEPFS specs',
+    department: 'Design & Compliance'
+  },
+  'permits': {
+    title: 'PEZA & City Hall Permits',
+    subtitle: 'Statutory government clearances, building permits, and regulatory inspections',
+    department: 'Design & Compliance'
+  },
+  'audit-trail': {
+    title: 'Audit Trail & QA Logs',
+    subtitle: 'Immutable record of financial transactions, project edits, and compliance events',
+    department: 'Design & Compliance'
+  },
+  'account-settings': {
+    title: 'My Account & Security',
+    subtitle: 'Personal profile, session security, authentication credentials, and preferences',
+    department: 'System'
+  },
+  'operations-settings': {
+    title: 'Operations & System Settings',
+    subtitle: 'Global parameters, automated alerts, AI scan policies, and audit configurations',
+    department: 'System'
+  }
+};
+
 interface AdminPortalProps {
   parcels: LandParcel[];
   slots: Slot[];
@@ -1119,6 +1232,71 @@ export default function AdminPortal({
   const [searchClientQuery, setSearchClientQuery] = useState<string>('');
   const [clientKycSearchQuery, setClientKycSearchQuery] = useState<string>('');
 
+  // Global ERP Quick Search State & Command Palette
+  const [globalSearch, setGlobalSearch] = useState<string>('');
+  const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
+  const searchContainerRef = useRef<HTMLDivElement>(null);
+
+  // Global Keyboard Shortcut: Ctrl+K or Cmd+K
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        const inputEl = document.getElementById('global-erp-search');
+        inputEl?.focus();
+        setIsSearchFocused(true);
+      }
+      if (e.key === 'Escape') {
+        setIsSearchFocused(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  // Close search popover on outside click
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
+        setIsSearchFocused(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Filtered Quick Search Results for Header Command Palette
+  const filteredQuickModules = useMemo(() => {
+    if (!globalSearch.trim()) return [];
+    const q = globalSearch.toLowerCase();
+    return Object.entries(TAB_METADATA).filter(([id, meta]) => 
+      meta.title.toLowerCase().includes(q) ||
+      meta.subtitle.toLowerCase().includes(q) ||
+      meta.department.toLowerCase().includes(q) ||
+      id.toLowerCase().includes(q)
+    ).slice(0, 5);
+  }, [globalSearch]);
+
+  const filteredQuickProjects = useMemo(() => {
+    if (!globalSearch.trim()) return [];
+    const q = globalSearch.toLowerCase();
+    return projects.filter(p => 
+      (p.name && p.name.toLowerCase().includes(q)) ||
+      (p.location && p.location.toLowerCase().includes(q)) ||
+      (p.clientName && p.clientName.toLowerCase().includes(q))
+    ).slice(0, 4);
+  }, [globalSearch, projects]);
+
+  const filteredQuickContractors = useMemo(() => {
+    if (!globalSearch.trim()) return [];
+    const q = globalSearch.toLowerCase();
+    return contractors.filter(c =>
+      (c.name && c.name.toLowerCase().includes(q)) ||
+      (c.specialty && c.specialty.toLowerCase().includes(q)) ||
+      (c.company && c.company.toLowerCase().includes(q))
+    ).slice(0, 3);
+  }, [globalSearch, contractors]);
+
   // Selected Lot modal state for lifecycle advancement
   const [transitioningSlot, setTransitioningSlot] = useState<Slot | null>(null);
   const [transitionTargetStage, setTransitionTargetStage] = useState<string>('Reserved');
@@ -1798,52 +1976,41 @@ export default function AdminPortal({
   const sidebarSections = isTimekeeper ? [
     {
       id: 'tk-workforce',
-      title: 'WORKFORCE',
+      title: 'Workforce & Attendance',
       items: [
         { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call', icon: ClipboardCheck },
       ]
     },
     {
-      id: 'tk-user',
-      title: 'PROFILE',
+      id: 'tk-system',
+      title: 'System & Security',
       items: [
         { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
       ]
     }
   ] : isProjectManager ? [
     {
-      id: 'pm-engineering',
-      step: '01',
-      title: 'DESIGN & SPECS',
+      id: 'pm-schedule',
+      title: 'Projects & Schedule',
       items: [
-        { id: 'documents', label: 'Blueprints & MEPFS Specs', icon: FileCode },
+        { id: 'dashboard', label: 'Site Command Center', icon: HardHat },
+        { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
+        { id: 'gantt', label: 'Site Gantt Schedule', icon: BarChart3 },
+        { id: 'kanban', label: 'Field Kanban Tasks', icon: CheckSquare },
+        { id: 'schedule', label: 'Site Calendar & Visits', icon: CalendarDays },
+      ]
+    },
+    {
+      id: 'pm-operations',
+      title: 'Field Operations & Safety',
+      items: [
+        { id: 'site-diary', label: 'Daily Diary & Weather', icon: CloudSun },
         { 
           id: 'rfis', 
           label: 'Site RFI Register', 
           icon: FileSpreadsheet,
           badge: rfis.filter(r => r.status === 'OPEN').length > 0 ? `${rfis.filter(r => r.status === 'OPEN').length}` : undefined 
         },
-      ]
-    },
-    {
-      id: 'pm-schedule',
-      step: '02',
-      title: 'SITE SCHEDULE & TASKS',
-      items: [
-        { id: 'dashboard', label: 'Site Command Center', icon: HardHat },
-        { id: 'kanban', label: 'Field Kanban Tasks', icon: CheckSquare },
-        { id: 'gantt', label: 'Site Gantt Schedule', icon: BarChart3 },
-        { id: 'schedule', label: 'Site Calendar & Visits', icon: CalendarDays },
-      ]
-    },
-    {
-      id: 'pm-operations',
-      step: '03',
-      title: 'JOBSITE OPERATIONS',
-      items: [
-        { id: 'site-diary', label: 'Daily Diary & Weather', icon: CloudSun },
-        { id: 'timekeeper-attendance', label: 'In-House Artisan Attendance', icon: ClipboardCheck },
-        { id: 'contractors', label: 'Artisans & Roll-Call', icon: Users },
         { 
           id: 'change-orders', 
           label: 'Site Change Orders', 
@@ -1854,8 +2021,25 @@ export default function AdminPortal({
       ]
     },
     {
+      id: 'pm-workforce',
+      title: 'Workforce & Attendance',
+      items: [
+        { id: 'timekeeper-attendance', label: 'Artisan Roll-Call & Logs', icon: ClipboardCheck },
+        { id: 'contractors', label: 'Trade Crews & Foremen', icon: Users },
+      ]
+    },
+    {
+      id: 'pm-specs',
+      title: 'Design & Compliance',
+      items: [
+        { id: 'documents', label: 'Blueprints & MEPFS Specs', icon: FileCode },
+        { id: 'permits', label: 'PEZA & City Hall Permits', icon: FileCheck },
+        { id: 'audit-trail', label: 'Audit Trail & QA Logs', icon: History },
+      ]
+    },
+    {
       id: 'pm-system',
-      title: 'SYSTEM',
+      title: 'System & Security',
       items: [
         { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
       ]
@@ -1863,8 +2047,7 @@ export default function AdminPortal({
   ] : isFinance ? [
     {
       id: 'fin-treasury',
-      step: '01',
-      title: 'PAYROLL & TREASURY',
+      title: 'Finance & Commercial',
       items: [
         { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote },
         { id: 'subcontractor-payables', label: 'Subcontractor Payables', icon: Receipt },
@@ -1876,17 +2059,16 @@ export default function AdminPortal({
           icon: FileText,
           badge: changeOrders.filter(c => c.status === 'PENDING').length > 0 ? `${changeOrders.filter(c => c.status === 'PENDING').length}` : undefined 
         },
-        { id: 'audit-trail', label: 'Financial Audit Trail', icon: History },
       ]
     },
     {
       id: 'fin-sites',
-      step: '02',
-      title: 'COMMERCIAL SITES & AUDIT',
+      title: 'Commercial Sites & Audit',
       items: [
+        { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
         { id: 'timekeeper-attendance', label: 'In-House Attendance Records', icon: ClipboardCheck },
         { id: 'subcontractor-audits', label: 'Subcontractor Roll-Call Audits', icon: ShieldCheck },
-        { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
+        { id: 'worker-masterlist', label: 'Worker Masterlist & Rates', icon: Users },
         { 
           id: 'quotation-leads', 
           label: 'Quotation Estimates CRM', 
@@ -1894,106 +2076,20 @@ export default function AdminPortal({
           badge: quotations.filter(q => q.status === 'NEW_INQUIRY').length > 0 ? `${quotations.filter(q => q.status === 'NEW_INQUIRY').length}` : undefined 
         },
         { id: 'permits', label: 'PEZA & LGU Permits', icon: FileCheck },
+        { id: 'audit-trail', label: 'Financial Audit Trail', icon: History },
       ]
     },
     {
       id: 'fin-system',
-      title: 'SYSTEM',
-      items: [
-        { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
-      ]
-    }
-  ] : isProjectManager ? [
-    {
-      id: 'pre-con',
-      step: '01',
-      title: 'PRE-CON & DESIGN',
-      items: [
-        { 
-          id: 'quotation-leads', 
-          label: 'Fit-Out Estimates & Leads', 
-          icon: Briefcase,
-          badge: quotations.filter(q => q.status === 'NEW_INQUIRY').length > 0 ? `${quotations.filter(q => q.status === 'NEW_INQUIRY').length}` : undefined 
-        },
-        { id: 'documents', label: 'Detailed Engineering & CAD', icon: FileCode },
-        { id: 'permits', label: 'PEZA & City Hall Permits', icon: FileCheck },
-      ]
-    },
-    {
-      id: 'project-controls',
-      step: '02',
-      title: 'PROJECT CONTROLS & SCHEDULE',
-      items: [
-        { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
-        { id: 'gantt', label: 'Master Gantt & Timeline', icon: BarChart3 },
-        { id: 'kanban', label: 'Field Execution Kanban', icon: CheckSquare },
-        { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
-      ]
-    },
-    {
-      id: 'field-operations',
-      step: '03',
-      title: 'FIELD OPERATIONS & SAFETY',
-      items: [
-        { id: 'site-diary', label: 'Site Diary & Weather', icon: CloudSun },
-        { 
-          id: 'rfis', 
-          label: 'Engineering RFIs Register', 
-          icon: FileSpreadsheet,
-          badge: rfis.filter(r => r.status === 'OPEN').length > 0 ? `${rfis.filter(r => r.status === 'OPEN').length}` : undefined 
-        },
-        { 
-          id: 'change-orders', 
-          label: 'Commercial Change Orders', 
-          icon: FileText,
-          badge: changeOrders.filter(c => c.status === 'PENDING').length > 0 ? `${changeOrders.filter(c => c.status === 'PENDING').length}` : undefined 
-        },
-        { id: 'risks', label: 'Jobsite Safety & Risk Matrix', icon: ShieldAlert },
-      ]
-    },
-    {
-      id: 'workforce',
-      step: '04',
-      title: 'SITE WORKFORCE & ATTENDANCE',
-      items: [
-        { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call & Timesheet', icon: ClipboardCheck },
-      ]
-    },
-    {
-      id: 'closeout',
-      step: '05',
-      title: 'QA & CLOSEOUT',
-      items: [
-        { id: 'audit-trail', label: 'Audit Trail & QA Logs', icon: History },
-      ]
-    },
-    {
-      id: 'settings',
-      title: 'SYSTEM',
+      title: 'System & Security',
       items: [
         { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
       ]
     }
   ] : [
     {
-      id: 'pre-con',
-      step: '01',
-      title: 'PRE-CON & DESIGN',
-      items: [
-        { 
-          id: 'quotation-leads', 
-          label: 'Fit-Out Estimates & Leads', 
-          icon: Briefcase,
-          badge: quotations.filter(q => q.status === 'NEW_INQUIRY').length > 0 ? `${quotations.filter(q => q.status === 'NEW_INQUIRY').length}` : undefined 
-        },
-        { id: 'documents', label: 'Detailed Engineering & CAD', icon: FileCode },
-        { id: 'permits', label: 'PEZA & City Hall Permits', icon: FileCheck },
-      ]
-    },
-    {
-      id: 'project-controls',
-      step: '02',
-      title: 'PROJECT CONTROLS & SCHEDULE',
+      id: 'ops-projects',
+      title: 'Projects & Schedule',
       items: [
         { id: 'dashboard', label: 'Executive Portfolio', icon: TrendingUp },
         { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
@@ -2003,9 +2099,8 @@ export default function AdminPortal({
       ]
     },
     {
-      id: 'field-operations',
-      step: '03',
-      title: 'FIELD OPERATIONS & SAFETY',
+      id: 'ops-operations',
+      title: 'Field Operations & Safety',
       items: [
         { id: 'site-diary', label: 'Site Diary & Weather', icon: CloudSun },
         { 
@@ -2024,26 +2119,42 @@ export default function AdminPortal({
       ]
     },
     {
-      id: 'workforce',
-      step: '04',
-      title: 'WORKFORCE & PAYROLL',
+      id: 'ops-workforce',
+      title: 'Workforce & Labor',
       items: [
         { id: 'contractors', label: 'Labor Workforce & Artisan Trades', icon: Users },
-        { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call & Timesheet', icon: ClipboardCheck },
-        { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote },
+        { id: 'worker-masterlist', label: 'Worker Masterlist & Rates', icon: Users },
+        { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call', icon: ClipboardCheck },
+        { id: 'subcontractor-audits', label: 'Subcontractor Roll-Call Audits', icon: ShieldCheck },
       ]
     },
     {
-      id: 'closeout',
-      step: '05',
-      title: 'QA & CLOSEOUT',
+      id: 'ops-finance',
+      title: 'Finance & Commercial',
       items: [
+        { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote },
+        { id: 'subcontractor-payables', label: 'Subcontractor Payables', icon: Receipt },
+        { id: 'payments', label: 'Progress Billings & Receipts', icon: DollarSign },
+        { 
+          id: 'quotation-leads', 
+          label: 'Fit-Out Estimates & Leads', 
+          icon: Briefcase,
+          badge: quotations.filter(q => q.status === 'NEW_INQUIRY').length > 0 ? `${quotations.filter(q => q.status === 'NEW_INQUIRY').length}` : undefined 
+        },
+      ]
+    },
+    {
+      id: 'ops-design',
+      title: 'Design & Compliance',
+      items: [
+        { id: 'documents', label: 'Detailed Engineering & CAD', icon: FileCode },
+        { id: 'permits', label: 'PEZA & City Hall Permits', icon: FileCheck },
         { id: 'audit-trail', label: 'Audit Trail & QA Logs', icon: History },
       ]
     },
     {
-      id: 'settings',
-      title: 'SETTINGS & CONTROLS',
+      id: 'ops-settings',
+      title: 'System & Controls',
       items: [
         { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
         { id: 'operations-settings', label: 'Operations & System Settings', icon: Settings2 },
@@ -2060,55 +2171,170 @@ export default function AdminPortal({
           {/* Hideable Navigation Sidebar Toggle Button */}
           <button
             onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-1.5 sm:p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-amber-400 border border-slate-800 transition-all cursor-pointer flex items-center justify-center shrink-0"
+            className="p-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition-colors cursor-pointer flex items-center justify-center shrink-0"
             title={isSidebarOpen ? "Collapse Navigation Sidebar" : "Expand Navigation Sidebar"}
           >
             {isSidebarOpen ? <ChevronLeft className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
           </button>
 
           {/* Logo & Brand Identity */}
-          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            <div className="h-8 w-8 sm:h-9 sm:w-9 rounded-xl bg-black border border-slate-800 flex items-center justify-center shadow-lg overflow-hidden shrink-0">
+          <div className="flex items-center gap-2.5 shrink-0">
+            <div className="h-8 w-8 rounded-lg bg-black border border-slate-800 flex items-center justify-center overflow-hidden shrink-0">
               <img src={logoJpg} alt="CTVill Logo" className="w-full h-full object-cover" />
             </div>
             <div className="shrink-0">
-              <div className="flex items-center gap-1.5 sm:gap-2">
-                <h1 className="text-sm sm:text-base font-black text-white tracking-tight shrink-0 whitespace-nowrap">CTVILL</h1>
-                <span className={`hidden sm:inline-flex text-[8px] sm:text-[9px] font-mono px-1.5 sm:px-2 py-0.5 rounded-full uppercase font-bold border whitespace-nowrap shrink-0 ${
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-bold text-white tracking-tight">CTVILL</span>
+                <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-semibold border whitespace-nowrap ${
                   isTimekeeper
-                    ? 'bg-teal-500/15 border-teal-500/40 text-teal-300'
+                    ? 'bg-teal-500/10 border-teal-500/30 text-teal-300'
                     : isProjectManager
-                    ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300'
+                    ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300'
                     : isFinance
-                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
-                    : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                    ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
                 }`}>
-                  {isTimekeeper ? 'TIMEKEEPER' : isProjectManager ? 'PROJECT MANAGER' : isFinance ? 'FINANCE' : 'OPERATIONS MANAGER'}
+                  {isTimekeeper ? 'TIMEKEEPER' : isProjectManager ? 'PROJECT MANAGER' : isFinance ? 'FINANCE' : 'OPERATIONS'}
                 </span>
               </div>
-              <p className="text-[10px] text-slate-400 font-mono hidden md:block truncate">
-                {isTimekeeper
-                  ? 'Daily Site Attendance Roll-Call, Overtime Logging & Timesheet Verification'
-                  : isProjectManager
-                  ? `Field Execution & Jobsite Command • ${pmScopedProjects[0]?.name || 'Assigned Site'}`
-                  : isFinance
-                  ? 'Corporate Treasury, Automated Weekly Payroll & Cash Advances (Vale)'
-                  : 'Commercial Construction & Field Operations Directorate'}
-              </p>
             </div>
+          </div>
+
+          {/* Clean Department & Page Breadcrumb */}
+          <div className="hidden lg:flex items-center gap-2 pl-3 border-l border-slate-800 text-xs">
+            <span className="text-slate-500 font-medium">{TAB_METADATA[activeTab]?.department || 'Portal'}</span>
+            <ChevronRight className="w-3.5 h-3.5 text-slate-600" />
+            <span className="text-slate-200 font-semibold">{TAB_METADATA[activeTab]?.title || activeTab}</span>
           </div>
         </div>
 
-        {/* Global Action Bar */}
-        <div className="flex items-center gap-1.5 sm:gap-2.5 shrink-0">
-          {/* Timekeeper Current Date Badge */}
-          {isTimekeeper && (
-            <div className="hidden sm:flex items-center gap-2 bg-teal-950/60 border border-teal-500/40 px-3 py-1.5 rounded-xl text-xs font-mono text-teal-300 shadow-xs">
-              <Calendar className="w-3.5 h-3.5 text-teal-400" />
-              <span>Today: {new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
+        {/* Center: Global ERP Quick Search (`⌘K`) */}
+        <div className="flex-1 max-w-sm sm:max-w-md relative mx-2" ref={searchContainerRef}>
+          <div className="relative flex items-center">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 pointer-events-none" />
+            <input
+              id="global-erp-search"
+              type="text"
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+              onFocus={() => setIsSearchFocused(true)}
+              placeholder="Search modules, sites, trade partners..."
+              className="w-full bg-slate-900/90 hover:bg-slate-900 focus:bg-slate-900 border border-slate-800 focus:border-amber-500/50 rounded-lg pl-8 pr-12 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none transition-colors"
+            />
+            <div className="absolute right-2 flex items-center pointer-events-none">
+              <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono text-slate-500 bg-slate-800 rounded border border-slate-700">⌘K</kbd>
+            </div>
+          </div>
+
+          {/* Quick Search Dropdown Palette */}
+          {isSearchFocused && (
+            <div className="absolute top-full left-0 right-0 mt-1.5 bg-slate-950 border border-slate-800 rounded-lg shadow-2xl overflow-hidden z-50 text-xs max-h-96 overflow-y-auto">
+              {!globalSearch.trim() ? (
+                <div className="p-2 space-y-1">
+                  <div className="px-2 py-1 text-[10px] font-mono uppercase text-slate-500 tracking-wider font-semibold">Quick Jump</div>
+                  {quickJumpModules.slice(0, 5).map((mod) => (
+                    <button
+                      key={mod.id}
+                      type="button"
+                      onClick={() => {
+                        setActiveTab(mod.id);
+                        setIsSearchFocused(false);
+                      }}
+                      className="w-full flex items-center justify-between px-2.5 py-1.5 rounded hover:bg-slate-900 text-slate-300 hover:text-white transition-colors cursor-pointer text-left"
+                    >
+                      <span className="font-medium">{mod.label}</span>
+                      <span className="text-[10px] text-slate-500">{mod.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-2 space-y-2">
+                  {filteredQuickModules.length > 0 && (
+                    <div>
+                      <div className="px-2 py-0.5 text-[10px] font-mono uppercase text-slate-500 tracking-wider font-semibold">Modules</div>
+                      {filteredQuickModules.map(([id, meta]) => (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => {
+                            setActiveTab(id);
+                            setIsSearchFocused(false);
+                            setGlobalSearch('');
+                          }}
+                          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded hover:bg-slate-900 text-slate-300 hover:text-white transition-colors cursor-pointer text-left"
+                        >
+                          <div>
+                            <span className="font-medium text-amber-400">{meta.title}</span>
+                            <span className="text-slate-500 text-[11px] block">{meta.subtitle}</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400 bg-slate-900 px-1.5 py-0.5 rounded border border-slate-800">{meta.department}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {filteredQuickProjects.length > 0 && (
+                    <div>
+                      <div className="px-2 py-0.5 text-[10px] font-mono uppercase text-slate-500 tracking-wider font-semibold">Commercial Sites</div>
+                      {filteredQuickProjects.map((p) => (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveTab('projects');
+                            setIsSearchFocused(false);
+                            setGlobalSearch('');
+                          }}
+                          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded hover:bg-slate-900 text-slate-300 hover:text-white transition-colors cursor-pointer text-left"
+                        >
+                          <span className="font-medium">{p.name}</span>
+                          <span className="text-[10px] text-slate-500">{p.location || p.status}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {filteredQuickContractors.length > 0 && (
+                    <div>
+                      <div className="px-2 py-0.5 text-[10px] font-mono uppercase text-slate-500 tracking-wider font-semibold">Workforce & Trades</div>
+                      {filteredQuickContractors.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveTab('contractors');
+                            setIsSearchFocused(false);
+                            setGlobalSearch('');
+                          }}
+                          className="w-full flex items-center justify-between px-2.5 py-1.5 rounded hover:bg-slate-900 text-slate-300 hover:text-white transition-colors cursor-pointer text-left"
+                        >
+                          <span className="font-medium">{c.name}</span>
+                          <span className="text-[10px] text-slate-500">{c.specialty || c.company}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {filteredQuickModules.length === 0 && filteredQuickProjects.length === 0 && filteredQuickContractors.length === 0 && (
+                    <div className="py-4 text-center text-slate-500 text-xs">
+                      No matching modules, projects, or personnel found.
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
+        </div>
 
+        {/* Global Action Bar */}
+        <div className="flex items-center gap-2 shrink-0">
+          {/* Timekeeper Current Date Badge */}
+          {isTimekeeper && (
+            <div className="hidden sm:flex items-center gap-1.5 bg-teal-950/40 border border-teal-500/30 px-2.5 py-1 rounded-md text-xs font-mono text-teal-300">
+              <Calendar className="w-3.5 h-3.5 text-teal-400" />
+              <span>{new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}</span>
+            </div>
+          )}
 
           <ThemeToggle />
 
@@ -2128,7 +2354,7 @@ export default function AdminPortal({
             >
               <Bell className="w-4 h-4" />
               {unreadNotificationCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white font-black text-[9px] flex items-center justify-center shadow-xs animate-pulse">
+                <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-red-500 text-white font-black text-[9px] flex items-center justify-center shadow-xs">
                   {unreadNotificationCount > 9 ? '9+' : unreadNotificationCount}
                 </span>
               )}
@@ -2136,7 +2362,7 @@ export default function AdminPortal({
 
             {isNotificationOpen && (
               <div
-                className={`fixed sm:absolute top-14 sm:top-auto left-2 right-2 sm:left-auto sm:right-0 mt-0 sm:mt-2 sm:w-96 max-w-sm mx-auto sm:mx-0 rounded-2xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md animate-in fade-in zoom-in-95 duration-150 ${
+                className={`fixed sm:absolute top-14 sm:top-auto left-2 right-2 sm:left-auto sm:right-0 mt-0 sm:mt-2 sm:w-96 max-w-sm mx-auto sm:mx-0 rounded-xl border shadow-2xl z-50 overflow-hidden backdrop-blur-md animate-in fade-in zoom-in-95 duration-150 ${
                   isDark
                     ? 'bg-slate-950/95 border-slate-800 text-slate-200'
                     : 'bg-white/95 border-slate-200 text-slate-800'
@@ -2296,30 +2522,30 @@ export default function AdminPortal({
 
           <button
             onClick={() => setActiveTab('account-settings')}
-            className={`flex items-center gap-2 p-1.5 sm:px-3 sm:py-1.5 rounded-lg border text-xs font-semibold transition-all cursor-pointer shrink-0 ${
+            className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors cursor-pointer shrink-0 ${
               activeTab === 'account-settings'
-                ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
                 : 'bg-slate-900 border-slate-800 text-slate-300 hover:text-white hover:border-slate-700'
             }`}
             title="Account Settings"
           >
-            <div className="w-6 h-6 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-black text-[10px] overflow-hidden border border-amber-500/40 shrink-0">
+            <div className="w-5 h-5 rounded-full bg-slate-800 text-amber-400 flex items-center justify-center font-bold text-[10px] overflow-hidden border border-slate-700 shrink-0">
               {avatarUrl ? (
                 <img src={avatarUrl} alt={profileName} className="w-full h-full object-cover" />
               ) : (
                 <span>{getInitials(profileName)}</span>
               )}
             </div>
-            <span className="hidden md:inline">Account Settings</span>
+            <span className="hidden sm:inline font-medium">{profileName.split(' ')[0] || 'User'}</span>
           </button>
 
           <button
             onClick={onLogout}
-            className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 bg-slate-800 hover:bg-red-950/50 border border-slate-700 hover:border-red-600 text-slate-300 hover:text-red-300 rounded-lg text-xs font-semibold transition-all cursor-pointer shadow-xs shrink-0"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 bg-slate-900 hover:bg-rose-950/40 border border-slate-800 hover:border-rose-700/50 text-slate-400 hover:text-rose-300 rounded-lg text-xs font-medium transition-colors cursor-pointer shrink-0"
             title="Sign Out of Portal"
           >
-            <LogOut className="w-3.5 h-3.5 text-slate-400" />
-            <span>Sign Out</span>
+            <LogOut className="w-3.5 h-3.5" />
+            <span className="hidden md:inline">Sign Out</span>
           </button>
         </div>
       </header>
@@ -2764,859 +2990,498 @@ export default function AdminPortal({
         )}
 
         {/* ------------------------------------------------------------- */}
-        {/* TAB 1: CTVILL COMMERCIAL FIT-OUT DASHBOARD */}
+        {/* TAB 1: MINIMALIST CONSTRUCTION ERP DASHBOARD */}
         {/* ------------------------------------------------------------- */}
-        {(isOperationsManager || isFinance) && activeTab === 'dashboard' && (
+        {!isTimekeeper && activeTab === 'dashboard' && (
           <div className="space-y-6">
-            {isProjectManager ? (
-              /* ========================================================================= */
-              /* PROJECT MANAGER SITE EXECUTION DASHBOARD (SCOPED) */
-              /* ========================================================================= */
-              <div className="space-y-6">
-                {/* PM Site Command Header Banner */}
-                <div className="bg-gradient-to-r from-amber-950/50 via-slate-950 to-slate-900 border border-amber-500/30 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold text-xl shrink-0 shadow-lg shadow-amber-500/10">
-                      <HardHat className="w-6 h-6" />
-                    </div>
+            {(() => {
+              // Scoped or Global datasets depending on role
+              const currentProjects = isProjectManager ? pmScopedProjects : projects;
+              const currentContractors = isProjectManager ? pmContractors : contractors;
+              const currentDefects = isProjectManager ? pmPunchListDefects : punchListDefects;
+              const currentTasks = isProjectManager ? tasks.filter(t => currentProjects.some(p => p.id === t.projectId)) : tasks;
+
+              // 5 Compact Summary Metrics (100% Real PostgreSQL Data)
+              const activeProjectsCount = currentProjects.length;
+              const inProgressProjects = currentProjects.filter(p => p.status === 'IN_PROGRESS' || !p.status).length;
+              const completedProjects = currentProjects.filter(p => p.status === 'COMPLETED' || p.status === 'HANDED_OVER').length;
+
+              const totalWorkforceHeadcount = currentContractors.reduce((sum, c) => sum + (c.activeManpower || 1), 0);
+              const activeTradeTeams = currentContractors.length;
+
+              const pendingTasksCount = currentTasks.filter(t => t.status !== 'COMPLETED').length;
+              const openDefectsCount = currentDefects.filter(d => d.status !== 'CLOSED').length;
+              const totalPendingItems = pendingTasksCount + openDefectsCount;
+
+              const totalBudgetValue = currentProjects.reduce((sum, p) => sum + (Number(p.budget) || 0), 0);
+
+              const disbursedPayrollExpenses = (extendedPayroll || [])
+                .filter(e => e.status === 'Disbursed')
+                .reduce((sum, e) => sum + (Number(e.netPay) || 0), 0);
+              const pendingPayrollExpenses = (extendedPayroll || [])
+                .filter(e => e.status === 'Pending')
+                .reduce((sum, e) => sum + (Number(e.netPay) || 0), 0);
+
+              // Chart 1: Project Progress
+              const progressChartData = currentProjects.slice(0, 7).map(p => ({
+                name: p.name.split(' ')[0] || 'Site',
+                fullName: p.name,
+                progress: Math.min(100, Math.max(0, Math.round(Number(p.progressPercentage) || 0))),
+                status: p.status || 'IN_PROGRESS'
+              }));
+
+              // Chart 2: Budget vs Disbursed per Project
+              const budgetCostChartData = currentProjects.slice(0, 6).map(p => {
+                const projectDisbursed = (extendedPayroll || [])
+                  .filter(e => e.status === 'Disbursed' && e.projectName === p.name)
+                  .reduce((sum, e) => sum + (Number(e.netPay) || 0), 0) || (p.paidExpenses || 0);
+
+                return {
+                  name: p.name.split(' ')[0] || 'Site',
+                  fullName: p.name,
+                  budget: Math.round((Number(p.budget) || 0) / 1000), // in ₱k
+                  disbursed: Math.round(projectDisbursed / 1000) // in ₱k
+                };
+              });
+
+              // Recent Activities (Latest 5 from auditLogs)
+              const recentActivityLogs = (auditLogs || []).slice(0, 5);
+
+              // Operational Notices
+              const activeChangeOrders = (changeOrders || []).filter(c => c.status === 'PENDING');
+              const activeOpenRfis = (rfis || []).filter(r => r.status === 'OPEN');
+
+              return (
+                <div className="space-y-5">
+                  {/* Page Title & Scope Header */}
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
                     <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
-                          Site Execution Command Center
+                      <div className="flex items-center gap-2.5">
+                        <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                          {isProjectManager ? 'Site Execution Command' : 'Construction Portfolio Overview'}
                         </h2>
-                        <span className="bg-amber-500/10 border border-amber-500/30 text-amber-400 text-[10px] font-mono px-2.5 py-0.5 rounded-full font-bold uppercase">
-                          Project Manager Portal
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                          {isProjectManager ? 'Project Manager' : isFinance ? 'Finance Treasury' : 'Corporate Operations'}
                         </span>
-                        {hasWeatherSuspension && (
-                          <span className="bg-red-500/20 border border-red-500/40 text-red-300 text-[10px] font-mono px-2.5 py-0.5 rounded-full font-bold uppercase animate-pulse flex items-center gap-1">
-                            <AlertTriangle className="w-3 h-3" />
-                            Force Majeure Suspension Active
-                          </span>
-                        )}
                       </div>
-                      <p className="text-xs text-slate-300 mt-1">
-                        Supervisor: <strong className="text-white font-semibold">{session?.name || profileName || 'Engr. Ricardo Ramos'}</strong> • Site diary status, punch-list resolutions, and crew roster scoped to your assigned projects.
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {isProjectManager
+                          ? `Monitoring ${currentProjects.length} assigned fit-out sites, field crews, and punch-list tickets.`
+                          : 'Real-time operational overview driven by active database records.'}
                       </p>
-                      <div className="flex items-center gap-2 mt-2">
-                        <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
-                          <Lock className="w-3 h-3 text-amber-400" />
-                          Confidential Scope: Financial ledgers, client payments, and wage disbursals restricted
-                        </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setActiveTab('projects')}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Building2 className="w-3.5 h-3.5 text-amber-400" />
+                        <span>Sites Hub</span>
+                      </button>
+                      <button
+                        onClick={() => setActiveTab('gantt')}
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium border border-slate-700 transition-colors cursor-pointer flex items-center gap-1.5"
+                      >
+                        <BarChart3 className="w-3.5 h-3.5 text-slate-300" />
+                        <span>Master Gantt</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* 1. 5 Compact Summary Cards */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
+                    {/* Active Projects */}
+                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between">
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span className="text-[11px] font-medium tracking-wide uppercase">Active Projects</span>
+                        <Building2 className="w-4 h-4 text-amber-400" />
+                      </div>
+                      <div className="mt-2">
+                        <div className="text-xl font-bold font-mono text-white">{activeProjectsCount}</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+                          {inProgressProjects} In Progress • {completedProjects} Closed
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Total Workforce */}
+                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between">
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span className="text-[11px] font-medium tracking-wide uppercase">Workforce</span>
+                        <Users className="w-4 h-4 text-teal-400" />
+                      </div>
+                      <div className="mt-2">
+                        <div className="text-xl font-bold font-mono text-white">{totalWorkforceHeadcount} <span className="text-xs font-normal text-slate-400">Workers</span></div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+                          {activeTradeTeams} active trade teams
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Pending Tasks & Defects */}
+                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between">
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span className="text-[11px] font-medium tracking-wide uppercase">Pending Tasks</span>
+                        <CheckSquare className="w-4 h-4 text-rose-400" />
+                      </div>
+                      <div className="mt-2">
+                        <div className="text-xl font-bold font-mono text-white">{totalPendingItems}</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+                          {pendingTasksCount} Tasks • {openDefectsCount} Defects
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Project Budgets */}
+                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between">
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span className="text-[11px] font-medium tracking-wide uppercase">Project Budgets</span>
+                        <DollarSign className="w-4 h-4 text-emerald-400" />
+                      </div>
+                      <div className="mt-2">
+                        <div className="text-xl font-bold font-mono text-white">₱{(totalBudgetValue / 1_000_000).toFixed(2)}M</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+                          ₱{totalBudgetValue.toLocaleString()} Total
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Disbursed Expenses */}
+                    <div className="bg-slate-950 border border-slate-800 rounded-lg p-3.5 flex flex-col justify-between">
+                      <div className="flex items-center justify-between text-slate-400">
+                        <span className="text-[11px] font-medium tracking-wide uppercase">Disbursed Expenses</span>
+                        <Banknote className="w-4 h-4 text-indigo-400" />
+                      </div>
+                      <div className="mt-2">
+                        <div className="text-xl font-bold font-mono text-white">₱{disbursedPayrollExpenses.toLocaleString()}</div>
+                        <div className="text-[11px] text-slate-400 mt-0.5 truncate">
+                          ₱{pendingPayrollExpenses.toLocaleString()} pending approval
+                        </div>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      onClick={() => setActiveTab('site-diary')}
-                      className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-amber-500/20 cursor-pointer"
-                    >
-                      <CloudSun className="w-3.5 h-3.5" />
-                      <span>Log Daily Site Diary</span>
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('gantt')}
-                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-all border border-slate-700 cursor-pointer"
-                    >
-                      <BarChart3 className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Gantt Schedule</span>
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('documents')}
-                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-all border border-slate-700 cursor-pointer"
-                    >
-                      <FileCode className="w-3.5 h-3.5 text-purple-400" />
-                      <span>Site DMS</span>
-                    </button>
-                  </div>
-                </div>
+                  {/* 2. Visualizations Row */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                    {/* Project Progress Chart */}
+                    <div className="lg:col-span-7 bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                        <div>
+                          <h3 className="text-xs font-semibold text-white tracking-tight">Project Progress Overview</h3>
+                          <p className="text-[11px] text-slate-400">Milestone completion percentage across active commercial fit-outs</p>
+                        </div>
+                        <button
+                          onClick={() => setActiveTab('gantt')}
+                          className="text-[11px] text-amber-400 hover:text-amber-300 font-medium flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>Full Schedule</span>
+                          <ChevronRight className="w-3 h-3" />
+                        </button>
+                      </div>
 
-                {/* Scoped PM Top KPI Metric Cards */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xs">
-                    <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
-                      <span>SUPERVISED SITES</span>
-                      <Building2 className="w-4 h-4 text-amber-400" />
-                    </div>
-                    <div className="text-2xl font-black text-white mt-2 font-mono">
-                      {pmScopedProjects.length} {pmScopedProjects.length === 1 ? 'Site' : 'Sites'}
-                    </div>
-                    <div className="text-xs text-slate-400 mt-2 flex items-center justify-between">
-                      <span className="text-amber-400 font-semibold truncate">
-                        {pmScopedProjects[0]?.name || 'Assigned Site'}
-                      </span>
-                      <span className="text-slate-500 font-mono text-[10px]">
-                        ₱{pmScopedProjects.reduce((sum, p) => sum + (p.budget || 0), 0).toLocaleString()} Budget
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xs">
-                    <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
-                      <span>SITE CREW DEPLOYED</span>
-                      <Users className="w-4 h-4 text-blue-400" />
-                    </div>
-                    <div className="text-2xl font-black text-white mt-2 font-mono">
-                      {pmContractors.length} Trade Teams
-                    </div>
-                    <div className="text-xs text-blue-400 mt-2 flex items-center justify-between">
-                      <span>{pmContractors.reduce((acc, c) => acc + (c.activeManpower || 1), 0)} Field Workers</span>
-                      <span className="text-slate-500 font-mono text-[10px]">Active Roster</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xs">
-                    <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
-                      <span>OPEN PUNCH-LIST ITEMS</span>
-                      <CheckSquare className="w-4 h-4 text-rose-400" />
-                    </div>
-                    <div className="text-2xl font-black text-rose-400 mt-2 font-mono">
-                      {pmPunchListDefects.length} Defect Tickets
-                    </div>
-                    <div className="text-xs text-slate-400 mt-2 flex items-center justify-between">
-                      <span className="text-rose-400/90 font-semibold">
-                        {pmPunchListDefects.filter(d => d.severity === 'CRITICAL').length} Critical Required
-                      </span>
-                      <span className="text-slate-500 font-mono text-[10px]">QA/QC Sign-off</span>
-                    </div>
-                  </div>
-
-                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xs">
-                    <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
-                      <span>WEATHER & FORCE MAJEURE</span>
-                      <CloudSun className="w-4 h-4 text-purple-400" />
-                    </div>
-                    <div className="text-2xl font-black mt-2 font-mono">
-                      {hasWeatherSuspension ? (
-                        <span className="text-amber-400">SUSPENDED</span>
+                      {progressChartData.length === 0 ? (
+                        <div className="h-52 flex items-center justify-center text-xs text-slate-500">
+                          No commercial projects available to display.
+                        </div>
                       ) : (
-                        <span className="text-emerald-400">OPERATIONAL</span>
+                        <div className="h-52">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ReBarChart data={progressChartData} margin={{ top: 8, right: 10, left: -20, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                              <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
+                              <YAxis stroke="#64748b" fontSize={11} tickLine={false} domain={[0, 100]} tickFormatter={(v) => `${v}%`} />
+                              <Tooltip
+                                formatter={(value) => [`${value}%`, 'Progress']}
+                                contentStyle={{ backgroundColor: '#020617', borderColor: '#334155', borderRadius: '8px', fontSize: '11px' }}
+                              />
+                              <Bar dataKey="progress" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                            </ReBarChart>
+                          </ResponsiveContainer>
+                        </div>
                       )}
                     </div>
-                    <div className="text-xs mt-2 flex items-center justify-between">
-                      <span className={hasWeatherSuspension ? "text-amber-400 font-semibold" : "text-emerald-400 font-semibold"}>
-                        {hasWeatherSuspension ? "Force Majeure Active" : "All Trades Safe & Active"}
-                      </span>
-                      <span className="text-slate-500 font-mono text-[10px]">Open-Meteo Synced</span>
+
+                    {/* Budget vs Disbursed Cost Chart */}
+                    <div className="lg:col-span-5 bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                        <div>
+                          <h3 className="text-xs font-semibold text-white tracking-tight">Budget vs. Disbursed Cost</h3>
+                          <p className="text-[11px] text-slate-400">Allocated capital vs. disbursed payroll (₱ in thousands)</p>
+                        </div>
+                        <button
+                          onClick={() => setActiveTab('payments')}
+                          className="text-[11px] text-amber-400 hover:text-amber-300 font-medium flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>Billings Hub</span>
+                          <ChevronRight className="w-3 h-3" />
+                        </button>
+                      </div>
+
+                      {budgetCostChartData.length === 0 ? (
+                        <div className="h-52 flex items-center justify-center text-xs text-slate-500">
+                          No budget records available.
+                        </div>
+                      ) : (
+                        <div className="h-52">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <ReBarChart data={budgetCostChartData} margin={{ top: 8, right: 10, left: -10, bottom: 0 }}>
+                              <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                              <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
+                              <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
+                              <Tooltip
+                                formatter={(value, name) => [`₱${(Number(value) * 1000).toLocaleString()}`, name === 'budget' ? 'Budget' : 'Disbursed']}
+                                contentStyle={{ backgroundColor: '#020617', borderColor: '#334155', borderRadius: '8px', fontSize: '11px' }}
+                              />
+                              <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '4px' }} />
+                              <Bar dataKey="budget" name="Budget" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                              <Bar dataKey="disbursed" name="Disbursed" fill="#10b981" radius={[4, 4, 0, 0]} />
+                            </ReBarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
 
-                {/* Assigned Projects Execution Cards */}
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xs space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div>
-                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                        <Building2 className="w-4 h-4 text-amber-400" />
-                        Supervised Fit-Out & Civil Works Sites ({pmScopedProjects.length})
-                      </h3>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Projects assigned strictly to your management scope
-                      </p>
+                  {/* 3. Operational Activities & Important Notices Row */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+                    {/* Recent Activities (Audit Ledger) */}
+                    <div className="lg:col-span-8 bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
+                      <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                        <div className="flex items-center gap-2">
+                          <History className="w-4 h-4 text-slate-400" />
+                          <h3 className="text-xs font-semibold text-white tracking-tight">Recent Operations Activity</h3>
+                        </div>
+                        <button
+                          onClick={() => setActiveTab('audit-trail')}
+                          className="text-[11px] text-amber-400 hover:text-amber-300 font-medium flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>Full Audit Trail</span>
+                          <ChevronRight className="w-3 h-3" />
+                        </button>
+                      </div>
+
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead>
+                            <tr className="border-b border-slate-800/80 text-[11px] text-slate-400 font-medium">
+                              <th className="py-2 px-2.5">Time</th>
+                              <th className="py-2 px-2.5">User</th>
+                              <th className="py-2 px-2.5">Action</th>
+                              <th className="py-2 px-2.5">Details</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-800/50">
+                            {recentActivityLogs.length === 0 ? (
+                              <tr>
+                                <td colSpan={4} className="py-6 text-center text-slate-500 text-xs">
+                                  No recent activities logged in audit ledger.
+                                </td>
+                              </tr>
+                            ) : (
+                              recentActivityLogs.map((log) => (
+                                <tr key={log.id} className="hover:bg-slate-900/50 transition-colors">
+                                  <td className="py-2 px-2.5 text-slate-400 font-mono text-[11px] whitespace-nowrap">
+                                    {log.createdAt ? new Date(log.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Recent'}
+                                  </td>
+                                  <td className="py-2 px-2.5 text-slate-200 font-medium whitespace-nowrap">
+                                    {log.actorName || 'System'}
+                                  </td>
+                                  <td className="py-2 px-2.5">
+                                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-900 text-slate-300 border border-slate-800">
+                                      {log.action}
+                                    </span>
+                                  </td>
+                                  <td className="py-2 px-2.5 text-slate-400 text-[11px] truncate max-w-xs">
+                                    {log.details || log.entityType}
+                                  </td>
+                                </tr>
+                              ))
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
-                    <button
-                      onClick={() => setActiveTab('gantt')}
-                      className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 cursor-pointer"
-                    >
-                      <span>View Gantt Timeline</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    {pmScopedProjects.map((p) => {
-                      const completedTasks = tasks.filter(t => t.status === 'COMPLETED').length;
-                      const taskProgress = p.progressPercentage || (tasks.length > 0 ? Math.round((completedTasks / tasks.length) * 100) : 0);
-                      return (
-                        <div key={p.id} className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-xl p-5 space-y-3 transition-all">
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <h4 className="text-sm font-bold text-white tracking-tight">{p.name}</h4>
-                                <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full uppercase ${
-                                  p.status === 'COMPLETED' || p.status === 'HANDED_OVER' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' :
-                                  p.status === 'IN_PROGRESS' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' :
-                                  'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                                }`}>
-                                  {p.status || 'IN_PROGRESS'}
+                    {/* Operational Notices */}
+                    <div className="lg:col-span-4 bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                          <div className="flex items-center gap-2">
+                            <Bell className="w-4 h-4 text-amber-400" />
+                            <h3 className="text-xs font-semibold text-white tracking-tight">Operational Notices</h3>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-400">Live Telemetry</span>
+                        </div>
+
+                        <div className="mt-3 space-y-2.5">
+                          {/* Weather Alert */}
+                          <div className={`p-2.5 rounded-lg border text-xs flex items-start gap-2.5 ${
+                            hasWeatherSuspension
+                              ? 'bg-rose-950/20 border-rose-800/40 text-rose-300'
+                              : 'bg-slate-900/60 border-slate-800 text-slate-300'
+                          }`}>
+                            <CloudSun className={`w-4 h-4 shrink-0 mt-0.5 ${hasWeatherSuspension ? 'text-rose-400' : 'text-amber-400'}`} />
+                            <div className="min-w-0 flex-1">
+                              <div className="font-semibold text-xs flex items-center justify-between">
+                                <span>Weather & Site Safety</span>
+                                <span className="text-[10px] font-mono text-slate-400">
+                                  {hasWeatherSuspension ? 'SUSPENDED' : 'NORMAL'}
                                 </span>
                               </div>
-                              <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-1.5">
-                                <MapPin className="w-3 h-3 text-slate-500" />
-                                <span>{p.location || 'Calamba, Laguna'}</span>
-                                {p.latitude && p.longitude && (
-                                  <span className="text-[10px] font-mono text-slate-500">({p.latitude.toFixed(2)}°N, {p.longitude.toFixed(2)}°E)</span>
-                                )}
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                {hasWeatherSuspension
+                                  ? 'Force majeure rain stoppage flagged under FIDIC guidelines.'
+                                  : 'Atmospheric conditions clear across active project sites.'}
                               </p>
                             </div>
-                            {p.weatherSuspended && (
-                              <span className="bg-red-950/60 border border-red-500/50 text-red-300 text-[10px] font-mono px-2 py-0.5 rounded font-bold">
-                                Suspended
-                              </span>
-                            )}
                           </div>
 
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between text-xs">
-                              <span className="text-slate-400 font-medium">Site Milestone Progress</span>
-                              <span className="text-emerald-400 font-mono font-bold">{taskProgress}%</span>
-                            </div>
-                            <div className="w-full bg-slate-800 rounded-full h-2 overflow-hidden">
-                              <div
-                                className="bg-gradient-to-r from-amber-500 to-emerald-400 h-full rounded-full transition-all duration-500"
-                                style={{ width: `${Math.min(100, Math.max(0, taskProgress))}%` }}
-                              />
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2 text-xs pt-2 border-t border-slate-800/80 font-mono">
-                            <div>
-                              <div className="text-[10px] text-slate-500">TARGET HANDOVER</div>
-                              <div className="text-slate-300 font-semibold">{p.targetHandoverDate ? new Date(p.targetHandoverDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : 'Q4 2026'}</div>
-                            </div>
-                            <div>
-                              <div className="text-[10px] text-slate-500">PM IN-CHARGE</div>
-                              <div className="text-amber-400 font-semibold truncate">{p.assignedProjectManagerName || 'Assigned to You'}</div>
+                          {/* Pending Change Orders Notice */}
+                          <div className="p-2.5 rounded-lg border border-slate-800 bg-slate-900/60 text-xs flex items-start gap-2.5">
+                            <FileText className="w-4 h-4 text-blue-400 shrink-0 mt-0.5" />
+                            <div className="min-w-0 flex-1">
+                              <div className="font-semibold text-xs flex items-center justify-between">
+                                <span>Pending Change Orders</span>
+                                <span className="text-[10px] font-mono text-slate-400 font-bold">{activeChangeOrders.length}</span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                {activeChangeOrders.length > 0
+                                  ? `${activeChangeOrders.length} variations requiring commercial evaluation.`
+                                  : 'All contract variations up to date.'}
+                              </p>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-2 pt-2">
-                            <button
-                              onClick={() => setActiveTab('site-diary')}
-                              className="flex-1 py-1.5 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer"
-                            >
-                              <CloudSun className="w-3 h-3 text-amber-400" />
-                              <span>Site Diary</span>
-                            </button>
-                            <button
-                              onClick={() => setActiveTab('gantt')}
-                              className="flex-1 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-semibold text-xs rounded-lg flex items-center justify-center gap-1 transition-all cursor-pointer"
-                            >
-                              <BarChart3 className="w-3.5 h-3.5" />
-                              <span>Gantt Chart</span>
-                            </button>
+                          {/* Open RFIs Notice */}
+                          <div className="p-2.5 rounded-lg border border-slate-800 bg-slate-900/60 text-xs flex items-start gap-2.5">
+                            <FileSpreadsheet className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
+                            <div className="min-w-0 flex-1">
+                              <div className="font-semibold text-xs flex items-center justify-between">
+                                <span>Open Engineering RFIs</span>
+                                <span className="text-[10px] font-mono text-slate-400 font-bold">{activeOpenRfis.length}</span>
+                              </div>
+                              <p className="text-[11px] text-slate-400 mt-0.5">
+                                {activeOpenRfis.length > 0
+                                  ? `${activeOpenRfis.length} technical queries awaiting design engineering response.`
+                                  : 'Zero open engineering queries.'}
+                              </p>
+                            </div>
                           </div>
                         </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                      </div>
 
-                {/* Two Column Layout: Daily Site Diary Quick Status & Punch-List Tracker */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                  {/* Left: Daily Site Diary Quick Status */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                      <div className="pt-2 border-t border-slate-800">
+                        <button
+                          onClick={() => setActiveTab('site-diary')}
+                          className="w-full py-1.5 px-3 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-medium transition-colors cursor-pointer text-center"
+                        >
+                          Open Site Diary & Weather Station
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 4. Active Commercial Fit-Out Sites Table */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
                       <div>
-                        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                          <CloudSun className="w-4 h-4 text-amber-400" />
-                          Daily Site Diary & Weather Telemetry
+                        <h3 className="text-xs font-semibold text-white tracking-tight">
+                          Commercial Fit-Out Sites ({currentProjects.length})
                         </h3>
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          Latest field conditions and daily manpower logs
-                        </p>
+                        <p className="text-[11px] text-slate-400">Ongoing fit-outs, budget allocations, and execution pace</p>
                       </div>
                       <button
-                        onClick={() => setActiveTab('site-diary')}
-                        className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 cursor-pointer"
+                        onClick={() => setActiveTab('projects')}
+                        className="text-[11px] text-amber-400 hover:text-amber-300 font-medium flex items-center gap-1 cursor-pointer"
                       >
-                        <span>Open Full Diary</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
+                        <span>Manage Sites</span>
+                        <ChevronRight className="w-3 h-3" />
                       </button>
                     </div>
 
-                    {latestSiteLog ? (
-                      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 space-y-3">
-                        <div className="flex items-center justify-between text-xs font-mono">
-                          <span className="text-slate-400">ENTRY DATE: {latestSiteLog.date}</span>
-                          <span className="text-emerald-400 font-bold flex items-center gap-1">
-                            <CheckCircle className="w-3.5 h-3.5" />
-                            VERIFIED
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2 py-2 border-y border-slate-800 text-center font-mono">
-                          <div className="bg-slate-950 p-2 rounded-lg">
-                            <div className="text-[10px] text-slate-500">WEATHER</div>
-                            <div className="text-xs font-bold text-amber-400 capitalize">{latestSiteLog.weather || 'SUNNY'}</div>
-                          </div>
-                          <div className="bg-slate-950 p-2 rounded-lg">
-                            <div className="text-[10px] text-slate-500">TEMPERATURE</div>
-                            <div className="text-xs font-bold text-white">{latestSiteLog.temperature || '29°C'}</div>
-                          </div>
-                          <div className="bg-slate-950 p-2 rounded-lg">
-                            <div className="text-[10px] text-slate-500">CREW COUNT</div>
-                            <div className="text-xs font-bold text-blue-400">{latestSiteLog.activeHeadcount || pmContractors.length * 4} Workers</div>
-                          </div>
-                        </div>
-                        {(latestSiteLog.workCompleted || latestSiteLog.delaysOrIssues) && (
-                          <p className="text-xs text-slate-300 italic line-clamp-2">
-                            "{latestSiteLog.workCompleted || latestSiteLog.delaysOrIssues}"
-                          </p>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="bg-slate-900/50 border border-dashed border-slate-800 rounded-xl p-6 text-center space-y-2">
-                        <CloudSun className="w-8 h-8 text-amber-400 mx-auto opacity-70" />
-                        <h4 className="text-xs font-bold text-white">No Site Diary Entry Logged Today</h4>
-                        <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
-                          Record today's weather telemetry, field observations, and active manpower count.
-                        </p>
-                      </div>
-                    )}
-
-                    <button
-                      onClick={() => setActiveTab('site-diary')}
-                      className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                      <span>Log Today's Site Diary Entry</span>
-                    </button>
-                  </div>
-
-                  {/* Right: Scoped Punch-List Defects */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                      <div>
-                        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                          <CheckSquare className="w-4 h-4 text-rose-400" />
-                          Site Punch-List & Defects ({pmPunchListDefects.length})
-                        </h3>
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          Quality issues and remediation items on your sites
-                        </p>
-                      </div>
-                      <span className="text-[10px] font-mono text-slate-400">
-                        {pmPunchListDefects.filter(d => d.status === 'CLOSED').length} Resolved
-                      </span>
-                    </div>
-
-                    <div className="space-y-2.5 max-h-[280px] overflow-y-auto pr-1">
-                      {pmPunchListDefects.length === 0 ? (
-                        <div className="bg-slate-900/50 border border-dashed border-slate-800 rounded-xl p-8 text-center space-y-2">
-                          <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto" />
-                          <h4 className="text-xs font-bold text-white">Zero Open Punch-List Items</h4>
-                          <p className="text-[11px] text-slate-400">All quality checks passing on supervised sites.</p>
-                        </div>
-                      ) : (
-                        pmPunchListDefects.map((defect) => (
-                          <div
-                            key={defect.id}
-                            className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-xl p-3.5 flex items-center justify-between gap-3 transition-all"
-                          >
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-xs font-bold text-white truncate">{defect.title || defect.description}</span>
-                                <span className={`text-[9px] font-mono font-bold px-2 py-0.2 rounded uppercase ${
-                                  defect.severity === 'CRITICAL' ? 'bg-red-500/10 text-red-400 border border-red-500/30' :
-                                  defect.severity === 'HIGH' ? 'bg-amber-500/10 text-amber-400 border border-amber-500/30' :
-                                  'bg-blue-500/10 text-blue-400 border border-blue-500/30'
-                                }`}>
-                                  {defect.severity || 'LOW'}
-                                </span>
-                              </div>
-                              <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-2">
-                                <span>{defect.category || 'Quality Check'}</span>
-                                <span>•</span>
-                                <span className={defect.status === 'CLOSED' ? 'text-emerald-400' : 'text-amber-400'}>
-                                  {defect.status || 'OPEN'}
-                                </span>
-                              </div>
-                            </div>
-                            <button
-                              onClick={() => {
-                                onUpdateDefect(defect.id, {
-                                  status: defect.status === 'CLOSED' ? 'OPEN' : 'CLOSED'
-                                });
-                              }}
-                              className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold cursor-pointer transition-all ${
-                                defect.status === 'CLOSED'
-                                  ? 'bg-slate-800 text-slate-400 hover:bg-slate-700'
-                                  : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                              }`}
-                            >
-                              {defect.status === 'CLOSED' ? 'Re-open' : 'Mark Done'}
-                            </button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Assigned Crew & Trade Teams Roster */}
-                <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xs space-y-4">
-                  <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                    <div>
-                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                        <Users className="w-4 h-4 text-amber-400" />
-                        Assigned Field Crew & Trade Teams Roster ({pmContractors.length})
-                      </h3>
-                      <p className="text-xs text-slate-400 mt-0.5">
-                        Specialists and trades actively deployed on your managed sites
-                      </p>
-                    </div>
-                    <button
-                      onClick={() => setActiveTab('contractors')}
-                      className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 cursor-pointer"
-                    >
-                      <span>Manage All Crew</span>
-                      <ChevronRight className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left text-xs text-slate-300">
-                      <thead className="bg-slate-900 text-[10px] font-mono uppercase text-slate-400 border-b border-slate-800">
-                        <tr>
-                          <th className="py-2.5 px-3">Trade Specialist / Lead</th>
-                          <th className="py-2.5 px-3">Trade Category</th>
-                          <th className="py-2.5 px-3">Allocation Status</th>
-                          <th className="py-2.5 px-3">Assigned Site</th>
-                          <th className="py-2.5 px-3">Team Size</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800 font-sans">
-                        {pmContractors.length === 0 ? (
-                          <tr>
-                            <td colSpan={5} className="py-6 text-center text-slate-500 italic">
-                              No crew records assigned yet.
-                            </td>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-slate-800/80 text-[11px] text-slate-400 font-medium">
+                            <th className="py-2 px-3">Site / Project</th>
+                            <th className="py-2 px-3">Client & Location</th>
+                            <th className="py-2 px-3">Status</th>
+                            <th className="py-2 px-3">Milestone Progress</th>
+                            <th className="py-2 px-3">Budget</th>
+                            <th className="py-2 px-3 text-right">Actions</th>
                           </tr>
-                        ) : (
-                          pmContractors.map((c) => (
-                            <tr key={c.id} className="hover:bg-slate-900/60 transition-colors">
-                              <td className="py-3 px-3 font-semibold text-white">
-                                <div>{c.name}</div>
-                                <div className="text-[10px] text-slate-400 font-normal">{c.specialty}</div>
-                              </td>
-                              <td className="py-3 px-3">
-                                <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
-                                  c.workforceCategory === 'PROFESSIONAL' ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30' :
-                                  c.workforceCategory === 'SKILLED' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' :
-                                  'bg-amber-500/10 text-amber-400 border border-amber-500/30'
-                                }`}>
-                                  {c.workforceCategory || 'SKILLED'}
-                                </span>
-                              </td>
-                              <td className="py-3 px-3">
-                                <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold uppercase ${
-                                  c.allocationStatus === 'ASSIGNED' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' :
-                                  c.allocationStatus === 'REALLOCATED' ? 'bg-purple-500/10 text-purple-400 border border-purple-500/30' :
-                                  c.allocationStatus === 'DEMOBILIZED' ? 'bg-slate-800 text-slate-400' :
-                                  'bg-yellow-500/10 text-yellow-400 border border-yellow-500/30'
-                                }`}>
-                                  {c.allocationStatus || 'ASSIGNED'}
-                                </span>
-                              </td>
-                              <td className="py-3 px-3 text-slate-400 font-mono text-[11px]">
-                                {c.activeProjectSite || pmScopedProjects[0]?.name || 'Site Allocation'}
-                              </td>
-                              <td className="py-3 px-3 font-mono font-bold text-white">
-                                {c.activeManpower || 1} {(c.activeManpower || 1) === 1 ? 'person' : 'workers'}
+                        </thead>
+                        <tbody className="divide-y divide-slate-800/50">
+                          {currentProjects.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="py-8 text-center text-slate-500 text-xs">
+                                No commercial projects configured.
                               </td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            ) : (
-              /* ========================================================================= */
-              /* ADMIN MACRO PORTFOLIO & EXECUTIVE OVERVIEW */
-              /* ========================================================================= */
-              <div className="space-y-6">
-                {/* Executive Welcome Banner */}
-                <div className="bg-gradient-to-r from-amber-950/40 via-slate-950 to-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold text-xl shrink-0 shadow-lg shadow-amber-500/10">
-                      <Building2 className="w-6 h-6" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
-                          CTVill Turnkey Fit-Out Command Center
-                        </h2>
-                        <span className="bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-mono px-2 py-0.5 rounded-full font-bold uppercase">
-                          Live Dynamic State
-                        </span>
-                      </div>
-                      <p className="text-xs text-slate-400 mt-1">
-                        Real-time operational metrics driven by your live projects, daily diary entries, and workforce allocations.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <button
-                      onClick={() => setActiveTab('gantt')}
-                      className="px-3.5 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-amber-500/20 cursor-pointer"
-                    >
-                      <BarChart3 className="w-3.5 h-3.5" />
-                      <span>Gantt Timeline</span>
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('site-diary')}
-                      className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-all border border-slate-700 cursor-pointer"
-                    >
-                      <CloudSun className="w-3.5 h-3.5 text-amber-400" />
-                      <span>Weather Report</span>
-                    </button>
-                  </div>
-                </div>
-
-            {/* Top KPI Metrics Cards — 100% Dynamic */}
-            {(() => {
-              const activeSitesCount = (projects && projects.length > 0) ? projects.length : (parcels ? parcels.length : 0);
-              const totalBudgetOrSqm = (projects && projects.length > 0)
-                ? projects.reduce((sum, p) => sum + (Number(p.budget) || 0), 0)
-                : (parcels ? parcels.reduce((sum, p) => sum + (p.totalAreaSqm || 0), 0) : 0);
-              const avgProgress = (projects && projects.length > 0)
-                ? Math.round(projects.reduce((sum, p) => sum + (Number(p.progressPercentage) || 0), 0) / projects.length)
-                : (civilWorksMilestones && civilWorksMilestones.length > 0
-                    ? Math.round(civilWorksMilestones.reduce((sum, m) => sum + m.currentPercentage, 0) / civilWorksMilestones.length)
-                    : 0);
-
-              return (
-                <>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xs">
-                      <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
-                        <span>ACTIVE FIT-OUT SITES</span>
-                        <Building className="w-4 h-4 text-amber-400" />
-                      </div>
-                      <div className="text-2xl font-black text-white mt-2 font-mono">
-                        {activeSitesCount} {activeSitesCount === 1 ? 'Site' : 'Sites'}
-                      </div>
-                      <div className="text-xs text-slate-400 mt-2 flex items-center justify-between">
-                        <span className="text-amber-400 font-semibold">
-                          {(projects && projects.length > 0)
-                            ? `₱${totalBudgetOrSqm.toLocaleString()} Budget`
-                            : `${totalBudgetOrSqm.toLocaleString()} sqm`}
-                        </span>
-                        <span className="text-slate-500 font-mono">
-                          {activeSitesCount > 0 ? 'Live In-Progress' : 'Empty'}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xs">
-                      <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
-                        <span>OVERALL FIT-OUT PROGRESS</span>
-                        <TrendingUp className="w-4 h-4 text-emerald-400" />
-                      </div>
-                      <div className="text-2xl font-black text-emerald-400 mt-2 font-mono">
-                        {avgProgress}%
-                      </div>
-                      <div className="text-xs text-slate-400 mt-2 flex items-center justify-between">
-                        <span className="text-emerald-400 font-semibold">
-                          {activeSitesCount > 0 ? `${activeSitesCount} Commercial Sites` : 'No Active Sites'}
-                        </span>
-                        <span className="text-slate-500 font-mono">Critical Path</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xs">
-                      <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
-                        <span>FIELD WORKFORCE DEPLOYED</span>
-                        <Users className="w-4 h-4 text-blue-400" />
-                      </div>
-                      <div className="text-2xl font-black text-white mt-2 font-mono">
-                        {totalManpower} Specialists
-                      </div>
-                      <div className="text-xs text-blue-400 mt-2 flex items-center justify-between">
-                        <span>{deployedFieldContractors.length > 0 ? `${deployedFieldContractors.length} Field Teams on Site` : '0 Field Teams on Site'}</span>
-                        <span className="text-[10px] text-slate-500 font-mono">On-site only</span>
-                      </div>
-                    </div>
-
-                    <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xs">
-                      <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
-                        <span>WEATHER OBSERVATION LOGS</span>
-                        <FileText className="w-4 h-4 text-purple-400" />
-                      </div>
-                      <div className="text-2xl font-black text-white mt-2 font-mono">
-                        {siteLogs.length} Field Reports
-                      </div>
-                      <div className="text-xs text-purple-400 mt-2">
-                        {siteLogs.length > 0 ? 'Daily logs recorded' : 'No logs recorded yet'}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Active Commercial Projects Breakdown */}
-                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xs space-y-4">
-                    <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-                      <div>
-                        <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                          <Building2 className="w-4 h-4 text-amber-400" />
-                          Active Commercial Fit-Out Projects ({activeSitesCount})
-                        </h3>
-                        <p className="text-xs text-slate-400 mt-0.5">
-                          Real-time status across ongoing corporate and interior fit-out projects
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <button
-                          onClick={() => setActiveTab('projects')}
-                          className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 cursor-pointer"
-                        >
-                          <span>Commercial Sites Hub</span>
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => setActiveTab('gantt')}
-                          className="text-xs text-slate-400 hover:text-slate-200 font-semibold flex items-center gap-1 cursor-pointer"
-                        >
-                          <span>View Gantt</span>
-                          <ArrowRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    {activeSitesCount === 0 ? (
-                      <div className="py-12 bg-slate-900/40 border border-dashed border-slate-800 rounded-xl flex flex-col items-center justify-center text-center p-6 space-y-3">
-                        <Building2 className="w-10 h-10 text-slate-600" />
-                        <div className="space-y-1">
-                          <h4 className="text-sm font-bold text-white">No fit-out projects configured yet</h4>
-                          <p className="text-xs text-slate-400 max-w-md">
-                            Start by adding projects in Commercial Sites Hub, checking live conditions in Weather Report, or uploading documents in Blueprints & Specs Vault.
-                          </p>
-                        </div>
-                        <button
-                          onClick={() => setActiveTab('projects')}
-                          className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl transition-all cursor-pointer shadow-md shadow-amber-500/20"
-                        >
-                          Open Commercial Sites Hub
-                        </button>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 pt-1">
-                        {projects && projects.length > 0 ? (
-                          projects.map((proj) => {
-                            const prog = Math.round(Number(proj.progressPercentage) || 0);
-                            const statusColor = 
-                              proj.status === 'COMPLETED' ? 'bg-emerald-950/80 border-emerald-800 text-emerald-300' :
-                              proj.status === 'PUNCHLIST_QA' ? 'bg-purple-950/80 border-purple-800 text-purple-300' :
-                              proj.status === 'IN_PROGRESS' ? 'bg-amber-950/80 border-amber-800 text-amber-300' :
-                              'bg-slate-800 border-slate-700 text-slate-300';
-
-                            return (
-                              <div key={proj.id} className="bg-slate-900/60 border border-slate-800 hover:border-slate-700 rounded-xl p-4 space-y-3 transition-all">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0 flex-1">
-                                    <h4 className="text-sm font-bold text-white truncate">{proj.name}</h4>
-                                    <p className="text-[11px] text-slate-400 mt-0.5 truncate">
-                                      {proj.clientName ? `${proj.clientName} • ` : ''}{proj.location || 'Commercial Zone'}
-                                    </p>
-                                  </div>
-                                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase border shrink-0 ${statusColor}`}>
-                                    {(proj.status || 'PLANNING').replace('_', ' ')}
-                                  </span>
-                                </div>
-
-                                <div className="flex items-center justify-between text-[11px] font-mono text-slate-400 bg-slate-950/40 px-2.5 py-1.5 rounded-lg border border-slate-800/60">
-                                  <span>Budget: <strong className="text-slate-200">₱{Number(proj.budget || 0).toLocaleString()}</strong></span>
-                                  <span>Crew: <strong className="text-teal-400">{proj.assignedWorkersCount || (proj.assignedContractorIds?.length || 0)} On-Site</strong></span>
-                                </div>
-
-                                <div className="space-y-1.5">
-                                  <div className="flex items-center justify-between text-xs">
-                                    <span className="text-slate-400 text-[11px]">
-                                      Handover: <strong className="text-slate-300 font-mono">{proj.targetHandoverDate || '2026-12-31'}</strong>
+                          ) : (
+                            currentProjects.map((p) => {
+                              const prog = Math.min(100, Math.max(0, Math.round(Number(p.progressPercentage) || 0)));
+                              return (
+                                <tr key={p.id} className="hover:bg-slate-900/50 transition-colors">
+                                  <td className="py-2.5 px-3">
+                                    <div className="font-semibold text-white">{p.name}</div>
+                                    <div className="text-[10px] font-mono text-slate-500">{p.id}</div>
+                                  </td>
+                                  <td className="py-2.5 px-3 text-slate-400">
+                                    <div className="truncate max-w-[160px]">{p.clientName || 'Commercial Client'}</div>
+                                    <div className="text-[10px] text-slate-500">{p.location || 'Site Location'}</div>
+                                  </td>
+                                  <td className="py-2.5 px-3">
+                                    <span className={`text-[10px] font-mono font-medium px-2 py-0.5 rounded border ${
+                                      p.status === 'COMPLETED' || p.status === 'HANDED_OVER'
+                                        ? 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
+                                        : p.status === 'IN_PROGRESS'
+                                        ? 'bg-blue-500/10 text-blue-300 border-blue-500/30'
+                                        : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                                    }`}>
+                                      {(p.status || 'IN_PROGRESS').replace('_', ' ')}
                                     </span>
-                                    <span className="font-mono text-amber-400 font-bold">{prog}%</span>
-                                  </div>
-                                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                                    <div 
-                                      className="h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-700"
-                                      style={{ width: `${Math.min(100, Math.max(0, prog))}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })
-                        ) : (
-                          parcels.map((proj) => {
-                            const projectMilestones = civilWorksMilestones.filter(m => m.parcelId === proj.id);
-                            const avgProg = projectMilestones.length > 0
-                              ? Math.round(projectMilestones.reduce((s, m) => s + m.currentPercentage, 0) / projectMilestones.length)
-                              : 0;
-                            return (
-                              <div key={proj.id} className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-3">
-                                <div className="flex items-start justify-between gap-3">
-                                  <div>
-                                    <h4 className="text-sm font-bold text-white">{proj.name}</h4>
-                                    <p className="text-[11px] text-slate-400 mt-0.5">{proj.location} • <span className="font-mono text-amber-400 font-semibold">{proj.totalAreaSqm.toLocaleString()} sqm</span></p>
-                                  </div>
-                                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded uppercase bg-amber-950/80 border border-amber-800 text-amber-300">
-                                    {avgProg === 100 ? 'COMPLETED' : avgProg > 0 ? 'IN PROGRESS' : 'PLANNING'}
-                                  </span>
-                                </div>
-
-                                <div className="space-y-1.5">
-                                  <div className="flex items-center justify-between text-xs">
-                                    <span className="text-slate-400 text-[11px] font-medium">{projectMilestones.length} Schedule Milestones</span>
-                                    <span className="font-mono text-amber-400 font-bold">{avgProg}%</span>
-                                  </div>
-                                  <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
-                                    <div 
-                                      className="h-full rounded-full bg-gradient-to-r from-amber-500 to-amber-400 transition-all duration-700"
-                                      style={{ width: `${avgProg}%` }}
-                                    />
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                    )}
+                                  </td>
+                                  <td className="py-2.5 px-3">
+                                    <div className="w-36 space-y-1">
+                                      <div className="flex items-center justify-between text-[11px] font-mono">
+                                        <span className="text-slate-400">Progress</span>
+                                        <span className="text-slate-200 font-semibold">{prog}%</span>
+                                      </div>
+                                      <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                                        <div
+                                          className="bg-amber-500 h-full rounded-full transition-all duration-300"
+                                          style={{ width: `${prog}%` }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </td>
+                                  <td className="py-2.5 px-3 font-mono text-slate-200 font-medium">
+                                    ₱{Number(p.budget || 0).toLocaleString()}
+                                  </td>
+                                  <td className="py-2.5 px-3 text-right">
+                                    <button
+                                      onClick={() => setActiveTab('projects')}
+                                      className="px-2.5 py-1 rounded bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 text-xs font-medium transition-colors cursor-pointer"
+                                    >
+                                      View Details
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
-                </>
+                </div>
               );
             })()}
-
-            {/* Middle Row: Trade Manpower Distribution & Quick Tools */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              
-              {/* Fit-Out Workforce by Trade Specialty */}
-              <div className="lg:col-span-7 bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xs flex flex-col justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Users className="w-4 h-4 text-amber-400" />
-                    Trade Workforce On-Site ({contractors.length} Teams)
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Live technician headcount mapped from Workforce & Manpower
-                  </p>
-                </div>
-
-                {contractors.length === 0 ? (
-                  <div className="h-56 my-3 flex flex-col items-center justify-center border border-dashed border-slate-800 rounded-xl text-slate-500 space-y-2">
-                    <Users className="w-8 h-8 text-slate-600" />
-                    <p className="text-xs">No trade contractors registered yet.</p>
-                    <button
-                      onClick={() => setActiveTab('contractors')}
-                      className="text-xs text-amber-400 hover:text-amber-300 font-semibold cursor-pointer underline"
-                    >
-                      Add Contractors in Workforce & Manpower
-                    </button>
-                  </div>
-                ) : (
-                  <>
-                    <div className="h-56 my-3">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <ReBarChart data={contractors.map(c => ({ trade: c.specialty || c.name, workers: c.activeManpower }))}>
-                          <XAxis dataKey="trade" stroke="#64748b" fontSize={11} tickLine={false} />
-                          <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: '#020617', borderColor: '#334155', borderRadius: '12px', fontSize: '12px' }}
-                          />
-                          <Bar dataKey="workers" fill="#f59e0b" radius={[6, 6, 0, 0]} />
-                        </ReBarChart>
-                      </ResponsiveContainer>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 text-xs pt-3 border-t border-slate-800 font-mono">
-                      {contractors.slice(0, 5).map(c => (
-                        <div key={c.id} className="text-center p-2 bg-slate-900/50 rounded-lg flex-1 min-w-[70px]">
-                          <span className="text-slate-400 block text-[10px] truncate">{c.specialty || c.name}</span>
-                          <strong className="text-amber-400 text-sm">{c.activeManpower}</strong>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Quick Navigation Cards */}
-              <div className="lg:col-span-5 bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xs flex flex-col justify-between space-y-4">
-                <div>
-                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    Quick Project Operations Modules
-                  </h3>
-                  <p className="text-xs text-slate-400 mt-1">
-                    Direct access to site management workspaces
-                  </p>
-                </div>
-
-                <div className="space-y-2.5">
-                  <button
-                    onClick={() => setActiveTab('projects')}
-                    className="w-full p-3.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-amber-500/50 rounded-xl flex items-center justify-between transition-all cursor-pointer text-left group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center font-bold">
-                        <Building2 className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-white group-hover:text-amber-300">Commercial Sites Hub</div>
-                        <div className="text-[10px] text-slate-400">Review fit-out projects, budgets & milestones</div>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400" />
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab('gantt')}
-                    className="w-full p-3.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-blue-500/50 rounded-xl flex items-center justify-between transition-all cursor-pointer text-left group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold">
-                        <BarChart3 className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-white group-hover:text-blue-300">Gantt Milestone Schedule</div>
-                        <div className="text-[10px] text-slate-400">Critical path & completion tracking</div>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-blue-400" />
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab('site-diary')}
-                    className="w-full p-3.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-emerald-500/50 rounded-xl flex items-center justify-between transition-all cursor-pointer text-left group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center font-bold">
-                        <CloudSun className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-white group-hover:text-amber-300">Weather Report</div>
-                        <div className="text-[10px] text-slate-400">Live atmospheric telemetry & forecasts</div>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-emerald-400" />
-                  </button>
-
-                  <button
-                    onClick={() => setActiveTab('documents')}
-                    className="w-full p-3.5 bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-purple-500/50 rounded-xl flex items-center justify-between transition-all cursor-pointer text-left group"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center font-bold">
-                        <FileCode className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <div className="text-xs font-bold text-white group-hover:text-purple-300">Document Management</div>
-                        <div className="text-[10px] text-slate-400">CAD files, spreadsheets & project archives</div>
-                      </div>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-purple-400" />
-                  </button>
-                </div>
-              </div>
-
-            </div>
           </div>
         )}
-      </div>
-    )}
-
+        
         {/* ------------------------------------------------------------- */}
         {/* TAB 5.1: COMMERCIAL SITES HUB */}
         {/* ------------------------------------------------------------- */}

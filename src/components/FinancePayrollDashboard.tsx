@@ -332,15 +332,15 @@ export default function FinancePayrollDashboard({
       )}
 
       {/* Header Banner */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-emerald-950/30 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400">
-            <Banknote className="w-6 h-6" />
+          <div className="p-2 bg-slate-900 border border-slate-800 rounded-lg text-emerald-400">
+            <Banknote className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-white tracking-tight">Weekly Site Payroll Engine</h1>
-              <span className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded-full font-bold border ${
+              <h1 className="text-base font-bold text-white tracking-tight">Weekly Site Payroll Engine</h1>
+              <span className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-medium border ${
                 !isFinance
                   ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
                   : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
@@ -349,18 +349,18 @@ export default function FinancePayrollDashboard({
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
-              Automated wage calculation from verified site attendance logs • Cash advance vale deductions • Print-ready payroll sheets
+              Automated wage calculation from verified site attendance logs • Cash advance deductions • Direct payroll ledger
             </p>
           </div>
         </div>
 
         {/* View Toggle Tabs */}
-        <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 p-1 rounded-xl text-xs font-semibold self-start md:self-auto">
+        <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1 rounded-lg text-xs font-medium self-start md:self-auto">
           <button
             onClick={() => { setActiveTab('calculator'); setSelectedRunDetail(null); }}
-            className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
               activeTab === 'calculator' && !selectedRunDetail
-                ? 'bg-amber-500 text-slate-950 shadow-md font-bold'
+                ? 'bg-amber-500 text-slate-950 font-semibold'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
@@ -368,13 +368,13 @@ export default function FinancePayrollDashboard({
           </button>
           <button
             onClick={() => setActiveTab('history')}
-            className={`px-3 py-1.5 rounded-lg transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
               activeTab === 'history'
-                ? 'bg-amber-500 text-slate-950 shadow-md font-bold'
+                ? 'bg-amber-500 text-slate-950 font-semibold'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
-            Finalized Payroll Archive ({pastRuns.length})
+            Payroll Archive ({pastRuns.length})
           </button>
         </div>
       </div>
