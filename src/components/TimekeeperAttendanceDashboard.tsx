@@ -446,19 +446,19 @@ export default function TimekeeperAttendanceDashboard({
       </div>
 
       {/* Filter & Selector Bar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-center">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-xs space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
           
           {/* Project Selector */}
           <div className="md:col-span-4">
-            <label className="block text-[11px] font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+            <label className="block text-[10px] font-mono text-slate-400 mb-1 flex items-center gap-1.5 uppercase tracking-wider font-bold">
               <HardHat className="w-3.5 h-3.5 text-amber-400" />
-              <span>Assigned Construction Site</span>
+              <span>Commercial Site</span>
             </label>
             <select
               value={selectedProjectId}
               onChange={(e) => handleProjectChange(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer"
+              className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer"
             >
               {projects.map(p => (
                 <option key={p.id} value={p.id}>
@@ -470,7 +470,7 @@ export default function TimekeeperAttendanceDashboard({
 
           {/* Date Picker */}
           <div className="md:col-span-3">
-            <label className="block text-[11px] font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+            <label className="block text-[10px] font-mono text-slate-400 mb-1 flex items-center gap-1.5 uppercase tracking-wider font-bold">
               <Calendar className="w-3.5 h-3.5 text-amber-400" />
               <span>Attendance Date</span>
             </label>
@@ -479,22 +479,22 @@ export default function TimekeeperAttendanceDashboard({
               value={selectedDate}
               onChange={(e) => setSelectedDate(e.target.value)}
               {...(!isOM ? { max: new Date().toISOString().split('T')[0] } : {})}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer"
+              className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 cursor-pointer"
             />
           </div>
 
           {/* Search Worker Input */}
           <div className="md:col-span-3">
-            <label className="block text-[11px] font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+            <label className="block text-[10px] font-mono text-slate-400 mb-1 flex items-center gap-1.5 uppercase tracking-wider font-bold">
               <Search className="w-3.5 h-3.5 text-slate-400" />
-              <span>Search Worker / Position</span>
+              <span>Filter Worker / Trade</span>
             </label>
             <input
               type="text"
-              placeholder="Filter by name..."
+              placeholder="Search by name..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              className="w-full bg-slate-950 border border-slate-700/80 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
             />
           </div>
 
@@ -503,7 +503,7 @@ export default function TimekeeperAttendanceDashboard({
             <button
               onClick={loadData}
               disabled={isLoading}
-              className="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5 border border-slate-700 transition-colors cursor-pointer"
+              className="w-full py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center gap-1.5 border border-slate-700 transition-colors cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-amber-400' : ''}`} />
               <span>Refresh</span>
@@ -561,31 +561,31 @@ export default function TimekeeperAttendanceDashboard({
 
       {/* Summary KPI Cards for the Date */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
-          <div className="text-[10px] text-slate-400 uppercase font-semibold">Total Assigned</div>
-          <div className="text-xl font-bold text-white mt-1">{stats.total} <span className="text-xs font-normal text-slate-500">workers</span></div>
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-1">
+          <div className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-semibold">Total Assigned</div>
+          <div className="text-xl font-bold font-mono text-white">{stats.total} <span className="text-xs font-normal text-slate-500">workers</span></div>
         </div>
-        <div className="bg-slate-900 border border-emerald-900/40 rounded-xl p-3">
-          <div className="text-[10px] text-emerald-400 uppercase font-semibold">Present (1.0 Day)</div>
-          <div className="text-xl font-bold text-emerald-300 mt-1">{stats.present}</div>
+        <div className="bg-slate-900 border border-emerald-900/40 rounded-xl p-3 space-y-1">
+          <div className="text-[10px] text-emerald-400 uppercase font-mono tracking-wider font-semibold">Present (1.0 Day)</div>
+          <div className="text-xl font-bold font-mono text-emerald-300">{stats.present}</div>
         </div>
-        <div className="bg-slate-900 border border-amber-900/40 rounded-xl p-3">
-          <div className="text-[10px] text-amber-400 uppercase font-semibold">Half-Day (0.5 Day)</div>
-          <div className="text-xl font-bold text-amber-300 mt-1">{stats.halfDay}</div>
+        <div className="bg-slate-900 border border-amber-900/40 rounded-xl p-3 space-y-1">
+          <div className="text-[10px] text-amber-400 uppercase font-mono tracking-wider font-semibold">Half-Day (0.5 Day)</div>
+          <div className="text-xl font-bold font-mono text-amber-300">{stats.halfDay}</div>
         </div>
-        <div className="bg-slate-900 border border-rose-900/40 rounded-xl p-3">
-          <div className="text-[10px] text-rose-400 uppercase font-semibold">Absent (0.0 Day)</div>
-          <div className="text-xl font-bold text-rose-300 mt-1">{stats.absent}</div>
+        <div className="bg-slate-900 border border-rose-900/40 rounded-xl p-3 space-y-1">
+          <div className="text-[10px] text-rose-400 uppercase font-mono tracking-wider font-semibold">Absent (0.0 Day)</div>
+          <div className="text-xl font-bold font-mono text-rose-300">{stats.absent}</div>
         </div>
-        <div className="bg-slate-900 border border-blue-900/40 rounded-xl p-3">
-          <div className="text-[10px] text-blue-400 uppercase font-semibold">Total Overtime</div>
-          <div className="text-xl font-bold text-blue-300 mt-1">{stats.totalOt.toFixed(1)} <span className="text-xs font-normal text-slate-500">hrs</span></div>
+        <div className="bg-slate-900 border border-blue-900/40 rounded-xl p-3 space-y-1">
+          <div className="text-[10px] text-blue-400 uppercase font-mono tracking-wider font-semibold">Total Overtime</div>
+          <div className="text-xl font-bold font-mono text-blue-300">{stats.totalOt.toFixed(1)} <span className="text-xs font-normal text-slate-500">hrs</span></div>
         </div>
       </div>
 
       {/* Warning Alert Banner: Only displays AFTER API returns empty array, never during intermediate loading */}
       {!isLoading && hasLoadedArtisans && workers.length === 0 && (
-        <div className="bg-amber-950/30 border border-amber-500/30 rounded-2xl p-4 flex items-center gap-3 text-xs text-amber-200 shadow-md">
+        <div className="bg-amber-950/30 border border-amber-500/30 rounded-xl p-3.5 flex items-center gap-3 text-xs text-amber-200 shadow-md">
           <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
           <div>
             <span className="font-semibold text-amber-300">No active artisans assigned: </span>
@@ -595,7 +595,7 @@ export default function TimekeeperAttendanceDashboard({
       )}
 
       {/* Workers Attendance Check-In Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col flex-1">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-sm font-bold text-white">In-House Artisan Muster Roll (Direct Payroll)</h2>
@@ -640,28 +640,28 @@ export default function TimekeeperAttendanceDashboard({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-slate-950/70 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800 font-semibold">
+          <table className="w-full text-left text-xs font-sans">
+            <thead className="bg-slate-950/70 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800 font-semibold font-mono">
               <tr>
-                <th className="py-3 px-4">#</th>
-                <th className="py-3 px-4">Worker Name & Position</th>
-                {!isTimekeeper && <th className="py-3 px-4">Daily Rate</th>}
-                <th className="py-3 px-4 text-center">Attendance Status</th>
-                <th className="py-3 px-4 text-center">Overtime Hours</th>
-                {!isTimekeeper && <th className="py-3 px-4 text-right">Effective Wage Ratio</th>}
+                <th className="py-2.5 px-3">#</th>
+                <th className="py-2.5 px-3">Worker Name &amp; Trade</th>
+                {!isTimekeeper && <th className="py-2.5 px-3">Daily Rate</th>}
+                <th className="py-2.5 px-3 text-center">Attendance Status</th>
+                <th className="py-2.5 px-3 text-center">Overtime Hours</th>
+                {!isTimekeeper && <th className="py-2.5 px-3 text-right">Effective Wage Ratio</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
               {filteredWorkers.length === 0 ? (
                 <tr>
-                  <td colSpan={isTimekeeper ? 4 : 6} className="py-12 text-center text-slate-500">
+                  <td colSpan={isTimekeeper ? 4 : 6} className="py-10 text-center text-slate-500">
                     {isLoading || !hasLoadedArtisans ? (
                       <div className="flex flex-col items-center gap-2">
                         <div className="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin"></div>
-                        <span>Loading assigned project workforce...</span>
+                        <span className="text-xs">Loading assigned project workforce...</span>
                       </div>
                     ) : (
-                      <div className="text-slate-400 text-xs sm:text-sm font-medium">
+                      <div className="text-slate-400 text-xs font-medium">
                         No active artisans assigned to this project. Assign workers via Workforce Management.
                       </div>
                     )}
@@ -681,46 +681,46 @@ export default function TimekeeperAttendanceDashboard({
                         isAbsent ? 'bg-rose-950/10' : isHalfDay ? 'bg-amber-950/10' : ''
                       }`}
                     >
-                      <td className="py-3 px-4 font-mono text-slate-500">{idx + 1}</td>
+                      <td className="py-2.5 px-3 font-mono text-slate-500">{idx + 1}</td>
                       
                       {/* Name & Position */}
-                      <td className="py-3 px-4">
+                      <td className="py-2.5 px-3">
                         <div className="font-semibold text-white">{worker.name}</div>
-                        <div className="text-[11px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
+                        <div className="text-[10px] text-slate-400 font-mono flex items-center gap-1.5 mt-0.5">
                           <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">{worker.position}</span>
-                          <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 font-mono">
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-semibold bg-emerald-950/70 text-emerald-300 border border-emerald-800/60 font-mono">
                             In-House Artisan
                           </span>
-                          <span className="text-slate-500">•</span>
+                          <span className="text-slate-600">•</span>
                           <span className="text-slate-500">{worker.id}</span>
                         </div>
                       </td>
 
                       {/* Daily Rate (Hidden from Timekeeper) */}
                       {!isTimekeeper && (
-                        <td className="py-3 px-4 font-mono text-slate-300">
+                        <td className="py-2.5 px-3 font-mono text-slate-300">
                           ₱{(worker.dailyRate || 0).toLocaleString()}
                           <div className="text-[10px] text-slate-500">OT: ₱{worker.hourlyOtRate || 0}/hr</div>
                         </td>
                       )}
 
                       {/* Quick Toggles: Present / Half-day / Absent */}
-                      <td className="py-3 px-4">
-                        <div className={`flex items-center justify-center gap-1.5 ${isFinance ? 'pointer-events-none opacity-80 cursor-default' : ''}`}>
+                      <td className="py-2.5 px-3">
+                        <div className={`flex items-center justify-center gap-1 ${isFinance ? 'pointer-events-none opacity-80 cursor-default' : ''}`}>
                           {/* Present Button */}
                           <button
                             type="button"
                             disabled={isDateLocked || isFinance}
                             onClick={() => handleSetStatus(worker.id, 'PRESENT')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
                               isFinance ? 'pointer-events-none opacity-80 cursor-default' : 'cursor-pointer'
                             } ${
                               isPresent
-                                ? 'bg-emerald-600 text-white shadow-md shadow-emerald-600/30'
-                                : 'bg-slate-800 text-slate-400 hover:text-emerald-300 hover:bg-slate-700'
+                                ? 'bg-emerald-600 text-white shadow-xs'
+                                : 'bg-slate-800/80 text-slate-400 hover:text-emerald-300 hover:bg-slate-700'
                             }`}
                           >
-                            <Check className="w-3.5 h-3.5" />
+                            <Check className="w-3 h-3" />
                             <span>Present</span>
                           </button>
 
@@ -729,15 +729,15 @@ export default function TimekeeperAttendanceDashboard({
                             type="button"
                             disabled={isDateLocked || isFinance}
                             onClick={() => handleSetStatus(worker.id, 'HALF_DAY')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
                               isFinance ? 'pointer-events-none opacity-80 cursor-default' : 'cursor-pointer'
                             } ${
                               isHalfDay
-                                ? 'bg-amber-600 text-white shadow-md shadow-amber-600/30'
-                                : 'bg-slate-800 text-slate-400 hover:text-amber-300 hover:bg-slate-700'
+                                ? 'bg-amber-600 text-white shadow-xs'
+                                : 'bg-slate-800/80 text-slate-400 hover:text-amber-300 hover:bg-slate-700'
                             }`}
                           >
-                            <Clock className="w-3.5 h-3.5" />
+                            <Clock className="w-3 h-3" />
                             <span>Half-Day</span>
                           </button>
 
@@ -746,23 +746,23 @@ export default function TimekeeperAttendanceDashboard({
                             type="button"
                             disabled={isDateLocked || isFinance}
                             onClick={() => handleSetStatus(worker.id, 'ABSENT')}
-                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1 ${
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-bold transition-all flex items-center gap-1 ${
                               isFinance ? 'pointer-events-none opacity-80 cursor-default' : 'cursor-pointer'
                             } ${
                               isAbsent
-                                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
-                                : 'bg-slate-800 text-slate-400 hover:text-rose-300 hover:bg-slate-700'
+                                ? 'bg-rose-600 text-white shadow-xs'
+                                : 'bg-slate-800/80 text-slate-400 hover:text-rose-300 hover:bg-slate-700'
                             }`}
                           >
-                            <X className="w-3.5 h-3.5" />
+                            <X className="w-3 h-3" />
                             <span>Absent</span>
                           </button>
                         </div>
                       </td>
 
                       {/* OT Hours Input */}
-                      <td className="py-3 px-4 text-center">
-                        <div className={`inline-flex items-center gap-1.5 bg-slate-950 border border-slate-700 rounded-xl px-2 py-1 ${isFinance ? 'pointer-events-none opacity-80 cursor-default' : ''}`}>
+                      <td className="py-2.5 px-3 text-center">
+                        <div className={`inline-flex items-center gap-1 bg-slate-950 border border-slate-700/80 rounded-lg px-2 py-0.5 ${isFinance ? 'pointer-events-none opacity-80 cursor-default' : ''}`}>
                           <input
                             type="number"
                             min="0"
@@ -771,7 +771,7 @@ export default function TimekeeperAttendanceDashboard({
                             disabled={isDateLocked || isAbsent || isFinance}
                             value={entry.otHours}
                             onChange={(e) => handleSetOt(worker.id, parseFloat(e.target.value) || 0)}
-                            className={`w-14 bg-transparent text-center text-xs font-mono font-bold text-amber-400 focus:outline-none disabled:opacity-30 ${isFinance ? 'pointer-events-none opacity-80 cursor-default' : ''}`}
+                            className={`w-12 bg-transparent text-center text-xs font-mono font-bold text-amber-400 focus:outline-none disabled:opacity-30 ${isFinance ? 'pointer-events-none opacity-80 cursor-default' : ''}`}
                           />
                           <span className="text-[10px] text-slate-500 font-mono">hrs</span>
                         </div>
@@ -779,7 +779,7 @@ export default function TimekeeperAttendanceDashboard({
 
                       {/* Effective Wage Ratio (Hidden from Timekeeper) */}
                       {!isTimekeeper && (
-                        <td className="py-3 px-4 text-right font-mono">
+                        <td className="py-2.5 px-3 text-right font-mono">
                           {isPresent && (
                             <span className="text-emerald-400 font-bold">1.0 Day</span>
                           )}

@@ -54,6 +54,7 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ONLINE' | 'BREAK' | 'OFFLINE'>('ALL');
   const [employmentFilter, setEmploymentFilter] = useState<'ALL' | 'INTERNAL' | 'OUTSOURCED'>('ALL');
   const [viewMode, setViewMode] = useState<'MESSENGER' | 'GRID'>('MESSENGER');
+  const [dossierTab, setDossierTab] = useState<'DEPLOYMENT' | 'PERFORMANCE' | 'CREDENTIALS'>('DEPLOYMENT');
 
   // Manual Allocation Modal State
   const [isAllocModalOpen, setIsAllocModalOpen] = useState<boolean>(false);
@@ -690,243 +691,307 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                       )}
                     </div>
                   </div>
+
+                  {/* Detail Panel Sub-Tabs */}
+                  <div className="flex items-center gap-1.5 pt-3 mt-3 border-t border-slate-800/80">
+                    <button
+                      type="button"
+                      onClick={() => setDossierTab('DEPLOYMENT')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                        dossierTab === 'DEPLOYMENT' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                      }`}
+                    >
+                      Deployment & Role
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDossierTab('PERFORMANCE')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                        dossierTab === 'PERFORMANCE' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                      }`}
+                    >
+                      Performance & Rates
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setDossierTab('CREDENTIALS')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                        dossierTab === 'CREDENTIALS' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                      }`}
+                    >
+                      Credentials & Roll-Call ({workerAudits.length})
+                    </button>
+                  </div>
                 </div>
 
                 {/* Worker Dossier & Field Specifications */}
                 <div className="flex-1 overflow-y-auto p-5 space-y-4">
-                  {/* Live Jobsite Assignment Card */}
-                  <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="text-slate-400 flex items-center gap-1.5 font-bold">
-                        <MapPin className="w-3.5 h-3.5 text-teal-400" />
-                        Commercial Project &amp; Zone Assignment
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => handleOpenAllocationModal(selectedContractor)}
-                          className="text-[11px] font-mono text-teal-400 hover:text-teal-300 underline cursor-pointer"
-                        >
-                          Edit Allocation
-                        </button>
-                        <span className="text-slate-600">|</span>
-                        <span className="text-emerald-400 font-bold">
-                          ● {getPresenceLabel(selectedPresence).text}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                      <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg space-y-1">
-                        <span className="text-[10px] font-mono text-slate-500 block">Current Project</span>
-                        <strong className="text-white text-xs block truncate">
-                          {selectedContractor.activeProjectSite || 'Unassigned (General Pool)'}
-                        </strong>
-                        <span className="text-[10px] text-slate-400 font-mono">
-                          {selectedContractor.activeProjectSite ? 'Commercial Construction Site' : 'Tap "Manual Allocation" to assign'}
-                        </span>
-                      </div>
-
-                      <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg space-y-1">
-                        <span className="text-[10px] font-mono text-slate-500 block">Assigned Work Zone</span>
-                        <strong className="text-slate-200 text-xs block truncate">
-                          {selectedContractor.assignedZone || 'General Site Area'}
-                        </strong>
-                        <span className="text-[10px] text-slate-400 font-mono">Shift: 07:00 AM – 04:00 PM</span>
-                      </div>
-
-                      <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg space-y-1">
-                        <span className="text-[10px] font-mono text-slate-500 block">Contact Phone</span>
-                        <strong className="text-white text-xs block truncate">
-                          {selectedContractor.contact || 'No contact provided'}
-                        </strong>
-                        <span className="text-[10px] text-slate-400 font-mono">Mobile / Radio Channel</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Graphical Metrics & KPIs */}
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                    {/* Active Crew / Role Metric */}
-                    <div className="bg-slate-900/50 border border-slate-800 p-3.5 rounded-xl space-y-1">
-                      <span className="text-[10px] font-mono text-slate-400 block">
-                        {isOfficeOrExecutive(selectedContractor) 
-                          ? 'Workforce Class' 
-                          : isIndividualStaffOrEngineer(selectedContractor) 
-                            ? 'Field Deployment' 
-                            : 'Crew Managed'}
-                      </span>
-                      <div className="flex items-baseline gap-1">
-                        <strong className="text-lg font-bold text-white font-mono">
-                          {isOfficeOrExecutive(selectedContractor) 
-                            ? 'Corporate' 
-                            : isIndividualStaffOrEngineer(selectedContractor) 
-                              ? 'Supervisor' 
-                              : selectedContractor.activeManpower}
-                        </strong>
-                        <span className="text-xs text-slate-500">
-                          {isOfficeOrExecutive(selectedContractor) || isIndividualStaffOrEngineer(selectedContractor) 
-                            ? '(1 Person)' 
-                            : 'workers'}
-                        </span>
-                      </div>
-                      <span className="text-[10px] text-teal-400 font-mono">
-                        {isOfficeOrExecutive(selectedContractor) 
-                          ? 'Executive & Admin Oversight' 
-                          : isIndividualStaffOrEngineer(selectedContractor) 
-                            ? 'Dedicated Site Professional' 
-                            : 'Skilled craft roster'}
-                      </span>
-                    </div>
-
-                    {/* QA Inspection Score */}
-                    <div className="bg-slate-900/50 border border-slate-800 p-3.5 rounded-xl space-y-1.5">
-                      <span className="text-[10px] font-mono text-slate-400 block">QA Inspection Score</span>
-                      {typeof selectedContractor.rating === 'number' && selectedContractor.rating > 0 ? (
-                        <>
-                          <div className="flex items-center justify-between text-xs font-mono">
-                            <strong className="text-amber-400 font-bold text-sm">
-                              ⭐ {selectedContractor.rating.toFixed(1)} / 5.0
-                            </strong>
-                          </div>
-                          <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-amber-400 rounded-full"
-                              style={{ width: `${(selectedContractor.rating / 5) * 100}%` }}
-                            ></div>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="space-y-1">
-                          <strong className="text-slate-500 font-mono text-xs block">Pending QA Audit</strong>
-                          <span className="text-[10px] text-slate-600 block">No field QA audits logged yet</span>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Milestone Progress Pace */}
-                    <div className="bg-slate-900/50 border border-slate-800 p-3.5 rounded-xl space-y-1.5">
-                      <span className="text-[10px] font-mono text-slate-400 block">Milestone Pace</span>
-                      {typeof selectedContractor.milestoneProgress === 'number' && selectedContractor.milestoneProgress > 0 ? (
-                        <>
-                          <div className="flex items-center justify-between text-xs font-mono">
-                            <strong className="text-blue-400 font-bold text-sm">
-                              {selectedContractor.milestoneProgress}%
-                            </strong>
-                            <span className="text-[10px] text-slate-500">
-                              {selectedContractor.milestoneProgress >= 100 ? 'Completed' : 'On Track'}
+                  {dossierTab === 'DEPLOYMENT' && (
+                    <div className="space-y-4 animate-fadeIn">
+                      {/* Live Jobsite Assignment Card */}
+                      <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-4 space-y-3">
+                        <div className="flex items-center justify-between text-xs font-mono">
+                          <span className="text-slate-400 flex items-center gap-1.5 font-bold">
+                            <MapPin className="w-3.5 h-3.5 text-teal-400" />
+                            Commercial Project &amp; Zone Assignment
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenAllocationModal(selectedContractor)}
+                              className="text-[11px] font-mono text-teal-400 hover:text-teal-300 underline cursor-pointer"
+                            >
+                              Edit Allocation
+                            </button>
+                            <span className="text-slate-600">|</span>
+                            <span className="text-emerald-400 font-bold">
+                              ● {getPresenceLabel(selectedPresence).text}
                             </span>
                           </div>
-                          <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-blue-500 rounded-full"
-                              style={{ width: `${Math.min(100, selectedContractor.milestoneProgress)}%` }}
-                            ></div>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="space-y-1">
-                          <strong className="text-slate-500 font-mono text-xs block">No Active Milestone</strong>
-                          <span className="text-[10px] text-slate-600 block">Pace tracked via project tasks</span>
                         </div>
-                      )}
-                    </div>
-                  </div>
 
-                  {/* Financial / Compensation Breakdown */}
-                  <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 space-y-2.5">
-                    <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="text-slate-400 font-bold flex items-center gap-1.5">
-                        <Award className="w-3.5 h-3.5 text-teal-400" />
-                        Compensation &amp; Contract Framework
-                      </span>
-                      <span className="text-slate-500 text-[10px]">PHILIPPINE PESO (₱)</span>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs font-mono">
-                      <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                        <span className="text-[10px] text-slate-500 block">Daily Wage</span>
-                        <strong className="text-emerald-400 text-xs">
-                          {selectedContractor.dailyRate ? `₱${selectedContractor.dailyRate.toLocaleString()}` : 'Salaried'}
-                        </strong>
-                      </div>
-                      <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                        <span className="text-[10px] text-slate-500 block">Monthly Equivalent</span>
-                        <strong className="text-white text-xs">
-                          ₱{(selectedContractor.monthlySalary || (selectedContractor.dailyRate ? selectedContractor.dailyRate * 22 : 0)).toLocaleString()}
-                        </strong>
-                      </div>
-                      <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 col-span-2 sm:col-span-1">
-                        <span className="text-[10px] text-slate-500 block">Contract Scope</span>
-                        <strong className="text-teal-300 text-xs truncate block">
-                          {selectedContractor.contractAmount ? `₱${selectedContractor.contractAmount.toLocaleString()}` : 'CTVill In-House'}
-                        </strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Certifications & Trade Badges */}
-                  <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-4 space-y-2">
-                    <span className="text-xs font-mono text-slate-400 block font-bold">
-                      Professional Accreditations &amp; Safety Badges
-                    </span>
-                    {selectedContractor.certifications && selectedContractor.certifications.length > 0 ? (
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        {selectedContractor.certifications.map((cert, cIdx) => (
-                          <span 
-                            key={cIdx} 
-                            className="bg-teal-950/60 border border-teal-800 text-teal-300 text-[10px] font-mono px-2.5 py-1 rounded-lg"
-                          >
-                            ✓ {cert}
-                          </span>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="pt-1 text-slate-600 text-[11px] font-mono flex items-center gap-1.5">
-                        <span>No registered accreditations or trade certifications recorded yet.</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Recent Roll-Call Audits for this Contractor */}
-                  <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 space-y-2.5">
-                    <div className="flex items-center justify-between text-xs font-mono">
-                      <span className="text-slate-300 font-bold flex items-center gap-1.5">
-                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                        Recent Field Roll-Call Audits
-                      </span>
-                      <span className="text-slate-500 text-[10px]">{workerAudits.length} Records</span>
-                    </div>
-
-                    {(selectedContractor.workforce_class === 'Corporate' || selectedContractor.workforceClass === 'Corporate' || isOfficeOrExecutive(selectedContractor)) ? (
-                      <div className="text-center py-3 text-slate-500 text-xs font-mono">
-                        Corporate and executive office personnel are not subject to field roll-call audits.
-                      </div>
-                    ) : workerAudits.length === 0 ? (
-                      <div className="text-center py-3 text-slate-500 text-xs font-mono">
-                        No recent roll-call audit logged today for this contractor. Click &quot;Verify Roll-Call Muster&quot; to register attendance.
-                      </div>
-                    ) : (
-                      <div className="divide-y divide-slate-800/80">
-                        {workerAudits.slice(0, 3).map(audit => (
-                          <div key={audit.id} className="py-2 flex items-center justify-between gap-2 text-xs font-mono">
-                            <div>
-                              <span className="text-white font-bold block">{audit.date}</span>
-                              <span className="text-slate-500 text-[10px]">{audit.assignedSectorOrLot} • {audit.shift}</span>
-                            </div>
-                            <div className="text-right">
-                              <span className="text-emerald-400 font-bold block">
-                                {audit.verifiedHeadcount} / {audit.claimedHeadcount} Verified
-                              </span>
-                              <span className="text-[10px] text-teal-400">
-                                {audit.verificationStatus}
-                              </span>
-                            </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                          <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg space-y-1">
+                            <span className="text-[10px] font-mono text-slate-500 block">Current Project</span>
+                            <strong className="text-white text-xs block truncate">
+                              {selectedContractor.activeProjectSite || 'Unassigned (General Pool)'}
+                            </strong>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              {selectedContractor.activeProjectSite ? 'Commercial Construction Site' : 'Tap "Manual Allocation" to assign'}
+                            </span>
                           </div>
-                        ))}
+
+                          <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg space-y-1">
+                            <span className="text-[10px] font-mono text-slate-500 block">Assigned Work Zone</span>
+                            <strong className="text-slate-200 text-xs block truncate">
+                              {selectedContractor.assignedZone || 'General Site Area'}
+                            </strong>
+                            <span className="text-[10px] text-slate-400 font-mono">Shift: 07:00 AM – 04:00 PM</span>
+                          </div>
+
+                          <div className="bg-slate-950/80 border border-slate-800 p-2.5 rounded-lg space-y-1">
+                            <span className="text-[10px] font-mono text-slate-500 block">Contact Phone</span>
+                            <strong className="text-white text-xs block truncate">
+                              {selectedContractor.contact || 'No contact provided'}
+                            </strong>
+                            <span className="text-[10px] text-slate-400 font-mono">Mobile / Radio Channel</span>
+                          </div>
+                        </div>
                       </div>
-                    )}
-                  </div>
+
+                      {/* Crew Deployment Overview */}
+                      <div className="bg-slate-900/50 border border-slate-800 p-4 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between text-xs font-mono">
+                          <span className="text-slate-400 font-bold">Crew Deployment Capacity</span>
+                          <span className="text-teal-400 font-bold">
+                            {isOfficeOrExecutive(selectedContractor) 
+                              ? 'Corporate Staff (1)' 
+                              : isIndividualStaffOrEngineer(selectedContractor) 
+                                ? 'Dedicated Professional (1)' 
+                                : `${selectedContractor.activeManpower} Craft Workers`}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-400">
+                          {isOfficeOrExecutive(selectedContractor)
+                            ? 'Executive and operational administrative personnel assigned to corporate planning, project oversight, and financial management.'
+                            : isIndividualStaffOrEngineer(selectedContractor)
+                              ? 'Certified construction professional deployed for field engineering, MEP coordination, or trade supervision.'
+                              : `Trade crew under contractor supervision actively deployed across commercial fit-out works.`}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {dossierTab === 'PERFORMANCE' && (
+                    <div className="space-y-4 animate-fadeIn">
+                      {/* Graphical Metrics & KPIs */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {/* Active Crew / Role Metric */}
+                        <div className="bg-slate-900/50 border border-slate-800 p-3.5 rounded-xl space-y-1">
+                          <span className="text-[10px] font-mono text-slate-400 block">
+                            {isOfficeOrExecutive(selectedContractor) 
+                              ? 'Workforce Class' 
+                              : isIndividualStaffOrEngineer(selectedContractor) 
+                                ? 'Field Deployment' 
+                                : 'Crew Managed'}
+                          </span>
+                          <div className="flex items-baseline gap-1">
+                            <strong className="text-lg font-bold text-white font-mono">
+                              {isOfficeOrExecutive(selectedContractor) 
+                                ? 'Corporate' 
+                                : isIndividualStaffOrEngineer(selectedContractor) 
+                                  ? 'Supervisor' 
+                                  : selectedContractor.activeManpower}
+                            </strong>
+                            <span className="text-xs text-slate-500">
+                              {isOfficeOrExecutive(selectedContractor) || isIndividualStaffOrEngineer(selectedContractor) 
+                                ? '(1 Person)' 
+                                : 'workers'}
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-teal-400 font-mono">
+                            {isOfficeOrExecutive(selectedContractor) 
+                              ? 'Executive & Admin Oversight' 
+                              : isIndividualStaffOrEngineer(selectedContractor) 
+                                ? 'Dedicated Site Professional' 
+                                : 'Skilled craft roster'}
+                          </span>
+                        </div>
+
+                        {/* QA Inspection Score */}
+                        <div className="bg-slate-900/50 border border-slate-800 p-3.5 rounded-xl space-y-1.5">
+                          <span className="text-[10px] font-mono text-slate-400 block">QA Inspection Score</span>
+                          {typeof selectedContractor.rating === 'number' && selectedContractor.rating > 0 ? (
+                            <>
+                              <div className="flex items-center justify-between text-xs font-mono">
+                                <strong className="text-amber-400 font-bold text-sm">
+                                  ⭐ {selectedContractor.rating.toFixed(1)} / 5.0
+                                </strong>
+                              </div>
+                              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-amber-400 rounded-full"
+                                  style={{ width: `${(selectedContractor.rating / 5) * 100}%` }}
+                                ></div>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="space-y-1">
+                              <strong className="text-slate-500 font-mono text-xs block">Pending QA Audit</strong>
+                              <span className="text-[10px] text-slate-600 block">No field QA audits logged yet</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Milestone Progress Pace */}
+                        <div className="bg-slate-900/50 border border-slate-800 p-3.5 rounded-xl space-y-1.5">
+                          <span className="text-[10px] font-mono text-slate-400 block">Milestone Pace</span>
+                          {typeof selectedContractor.milestoneProgress === 'number' && selectedContractor.milestoneProgress > 0 ? (
+                            <>
+                              <div className="flex items-center justify-between text-xs font-mono">
+                                <strong className="text-blue-400 font-bold text-sm">
+                                  {selectedContractor.milestoneProgress}%
+                                </strong>
+                                <span className="text-[10px] text-slate-500">
+                                  {selectedContractor.milestoneProgress >= 100 ? 'Completed' : 'On Track'}
+                                </span>
+                              </div>
+                              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                                <div 
+                                  className="h-full bg-blue-500 rounded-full"
+                                  style={{ width: `${Math.min(100, selectedContractor.milestoneProgress)}%` }}
+                                ></div>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="space-y-1">
+                              <strong className="text-slate-500 font-mono text-xs block">No Active Milestone</strong>
+                              <span className="text-[10px] text-slate-600 block">Pace tracked via project tasks</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Financial / Compensation Breakdown */}
+                      <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                        <div className="flex items-center justify-between text-xs font-mono">
+                          <span className="text-slate-400 font-bold flex items-center gap-1.5">
+                            <Award className="w-3.5 h-3.5 text-teal-400" />
+                            Compensation &amp; Contract Framework
+                          </span>
+                          <span className="text-slate-500 text-[10px]">PHILIPPINE PESO (₱)</span>
+                        </div>
+
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs font-mono">
+                          <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            <span className="text-[10px] text-slate-500 block">Daily Wage</span>
+                            <strong className="text-emerald-400 text-xs">
+                              {selectedContractor.dailyRate ? `₱${selectedContractor.dailyRate.toLocaleString()}` : 'Salaried'}
+                            </strong>
+                          </div>
+                          <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
+                            <span className="text-[10px] text-slate-500 block">Monthly Equivalent</span>
+                            <strong className="text-white text-xs">
+                              ₱{(selectedContractor.monthlySalary || (selectedContractor.dailyRate ? selectedContractor.dailyRate * 22 : 0)).toLocaleString()}
+                            </strong>
+                          </div>
+                          <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 col-span-2 sm:col-span-1">
+                            <span className="text-[10px] text-slate-500 block">Contract Scope</span>
+                            <strong className="text-teal-300 text-xs truncate block">
+                              {selectedContractor.contractAmount ? `₱${selectedContractor.contractAmount.toLocaleString()}` : 'CTVill In-House'}
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {dossierTab === 'CREDENTIALS' && (
+                    <div className="space-y-4 animate-fadeIn">
+                      {/* Certifications & Trade Badges */}
+                      <div className="bg-slate-900/30 border border-slate-800 rounded-xl p-4 space-y-2">
+                        <span className="text-xs font-mono text-slate-400 block font-bold">
+                          Professional Accreditations &amp; Safety Badges
+                        </span>
+                        {selectedContractor.certifications && selectedContractor.certifications.length > 0 ? (
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            {selectedContractor.certifications.map((cert, cIdx) => (
+                              <span 
+                                key={cIdx} 
+                                className="bg-teal-950/60 border border-teal-800 text-teal-300 text-[10px] font-mono px-2.5 py-1 rounded-lg"
+                              >
+                                ✓ {cert}
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="pt-1 text-slate-600 text-[11px] font-mono flex items-center gap-1.5">
+                            <span>No registered accreditations or trade certifications recorded yet.</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Recent Roll-Call Audits for this Contractor */}
+                      <div className="bg-slate-900/40 border border-slate-800 rounded-xl p-4 space-y-2.5">
+                        <div className="flex items-center justify-between text-xs font-mono">
+                          <span className="text-slate-300 font-bold flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                            Recent Field Roll-Call Audits
+                          </span>
+                          <span className="text-slate-500 text-[10px]">{workerAudits.length} Records</span>
+                        </div>
+
+                        {(selectedContractor.workforce_class === 'Corporate' || selectedContractor.workforceClass === 'Corporate' || isOfficeOrExecutive(selectedContractor)) ? (
+                          <div className="text-center py-3 text-slate-500 text-xs font-mono">
+                            Corporate and executive office personnel are not subject to field roll-call audits.
+                          </div>
+                        ) : workerAudits.length === 0 ? (
+                          <div className="text-center py-3 text-slate-500 text-xs font-mono">
+                            No recent roll-call audit logged today for this contractor. Click &quot;Verify Roll-Call Muster&quot; to register attendance.
+                          </div>
+                        ) : (
+                          <div className="divide-y divide-slate-800/80">
+                            {workerAudits.slice(0, 5).map(audit => (
+                              <div key={audit.id} className="py-2 flex items-center justify-between gap-2 text-xs font-mono">
+                                <div>
+                                  <span className="text-white font-bold block">{audit.date}</span>
+                                  <span className="text-slate-500 text-[10px]">{audit.assignedSectorOrLot} • {audit.shift}</span>
+                                </div>
+                                <div className="text-right">
+                                  <span className="text-emerald-400 font-bold block">
+                                    {audit.verifiedHeadcount} / {audit.claimedHeadcount} Verified
+                                  </span>
+                                  <span className="text-[10px] text-teal-400">
+                                    {audit.verificationStatus}
+                                  </span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </>
             ) : (

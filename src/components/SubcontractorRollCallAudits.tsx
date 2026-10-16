@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import {
   ShieldCheck, AlertTriangle, Award, BadgeAlert,
-  ClipboardList, Plus, Building2, Filter, MapPin, CheckCircle2
+  ClipboardList, Plus, Building2, Filter, MapPin, CheckCircle2, Search
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart as ReBarChart, Bar,
@@ -29,6 +29,7 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
   notify,
 }) => {
   const [selectedSite, setSelectedSite] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
   const audits = manpowerAudits;
 
   // Derive unique list of active commercial sites / project names
@@ -63,11 +64,10 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
     return Array.from(set).sort();
   }, [projects, audits]);
 
-  // Filter audits based on selectedSite
+  // Filter audits based on selectedSite and searchQuery
   const filteredAudits = useMemo(() => {
     return audits.filter(audit => {
-      if (selectedSite === 'ALL') return true;
-      return (
+      const matchesSite = selectedSite === 'ALL' || (
         audit.projectId === selectedSite ||
         audit.allocatedZone === selectedSite ||
         audit.projectTitle?.toLowerCase() === selectedSite.toLowerCase() ||
@@ -75,8 +75,18 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
         (audit.assignedSectorOrLot && audit.assignedSectorOrLot.toLowerCase().includes(selectedSite.toLowerCase())) ||
         (audit.assignedSectorOrLot && selectedSite.toLowerCase().includes(audit.assignedSectorOrLot.toLowerCase()))
       );
+      if (!matchesSite) return false;
+
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      return (
+        audit.contractorName?.toLowerCase().includes(q) ||
+        audit.specialty?.toLowerCase().includes(q) ||
+        audit.remarks?.toLowerCase().includes(q) ||
+        audit.assignedSectorOrLot?.toLowerCase().includes(q)
+      );
     });
-  }, [audits, selectedSite]);
+  }, [audits, selectedSite, searchQuery]);
 
   // Dynamic chart data for filtered audits
   const chartData = useMemo(() => {
@@ -101,9 +111,9 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
   const isReadOnlyMode = readOnly || isFinance;
 
   return (
-    <div className="space-y-6 animate-fadeIn">
-      {/* View Header with Project Selector */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+    <div className="space-y-4 animate-fadeIn">
+      {/* View Header with Project Selector & Search */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <ShieldCheck className="w-4 h-4 text-blue-400" />
@@ -111,40 +121,50 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
               {isFinance ? 'FINANCE AUDIT VIEW • READ-ONLY PROTECTION' : 'SUBCONTRACTOR GATE MUSTER & ROLL-CALL VERIFICATION'}
             </span>
           </div>
-          <h3 className="text-lg font-bold text-white flex items-center gap-2">
+          <h3 className="text-base font-bold text-white flex items-center gap-2">
             Subcontractor Roll-Call Audits
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Certified field supervisor roll-calls, GPS geotagged attendance, biometric headcount, and anti-ghost discrepancy auditing.
+            Field supervisor roll-calls, GPS geotagged attendance, biometric headcount, and anti-ghost discrepancy auditing.
           </p>
         </div>
 
-        {/* Project Filter Selector */}
-        <div className="flex flex-wrap items-center gap-2.5">
-          <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-lg">
-            <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <div className="flex flex-col">
-              <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider font-bold">Project Site Filter</span>
-              <select
-                value={selectedSite}
-                onChange={e => setSelectedSite(e.target.value)}
-                className="bg-transparent text-xs font-semibold text-white focus:outline-none cursor-pointer pr-4"
-              >
-                <option value="ALL" className="bg-slate-900 text-white">All Projects ({audits.length} Audits)</option>
-                {availableProjects.map(proj => (
-                  <option key={proj} value={proj} className="bg-slate-900 text-white">
-                    {proj}
-                  </option>
-                ))}
-              </select>
-            </div>
+        {/* Filters Toolbar */}
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Search Input */}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search trade or note..."
+              className="bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/50 w-44"
+            />
           </div>
 
-          {/* New Roll-Call Audit button: completely hidden for Finance / readOnly */}
+          {/* Project Filter Selector */}
+          <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 px-2.5 py-1.5 rounded-lg">
+            <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <select
+              value={selectedSite}
+              onChange={e => setSelectedSite(e.target.value)}
+              className="bg-transparent text-xs font-semibold text-white focus:outline-none cursor-pointer pr-2"
+            >
+              <option value="ALL" className="bg-slate-900 text-white">All Projects ({audits.length})</option>
+              {availableProjects.map(proj => (
+                <option key={proj} value={proj} className="bg-slate-900 text-white">
+                  {proj}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Single Action Button: completely hidden for Finance / readOnly */}
           {!isReadOnlyMode && onLogAuditClick && (
             <button
               onClick={onLogAuditClick}
-              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs shrink-0"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New Roll-Call Audit</span>
@@ -154,13 +174,13 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
       </div>
 
       {/* Subcontractor Fraud Audit KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>24H ROLL-CALL AUDIT</span>
             <ShieldCheck className="w-4 h-4 text-blue-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-blue-300">
+          <div className="text-xl font-bold font-mono text-blue-300">
             {totalVerified} / {totalClaimed}
             <span className="text-xs text-slate-400 font-normal ml-1">
               ({filteredAudits.length} Audits)
@@ -171,12 +191,12 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
           </span>
         </div>
 
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>LABOR DISCREPANCY RATE</span>
             <AlertTriangle className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-amber-400">
+          <div className="text-xl font-bold font-mono text-amber-400">
             {filteredAudits.length === 0 ? '0%' : `${Math.round((flaggedCount / filteredAudits.length) * 100)}%`}
             <span className="text-xs text-slate-400 font-normal ml-1.5">
               ({flaggedCount} of {filteredAudits.length} Shifts)
@@ -185,12 +205,12 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
           <span className="text-[10px] text-amber-300/80 block font-mono">Subcontractor Billing auto-locked on variance</span>
         </div>
 
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1 sm:col-span-2 lg:col-span-1">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>FRAUD PREVENTION</span>
             <Award className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-emerald-300">
+          <div className="text-xl font-bold font-mono text-emerald-300">
             {filteredAudits.length === 0 ? '100%' : `${Math.round((cleanCount / filteredAudits.length) * 100)}%`}
             <span className="text-xs text-slate-400 font-normal ml-1.5">
               ({cleanCount} of {filteredAudits.length} Audits)
@@ -202,11 +222,11 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
 
       {/* Discrepancy & Anti-Ghost Worker Warning Banner */}
       {flaggedCount > 0 && (
-        <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl p-4 flex items-start gap-3 text-xs">
-          <BadgeAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <strong className="text-amber-200 block">Active Subcontractor Headcount Variance Detected:</strong>
-            <p className="text-slate-300">
+        <div className="bg-amber-950/40 border border-amber-500/40 rounded-xl p-3.5 flex items-start gap-2.5 text-xs">
+          <BadgeAlert className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div className="space-y-0.5">
+            <strong className="text-amber-200 block text-xs">Active Subcontractor Headcount Variance Detected:</strong>
+            <p className="text-slate-300 text-[11px]">
               A discrepancy between subcontractor billed manifest and verified physical gate headcount was flagged. Progress payment releases remain guarded until rectified on next shift inspection.
             </p>
           </div>
@@ -214,14 +234,14 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
       )}
 
       {/* Chart: Roll-Call Discrepancy Multi-Bar Comparison */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4.5 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
           <div>
-            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+            <h4 className="text-xs font-bold text-white flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-blue-400" />
               Subcontractor Audit: Declared vs Verified vs Ghost Discrepancy
             </h4>
-            <p className="text-xs text-slate-400">
+            <p className="text-[11px] text-slate-400">
               Macro gate headcount comparison protecting against ghost worker invoice fraud
               {selectedSite !== 'ALL' && <span className="text-blue-400 font-semibold ml-1">({selectedSite})</span>}
             </p>
@@ -234,13 +254,13 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
         </div>
 
         {chartData.length === 0 ? (
-          <div className="h-64 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
+          <div className="h-52 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
             <ShieldCheck className="w-8 h-8 text-slate-600" />
-            <span className="text-xs font-semibold text-slate-400">No Roll-Call Audits Found for Selected Project</span>
-            <span className="text-[11px] text-slate-600">Switch filter to &quot;All Projects&quot; or log an audit to detect variances.</span>
+            <span className="text-xs font-semibold text-slate-400">No Roll-Call Audits Found for Selected Filter</span>
+            <span className="text-[11px] text-slate-600">Switch filter to &quot;All Projects&quot; or clear search to view variances.</span>
           </div>
         ) : (
-          <div className="h-64 w-full pt-2">
+          <div className="h-52 w-full pt-1">
             <ResponsiveContainer width="100%" height="100%">
               <ReBarChart data={chartData} margin={{ top: 10, right: 10, left: -15, bottom: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
@@ -251,7 +271,7 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
                     if (active && payload && payload.length) {
                       const d = payload[0].payload;
                       return (
-                        <div className="bg-slate-900 border border-slate-700 p-3 rounded-xl shadow-xl text-xs font-sans space-y-1 pointer-events-none select-none">
+                        <div className="bg-slate-900 border border-slate-700 p-2.5 rounded-xl shadow-xl text-xs font-sans space-y-1 pointer-events-none select-none">
                           <div className="font-bold text-white">{d.fullName} ({d.shift})</div>
                           {d.specialty && <div className="text-teal-400 text-[10px]">{d.specialty}</div>}
                           <div className="text-blue-400 font-mono">Declared Headcount: {d.claimed}</div>
@@ -275,37 +295,29 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
           </div>
         )}
 
-        <div className="p-3 bg-slate-900/60 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs">
+        <div className="p-2.5 bg-slate-950/60 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs">
           <div className="text-slate-300 flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-            <span>Real-Time Biometric &amp; Geofenced Gate Muster Protection Active</span>
+            <span className="text-[11px]">Real-Time Biometric &amp; Geofenced Gate Muster Protection Active</span>
           </div>
-          {!isReadOnlyMode && onLogAuditClick && (
-            <button
-              onClick={onLogAuditClick}
-              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-xs"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>New Roll-Call Audit</span>
-            </button>
-          )}
+          <span className="text-[10px] font-mono text-slate-500">Protected by SHA-256 Geotag Signatures</span>
         </div>
       </div>
 
       {/* Certified Daily Roll-Call Audits & GPS Attendance Records Table */}
-      <div className="bg-slate-950 border border-slate-800 rounded-xl p-6 shadow-xs space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4.5 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-2.5">
           <div>
-            <h4 className="text-sm font-bold text-white flex items-center gap-2">
+            <h4 className="text-xs font-bold text-white flex items-center gap-2">
               <ClipboardList className="w-4 h-4 text-teal-400" />
               Certified Subcontractor Roll-Call Audits &amp; GPS Attendance Records
             </h4>
-            <p className="text-xs text-slate-400">
+            <p className="text-[11px] text-slate-400">
               Field supervisor on-site roll-call certifications with GPS geotags and anti-fraud verification
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <span className="text-teal-400 font-mono text-xs font-bold bg-teal-950/60 border border-teal-800/80 px-2.5 py-1 rounded-lg">
+            <span className="text-teal-400 font-mono text-[11px] font-bold bg-teal-950/60 border border-teal-800/80 px-2 py-0.5 rounded-lg">
               {filteredAudits.length} Audited Logs
             </span>
           </div>

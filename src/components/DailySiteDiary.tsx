@@ -1981,20 +1981,22 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
         )}
 
         {/* Live Safety Evaluation Card */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-3">
-            <div className="text-xs font-mono text-slate-400 uppercase tracking-wider">Evaluation Verdict</div>
-            <div className="flex items-center gap-3">
-              <span className={`text-xs font-bold px-3 py-1 rounded-full border font-mono ${tradeSafety.badgeColor}`}>
-                {tradeSafety.verdict}
-              </span>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+            <div>
+              <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2">Evaluation Verdict</div>
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border font-mono ${tradeSafety.badgeColor}`}>
+                  {tradeSafety.verdict}
+                </span>
+              </div>
             </div>
-            <div className="pt-2">
+            <div className="pt-3">
               <div className="flex justify-between text-xs font-mono text-slate-400 mb-1">
                 <span>Calculated Safety Index</span>
                 <span className="text-white font-bold">{tradeSafety.score}%</span>
               </div>
-              <div className="w-full bg-slate-900 rounded-full h-2 overflow-hidden border border-slate-800">
+              <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden border border-slate-800">
                 <div
                   className={`h-full transition-all duration-500 ${
                     tradeSafety.score > 80 ? 'bg-emerald-400' : tradeSafety.score > 50 ? 'bg-amber-400' : 'bg-rose-400'
@@ -2002,18 +2004,18 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                   style={{ width: `${tradeSafety.score}%` }}
                 />
               </div>
+              <p className="text-[10px] text-slate-500 italic pt-1.5 font-mono">
+                Source: {isSimulationMode ? 'Simulated Weather Override' : `Live Weather Sensors (${selectedLocation.name})`}
+              </p>
             </div>
-            <p className="text-[11px] text-slate-400 italic pt-1">
-              Source: {isSimulationMode ? 'Simulated Weather Override' : `Live Weather Sensors (${selectedLocation.name})`}
-            </p>
           </div>
 
-          <div className="lg:col-span-2 bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-3 flex flex-col justify-between">
+          <div className="md:col-span-2 bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3 flex flex-col justify-between">
             <div>
-              <div className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-2">Trade Safety Rationale & Field Advisory</div>
-              <div className="space-y-1.5">
+              <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-1.5">Trade Safety Rationale & Field Advisory</div>
+              <div className="space-y-1">
                 {tradeSafety.reasons.map((r, idx) => (
-                  <div key={idx} className="flex items-start gap-2 text-xs text-slate-200">
+                  <div key={idx} className="flex items-start gap-1.5 text-xs text-slate-300">
                     <span className="text-indigo-400 font-bold">•</span>
                     <span>{r}</span>
                   </div>
@@ -2021,8 +2023,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               </div>
             </div>
 
-            <div className="p-3 bg-slate-900/80 rounded-lg border border-slate-800/80 text-[11px] text-indigo-300">
-              <strong className="block text-indigo-200 font-bold mb-0.5">Engineering Protocol:</strong>
+            <div className="p-2.5 bg-slate-900/60 rounded-lg border border-slate-800 text-[11px] text-indigo-300">
+              <strong className="text-indigo-200 font-bold mr-1">Engineering Protocol:</strong>
               {selectedTrade.advice}
             </div>
           </div>
@@ -2030,7 +2032,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
       </div>
 
       {/* Historical Weather Observation Records */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xs space-y-4">
+      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xs space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
           <div>
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
@@ -2052,47 +2054,76 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
         </div>
 
         {logs.length === 0 ? (
-          <div className="h-44 bg-slate-900/40 border border-dashed border-slate-800 rounded-xl flex flex-col items-center justify-center text-slate-500 space-y-2">
-            <CloudSun className="w-8 h-8 text-slate-600" />
+          <div className="h-32 bg-slate-900/40 border border-dashed border-slate-800 rounded-xl flex flex-col items-center justify-center text-slate-500 space-y-1.5">
+            <CloudSun className="w-7 h-7 text-slate-600" />
             <p className="text-xs font-semibold text-slate-400">No historical weather observations recorded yet.</p>
             <p className="text-[11px] text-slate-500 max-w-sm text-center">
-              Click &quot;Log Weather Record&quot; to archive current live atmospheric readings for this site location.
+              Click &quot;Record New Weather Log&quot; to archive current live atmospheric readings for this site location.
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {logs.slice(0, 8).map((log) => {
-              const info = getWeatherInfo(log.weather === 'SUNNY' ? 0 : log.weather === 'RAINY' ? 61 : log.weather === 'STORM' ? 95 : 3);
-              const LogIcon = info.icon;
-              return (
-                <div key={log.id} className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 bg-slate-950 border border-slate-800 rounded-lg shrink-0 mt-0.5">
-                      <LogIcon className={`w-4 h-4 ${info.color}`} />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <strong className="text-white text-xs">{log.toolboxTopic || 'Weather Observation Snapshot'}</strong>
-                        <span className="text-[10px] font-mono px-2 py-0.2 rounded bg-slate-800 text-amber-400 border border-slate-700">
-                          {log.temperature}
-                        </span>
-                      </div>
-                      <p className="text-slate-400 text-[11px] mt-1 leading-relaxed">{log.workCompleted}</p>
-                      {log.delaysOrIssues && (
-                        <span className="inline-block mt-1 text-[10px] text-rose-400 font-mono">
-                          ⚠️ {log.delaysOrIssues}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="text-right shrink-0 text-slate-500 font-mono text-[10px]">
-                    <div>{new Date(log.date).toLocaleDateString()}</div>
-                    <div className="text-slate-400">{log.supervisorName}</div>
-                  </div>
-                </div>
-              );
-            })}
+          <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-800 bg-slate-950/80 text-slate-400 font-mono text-[11px] uppercase tracking-wider">
+                    <th className="py-2.5 px-3">Date & Time</th>
+                    <th className="py-2.5 px-3">Condition & Temp</th>
+                    <th className="py-2.5 px-3">Topic / Summary</th>
+                    <th className="py-2.5 px-3">Delays / Issues</th>
+                    <th className="py-2.5 px-3 text-right">Supervisor</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/60">
+                  {logs.slice(0, 10).map((log) => {
+                    const info = getWeatherInfo(log.weather === 'SUNNY' ? 0 : log.weather === 'RAINY' ? 61 : log.weather === 'STORM' ? 95 : 3);
+                    const LogIcon = info.icon;
+                    return (
+                      <tr key={log.id} className="hover:bg-slate-800/30 transition-colors">
+                        <td className="py-2.5 px-3 whitespace-nowrap font-mono text-[11px] text-slate-300">
+                          <div>{new Date(log.date).toLocaleDateString()}</div>
+                          <div className="text-[10px] text-slate-500">
+                            {new Date(log.date).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <div className="p-1 rounded bg-slate-950 border border-slate-800 shrink-0">
+                              <LogIcon className={`w-3.5 h-3.5 ${info.color}`} />
+                            </div>
+                            <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700 font-bold">
+                              {log.temperature}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 max-w-[320px]">
+                          <div className="font-semibold text-white truncate text-[11px]">
+                            {log.toolboxTopic || 'Weather Observation Snapshot'}
+                          </div>
+                          <div className="text-[10px] text-slate-400 truncate leading-tight mt-0.5">
+                            {log.workCompleted}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 max-w-[200px]">
+                          {log.delaysOrIssues ? (
+                            <span className="inline-block text-[10px] text-rose-300 font-mono bg-rose-950/60 border border-rose-800/80 px-1.5 py-0.5 rounded truncate max-w-full">
+                              ⚠️ {log.delaysOrIssues}
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-slate-500 font-mono">
+                              None reported
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono text-[11px] text-slate-400">
+                          {log.supervisorName || 'Site Engineer'}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
       </div>

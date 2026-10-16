@@ -101,6 +101,11 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
   const [reallocatingId, setReallocatingId] = useState<string | null>(null);
   const [recommendationQueue, setRecommendationQueue] = useState<AIManpowerRecommendation[]>([]);
   const [appliedTransfersHistory, setAppliedTransfersHistory] = useState<AIManpowerRecommendation[]>([]);
+  const [expandedRecIds, setExpandedRecIds] = useState<Record<string, boolean>>({});
+
+  const toggleExpandRec = (id: string) => {
+    setExpandedRecIds(prev => ({ ...prev, [id]: !prev[id] }));
+  };
 
   // Filter out non-artisan personnel (office staff, executives, architects, PMs, engineers, permanent safety inspectors)
   const isNonArtisanStaff = (rec: AIManpowerRecommendation) => {
@@ -285,32 +290,32 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
           </div>
 
           {/* Visual Workforce Analytics Charts */}
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             
             {/* Chart 1: Manpower Headcount Deployed per Commercial Project */}
-            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4.5 shadow-xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
                 <div>
-                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <h4 className="text-xs font-bold text-white flex items-center gap-2">
                     <BarChart3 className="w-4 h-4 text-teal-400" />
                     Labor Allocation by Commercial Site
                   </h4>
-                  <p className="text-xs text-slate-400">Physical workforce distribution across active project sites</p>
+                  <p className="text-[11px] text-slate-400">Physical workforce distribution across active project sites</p>
                 </div>
-                <span className="text-[10px] font-mono bg-teal-950 border border-teal-800 text-teal-300 px-2.5 py-1 rounded-full font-bold">
+                <span className="text-[10px] font-mono bg-teal-950/80 border border-teal-800/80 text-teal-300 px-2.5 py-0.5 rounded-full font-bold">
                   {projectLaborChartData.reduce((sum, p) => sum + p.workers, 0)} Total Assigned
                 </span>
               </div>
 
               {projectLaborChartData.length === 0 ? (
-                <div className="h-64 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
+                <div className="h-52 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
                   <Building className="w-8 h-8 text-slate-600" />
                   <span className="text-xs font-semibold text-slate-400">No Commercial Sites Registered</span>
                   <span className="text-[11px] text-slate-600">Register a commercial project site to track labor distribution.</span>
                 </div>
               ) : (
                 <>
-                  <div className="h-64 w-full pt-2">
+                  <div className="h-52 w-full pt-1">
                     <ResponsiveContainer width="100%" height="100%">
                       <ReBarChart data={projectLaborChartData} margin={{ top: 10, right: 10, left: -15, bottom: 25 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
@@ -363,22 +368,22 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
             </div>
 
             {/* Chart 2: Engineering Specialty & Trade Distribution Donut */}
-            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xs space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4.5 shadow-xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
                 <div>
-                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <h4 className="text-xs font-bold text-white flex items-center gap-2">
                     <PieChart className="w-4 h-4 text-indigo-400" />
                     Trade Discipline &amp; Specialty Breakdown
                   </h4>
-                  <p className="text-xs text-slate-400">Headcount distribution across specialized construction trades</p>
+                  <p className="text-[11px] text-slate-400">Headcount distribution across specialized construction trades</p>
                 </div>
-                <span className="text-[10px] font-mono bg-indigo-950 border border-indigo-800 text-indigo-300 px-2.5 py-1 rounded-full font-bold">
+                <span className="text-[10px] font-mono bg-indigo-950/80 border border-indigo-800/80 text-indigo-300 px-2.5 py-0.5 rounded-full font-bold">
                   {tradeManpowerChartData.length} Specialized Trades
                 </span>
               </div>
 
               {tradeManpowerChartData.length === 0 ? (
-                <div className="h-64 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
+                <div className="h-52 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
                   <Users className="w-8 h-8 text-slate-600" />
                   <span className="text-xs font-semibold text-slate-400">No Trade Workers Registered</span>
                   <span className="text-[11px] text-slate-600">Click &quot;Register Worker&quot; above to add construction personnel and trades.</span>
@@ -389,15 +394,15 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
 
                   return (
                     <>
-                      <div className="h-64 w-full flex items-center justify-center relative">
+                      <div className="h-52 w-full flex items-center justify-center relative">
                         <ResponsiveContainer width="100%" height="100%">
                           <RePieChart>
                             <Pie
                               data={tradeManpowerChartData}
                               cx="50%"
                               cy="50%"
-                              innerRadius={60}
-                              outerRadius={90}
+                              innerRadius={50}
+                              outerRadius={75}
                               paddingAngle={4}
                               dataKey="value"
                             >
@@ -453,30 +458,30 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
               )}
             </div>
 
-            {/* Chart 4: Employment Mix: In-House Core vs Outsourced Partners */}
-            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-xs space-y-4 lg:col-span-2">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+            {/* Chart 3: Employment Mix: In-House Core vs Outsourced Partners */}
+            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4.5 shadow-xs space-y-3 lg:col-span-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
                 <div>
-                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                  <h4 className="text-xs font-bold text-white flex items-center gap-2">
                     <Users className="w-4 h-4 text-emerald-400" />
                     Workforce Structure: In-House vs Outsourced
                   </h4>
-                  <p className="text-xs text-slate-400">Direct employee supervision vs subcontractor specialized capacity</p>
+                  <p className="text-[11px] text-slate-400">Direct employee supervision vs subcontractor specialized capacity</p>
                 </div>
-                <span className="text-[10px] font-mono bg-emerald-950 border border-emerald-800 text-emerald-300 px-2.5 py-1 rounded-full font-bold">
+                <span className="text-[10px] font-mono bg-emerald-950/80 border border-emerald-800/80 text-emerald-300 px-2.5 py-0.5 rounded-full font-bold">
                   {contractors.length} Total Workforce Entities
                 </span>
               </div>
 
               {employmentMixChartData.length === 0 ? (
-                <div className="h-64 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
+                <div className="h-48 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
                   <Users className="w-8 h-8 text-slate-600" />
                   <span className="text-xs font-semibold text-slate-400">No Workforce Registered</span>
                   <span className="text-[11px] text-slate-600">Register in-house personnel or subcontracted trade partners to view organizational mix.</span>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-center">
-                  <div className="h-56 w-full flex items-center justify-center relative md:col-span-1">
+                  <div className="h-48 w-full flex items-center justify-center relative md:col-span-1">
                     <ResponsiveContainer width="100%" height="100%">
                       <RePieChart>
                         <Pie
@@ -680,7 +685,7 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                       </div>
                     </div>
                   ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    <div className="space-y-2">
                       {visibleCards.map((rec) => {
                         const donorDisplay = rec.donorProjectName || (rec.title.includes('from') ? rec.title.split('from')[1]?.split('to')[0]?.replace(/"/g, '').trim() : 'General Standby Pool');
                         const targetDisplay = rec.targetProjectName || rec.targetLots || 'Commercial Site';
@@ -695,171 +700,116 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                             ? 'bg-amber-950/80 text-amber-300 border-amber-800'
                             : 'bg-slate-800 text-slate-300 border-slate-700';
 
-                        const priorityLabel = isHigh ? 'HIGH PRIORITY' : isMed ? 'MEDIUM PRIORITY' : 'LOW';
+                        const priorityLabel = isHigh ? 'HIGH' : isMed ? 'MEDIUM' : 'LOW';
 
                         // Concise Optimization Category Tag
                         const categoryTag = getCategoryTag(rec);
-                        const categoryBadgeClass =
-                          categoryTag === 'Idle Labor Mitigation'
-                            ? 'bg-amber-950/70 text-amber-300 border-amber-800/80'
-                            : categoryTag === 'Timeline Compression'
-                              ? 'bg-emerald-950/70 text-emerald-300 border-emerald-800/80'
-                              : categoryTag === 'Critical Path Expedite'
-                                ? 'bg-rose-950/70 text-rose-300 border-rose-800/80'
-                                : 'bg-indigo-950/70 text-indigo-300 border-indigo-800/80';
-
-                        // Fit/Confidence score (calculated by documented scoring method)
                         const fitScore = typeof rec.confidenceScore === 'number' ? rec.confidenceScore : null;
-
-                        // Origin & Target subtitles
-                        const originSubtitle = rec.donorProjectName ? 'Standby Pool • Idle' : 'Standby Pool • Idle';
-                        const targetSubtitle = rec.targetLots ? `Phase: Lots ${rec.targetLots}` : 'Phase: Structural Framing';
-
                         const isReallocating = reallocatingId === rec.id;
+                        const isExpanded = Boolean(expandedRecIds[rec.id]);
 
                         return (
                           <div 
                             key={rec.id} 
-                            className="bg-slate-900/90 border border-slate-800 hover:border-indigo-500/50 rounded-2xl p-4.5 space-y-4 transition-all flex flex-col justify-between shadow-md animate-fadeIn"
+                            className="bg-slate-950/80 border border-slate-800 hover:border-slate-700 rounded-xl overflow-hidden transition-all text-xs"
                           >
-                            <div className="space-y-3.5">
-                              {/* 1. CARD HEADER */}
-                              <div className="flex items-center justify-between gap-2">
-                                <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                                  {/* AI Transparency Badge */}
-                                  {rec.source === 'GEMINI_AI' ? (
-                                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border bg-indigo-950/80 text-indigo-300 border-indigo-700/80 flex items-center gap-1 shadow-xs">
-                                      <Sparkles className="w-3 h-3 text-indigo-400" />
-                                      <span>Gemini AI ({rec.aiModel || 'gemini-3.1-flash-lite'})</span>
-                                    </span>
-                                  ) : rec.source === 'GROQ_AI' ? (
-                                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border bg-amber-950/80 text-amber-300 border-amber-700/80 flex items-center gap-1 shadow-xs">
-                                      <Bot className="w-3 h-3 text-amber-400" />
-                                      <span>Groq AI ({rec.aiModel || 'openai/gpt-oss-20b'})</span>
-                                    </span>
-                                  ) : (
-                                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border bg-slate-900 text-amber-300 border-amber-800/80 flex items-center gap-1 shadow-xs">
-                                      <Zap className="w-3 h-3 text-amber-400" />
-                                      <span>Rule-Based Fallback</span>
-                                    </span>
-                                  )}
-                                  <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border tracking-wider ${priorityBadgeClass}`}>
-                                    {priorityLabel}
-                                  </span>
-                                  <span className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full border ${categoryBadgeClass}`}>
-                                    {categoryTag}
-                                  </span>
+                            <div className="p-3 sm:p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                              {/* Left: Worker & Route */}
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-8 h-8 rounded-lg bg-indigo-950/80 border border-indigo-700/60 flex items-center justify-center text-indigo-300 font-bold shrink-0">
+                                  {workerDisplay.slice(0, 2).toUpperCase()}
                                 </div>
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-bold text-white text-xs truncate">{workerDisplay}</span>
+                                    <span className="text-[10px] text-slate-400 font-mono">({rec.tradeType || 'General'})</span>
+                                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-teal-300 border border-slate-700">
+                                      {crewDelta > 1 ? `+${crewDelta} Crew` : '1 Artisan'}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1.5 text-[11px] text-slate-400 font-mono mt-0.5">
+                                    <span className="truncate max-w-[140px] text-slate-300" title={donorDisplay}>{donorDisplay}</span>
+                                    <ArrowRight className="w-3 h-3 text-indigo-400 shrink-0" />
+                                    <span className="truncate max-w-[140px] text-amber-300 font-semibold" title={targetDisplay}>{targetDisplay}</span>
+                                  </div>
+                                </div>
+                              </div>
 
+                              {/* Middle: Priority, Fit, AI Provider Badges */}
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className={`text-[9px] font-mono font-bold px-2 py-0.5 rounded-full border ${priorityBadgeClass}`}>
+                                  {priorityLabel}
+                                </span>
                                 {fitScore !== null && (
-                                  <div 
-                                    className="text-[10px] font-mono text-emerald-300 bg-emerald-950/80 border border-emerald-800/80 px-2.5 py-0.5 rounded-full font-bold flex items-center gap-1 shrink-0 shadow-xs"
-                                    title="Rule-based workforce fit score (0-100) derived from trade skill matching and site schedule urgency"
-                                  >
-                                    <Sparkles className="w-3 h-3 text-emerald-400" />
-                                    <span>Rule-Based Fit: {fitScore}/100</span>
-                                  </div>
+                                  <span className="text-[9px] font-mono text-emerald-300 bg-emerald-950/80 border border-emerald-800 px-2 py-0.5 rounded-full font-bold flex items-center gap-1">
+                                    <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
+                                    Fit: {fitScore}/100
+                                  </span>
                                 )}
-                              </div>
-
-                              {/* 2. WORKER PROFILE & ROUTE VISUALIZER */}
-                              <div className="space-y-2.5">
-                                {/* Worker Profile Header */}
-                                <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-950/60 border border-slate-800/70">
-                                  <div className="flex items-center gap-2.5 min-w-0">
-                                    <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-teal-400 font-bold text-xs shrink-0">
-                                      <Users className="w-4 h-4" />
-                                    </div>
-                                    <div className="min-w-0">
-                                      <div className="text-xs font-bold text-white truncate">{workerDisplay}</div>
-                                      <div className="text-[10px] text-slate-400 font-mono truncate">{rec.tradeType || 'Specialized Trade Artisan'}</div>
-                                    </div>
-                                  </div>
-                                  <span className="bg-teal-950/80 border border-teal-800/80 text-teal-300 text-[10px] font-mono px-2 py-0.5 rounded font-bold shrink-0">
-                                    {crewDelta > 1 ? `+${crewDelta} Crew` : '1 Artisan'}
+                                {rec.source === 'GEMINI_AI' ? (
+                                  <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-full border bg-indigo-950/80 text-indigo-300 border-indigo-700/80">
+                                    Gemini AI
                                   </span>
-                                </div>
-
-                                {/* Route Container */}
-                                <div className="bg-slate-950/90 border border-slate-800/80 rounded-xl p-3 flex items-center justify-between gap-2 shadow-inner">
-                                  {/* Origin Project Box */}
-                                  <div className="flex-1 min-w-0 bg-slate-900/80 border border-slate-800/80 rounded-lg p-2.5 space-y-0.5">
-                                    <span className="text-[9px] text-slate-400 font-mono uppercase tracking-wider block font-semibold">
-                                      Origin Project
-                                    </span>
-                                    <div className="text-xs font-bold text-slate-200 truncate" title={donorDisplay}>
-                                      {donorDisplay}
-                                    </div>
-                                    <span className="text-[10px] text-slate-400 font-mono truncate block" title={originSubtitle}>
-                                      {originSubtitle}
-                                    </span>
-                                  </div>
-
-                                  {/* Center Directional Arrow */}
-                                  <div className="flex flex-col items-center shrink-0 px-1">
-                                    <div className="w-7 h-7 rounded-full bg-indigo-950/80 border border-indigo-700/60 flex items-center justify-center text-indigo-300 shadow-sm">
-                                      <ArrowRight className="w-3.5 h-3.5" />
-                                    </div>
-                                  </div>
-
-                                  {/* Target Project Box */}
-                                  <div className="flex-1 min-w-0 bg-slate-900/80 border border-slate-800/80 rounded-lg p-2.5 space-y-0.5 text-right">
-                                    <span className="text-[9px] text-teal-400 font-mono uppercase tracking-wider block font-semibold">
-                                      Target Project
-                                    </span>
-                                    <div className="text-xs font-bold text-teal-300 truncate" title={targetDisplay}>
-                                      {targetDisplay}
-                                    </div>
-                                    <span className="text-[10px] text-slate-400 font-mono truncate block" title={targetSubtitle}>
-                                      {targetSubtitle}
-                                    </span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              {/* 3. IMPACT STATEMENT BANNER */}
-                              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-start gap-2.5 text-xs text-slate-200">
-                                <TrendingUp className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-                                <div className="space-y-0.5 flex-1 min-w-0">
-                                  <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-wider block">
-                                    Operational Impact
+                                ) : rec.source === 'GROQ_AI' ? (
+                                  <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-full border bg-amber-950/80 text-amber-300 border-amber-700/80">
+                                    Groq AI
                                   </span>
-                                  <p className="leading-relaxed text-slate-300 text-xs">
-                                    {rec.rationale || rec.impact || 'Mitigates critical path delay for milestone delivery.'}
-                                  </p>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* 4. CARD ACTIONS */}
-                            <div className="pt-3 border-t border-slate-800/80 flex items-center justify-end gap-2.5">
-                              <button
-                                type="button"
-                                onClick={() => handleDismissCard(rec)}
-                                className="px-3 py-1.5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60 rounded-lg text-xs font-mono font-medium transition-colors cursor-pointer"
-                              >
-                                Dismiss
-                              </button>
-
-                              <button
-                                type="button"
-                                disabled={isReallocating}
-                                onClick={() => handleApproveCard(rec)}
-                                className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60"
-                              >
-                                {isReallocating ? (
-                                  <>
-                                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                                    <span>Reallocating...</span>
-                                  </>
                                 ) : (
-                                  <>
-                                    <Check className="w-3.5 h-3.5 text-white" />
-                                    <span>Approve Reallocation</span>
-                                  </>
+                                  <span className="text-[9px] font-mono font-bold px-2 py-0.5 rounded-full border bg-slate-900 text-amber-300 border-amber-800/80">
+                                    Rule-Based
+                                  </span>
                                 )}
-                              </button>
+                              </div>
+
+                              {/* Right: Controls */}
+                              <div className="flex items-center gap-2 shrink-0 justify-end">
+                                <button
+                                  type="button"
+                                  onClick={() => toggleExpandRec(rec.id)}
+                                  className="p-1 rounded text-slate-400 hover:text-white transition cursor-pointer"
+                                  title={isExpanded ? 'Collapse Rationale' : 'Expand Rationale'}
+                                >
+                                  {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDismissCard(rec)}
+                                  className="px-2.5 py-1 text-slate-400 hover:text-slate-200 hover:bg-slate-800 rounded-lg text-xs font-mono transition cursor-pointer"
+                                >
+                                  Dismiss
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={isReallocating}
+                                  onClick={() => handleApproveCard(rec)}
+                                  className="px-3 py-1 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 rounded-lg text-xs font-bold transition flex items-center gap-1 cursor-pointer"
+                                >
+                                  {isReallocating ? (
+                                    <>
+                                      <RefreshCw className="w-3 h-3 animate-spin" />
+                                      <span>Applying...</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Check className="w-3 h-3" />
+                                      <span>Approve</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
+
+                            {/* Expandable Rationale Details */}
+                            {isExpanded && (
+                              <div className="px-3.5 pb-3 pt-1 border-t border-slate-800/60 bg-slate-900/40 text-xs text-slate-300 space-y-1">
+                                <div className="text-[10px] font-mono text-amber-400 uppercase font-bold tracking-wider">
+                                  AI Optimization Rationale ({categoryTag}):
+                                </div>
+                                <p className="leading-relaxed text-slate-300 text-[11px]">
+                                  {rec.rationale || rec.impact || 'Mitigates critical path delay for milestone delivery.'}
+                                </p>
+                              </div>
+                            )}
                           </div>
                         );
                       })}

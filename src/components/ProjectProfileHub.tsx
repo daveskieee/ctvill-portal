@@ -8,7 +8,7 @@ import {
   Building2, Users, CheckCircle2, TrendingUp, DollarSign, Calendar, 
   Layers, Plus, ExternalLink, ShieldCheck, Clock, FileText, ArrowRight, 
   X, AlertCircle, Edit3, Trash2, Check, Sliders, HardHat, Search, Download, HelpCircle, FileSpreadsheet, Lock,
-  MapPin, CloudSun, RefreshCw
+  MapPin, CloudSun, RefreshCw, LayoutGrid, Table, Eye
 } from 'lucide-react';
 import { ProjectProfile, ProjectTask, Contractor, WorkforceReallocationRecommendation, ProjectRFI, ChangeOrder } from '../types';
 import { generateReallocationRecommendations } from '../services/WorkforceReallocationService';
@@ -93,9 +93,12 @@ export default function ProjectProfileHub({
 
   const [selectedProject, setSelectedProject] = useState<ProjectProfile | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [showNewModal, setShowNewModal] = useState<boolean>(false);
   const [showEditModal, setShowEditModal] = useState<boolean>(false);
-  const [activeTabInsideProfile, setActiveTabInsideProfile] = useState<'OVERVIEW' | 'TASKS' | 'MILESTONES' | 'WORKERS'>('OVERVIEW');
+  const [modalTab, setModalTab] = useState<'general' | 'timeline' | 'personnel'>('general');
+  const [activeTabInsideProfile, setActiveTabInsideProfile] = useState<'OVERVIEW' | 'FINANCIALS' | 'WORKERS'>('OVERVIEW');
 
   // Workforce Reallocation State
   const [showReallocationModal, setShowReallocationModal] = useState<boolean>(false);
@@ -203,8 +206,14 @@ export default function ProjectProfileHub({
   }, [localProjects, tasks]);
 
   const filteredProjects = synchronizedProjects.filter(p => {
-    if (filterStatus === 'ALL') return true;
-    return p.status === filterStatus;
+    const matchesStatus = filterStatus === 'ALL' || p.status === filterStatus;
+    const query = searchQuery.trim().toLowerCase();
+    const matchesSearch = !query || 
+      p.name.toLowerCase().includes(query) ||
+      p.clientName.toLowerCase().includes(query) ||
+      p.location.toLowerCase().includes(query) ||
+      p.id.toLowerCase().includes(query);
+    return matchesStatus && matchesSearch;
   });
 
   const totalPortfolioBudget = synchronizedProjects.reduce((acc, p) => acc + p.budget, 0);
@@ -270,6 +279,7 @@ export default function ProjectProfileHub({
     setFormPMName('');
     setFormAssignedWorkerIds([]);
     setModalWorkerSearchQuery('');
+    setModalTab('general');
     setShowNewModal(true);
   };
 
@@ -306,6 +316,7 @@ export default function ProjectProfileHub({
     setFormAssignedWorkerIds(assignedIds);
     setFormWorkers(assignedIds.length > 0 ? assignedIds.length : (p.assignedWorkersCount || 0));
     setModalWorkerSearchQuery('');
+    setModalTab('general');
     setShowEditModal(true);
   };
 
@@ -515,6 +526,17 @@ export default function ProjectProfileHub({
         </div>
 
         <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <div className="relative flex-1 sm:w-52">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search projects, client, ID..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg pl-8 pr-2.5 py-1.5 focus:outline-none focus:border-amber-500 placeholder:text-slate-500"
+            />
+          </div>
+
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
@@ -526,6 +548,36 @@ export default function ProjectProfileHub({
             <option value="PLANNING">Planning Phase</option>
             <option value="HANDED_OVER">Handed Over</option>
           </select>
+
+          {/* View Mode Switcher */}
+          <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              className={`p-1.5 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1 ${
+                viewMode === 'table'
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Compact Table View (Default)"
+            >
+              <Table className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline text-[11px]">Table</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('cards')}
+              className={`p-1.5 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1 ${
+                viewMode === 'cards'
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="Card Grid View"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline text-[11px]">Cards</span>
+            </button>
+          </div>
 
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
@@ -631,7 +683,7 @@ export default function ProjectProfileHub({
         </div>
       </div>
 
-      {/* Projects Grid or Empty State */}
+      {/* Projects Table, Cards, or Empty State */}
       {filteredProjects.length === 0 ? (
         <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-12 text-center">
           <Building2 className="w-12 h-12 text-slate-600 mx-auto mb-3" />
@@ -639,572 +691,701 @@ export default function ProjectProfileHub({
           <p className="text-xs text-slate-400 max-w-md mx-auto mb-6">
             There are currently no projects matching your filter in the database. Create a new commercial project profile to get started.
           </p>
-          <button
-            onClick={openNewModal}
-            className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs inline-flex items-center gap-2 cursor-pointer transition shadow-lg shadow-amber-500/10"
-          >
-            <Plus className="w-4 h-4" />
-            Create Project Profile
-          </button>
+          {isAdmin && (
+            <button
+              onClick={openNewModal}
+              className="bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs inline-flex items-center gap-2 cursor-pointer transition shadow-lg shadow-amber-500/10"
+            >
+              <Plus className="w-4 h-4" />
+              Create Project Profile
+            </button>
+          )}
+        </div>
+      ) : viewMode === 'table' ? (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 bg-slate-950/70 text-slate-400 font-mono text-[11px] uppercase tracking-wider">
+                  <th className="py-3 px-4">Code / Project</th>
+                  <th className="py-3 px-3">Location & Lead PM</th>
+                  <th className="py-3 px-3">Status</th>
+                  <th className="py-3 px-3">Progress</th>
+                  <th className="py-3 px-3">Budget & Collected</th>
+                  <th className="py-3 px-3">Target Handover</th>
+                  <th className="py-3 px-3">Signals & Crew</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {filteredProjects.map((project) => {
+                  const collectionRate = project.budget > 0 ? Math.round((project.fundsCollected / project.budget) * 100) : 0;
+                  const pRfis = rfis.filter(r => r.projectId === project.id || (r.projectName && r.projectName.toLowerCase() === project.name.toLowerCase()));
+                  const openRfis = pRfis.filter(r => r.status === 'OPEN' || r.status === 'UNDER_REVIEW');
+                  const pCOs = changeOrders.filter(co => co.projectId === project.id || (co.projectName && co.projectName.toLowerCase() === project.name.toLowerCase()));
+                  const pendingCOs = pCOs.filter(co => co.status === 'PENDING');
+
+                  return (
+                    <tr 
+                      key={project.id}
+                      onClick={() => setSelectedProject(project)}
+                      className="hover:bg-slate-800/40 transition-colors cursor-pointer group"
+                    >
+                      <td className="py-3 px-4">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold shrink-0">
+                            {project.id}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="font-bold text-white group-hover:text-amber-400 transition-colors truncate max-w-[200px] sm:max-w-[260px]">
+                              {project.name}
+                            </div>
+                            <div className="text-[11px] text-slate-400 truncate max-w-[200px]">
+                              {project.clientName}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <div className="truncate max-w-[170px] text-slate-300 flex items-center gap-1">
+                          <MapPin className="w-3 h-3 text-slate-500 shrink-0" />
+                          <span className="truncate">{project.location}</span>
+                        </div>
+                        <div className="text-[11px] text-amber-300/80 font-mono truncate max-w-[170px] flex items-center gap-1 mt-0.5">
+                          <HardHat className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span className="truncate">{project.assignedProjectManagerName ? project.assignedProjectManagerName.split('(')[0].trim() : 'Unassigned'}</span>
+                        </div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border inline-block whitespace-nowrap ${
+                          project.status === 'COMPLETED' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800' :
+                          project.status === 'PUNCHLIST_QA' ? 'bg-purple-950/80 text-purple-300 border-purple-800' :
+                          project.status === 'PLANNING' ? 'bg-blue-950/80 text-blue-300 border-blue-800' :
+                          'bg-amber-950/80 text-amber-300 border-amber-800'
+                        }`}>
+                          {project.status.replace('_', ' ')}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 min-w-[110px]">
+                        <div className="flex items-center justify-between text-[11px] font-mono mb-1">
+                          <span className="text-white font-bold">{project.progressPercentage}%</span>
+                        </div>
+                        <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden border border-slate-800">
+                          <div
+                            className="bg-gradient-to-r from-amber-500 to-amber-400 h-full rounded-full transition-all"
+                            style={{ width: `${project.progressPercentage}%` }}
+                          />
+                        </div>
+                      </td>
+                      <td className="py-3 px-3">
+                        <div className="font-mono text-white font-bold text-[11px]">
+                          ₱{project.budget.toLocaleString()}
+                        </div>
+                        <div className="text-[10px] text-emerald-400 font-mono">
+                          ₱{project.fundsCollected.toLocaleString()} ({collectionRate}%)
+                        </div>
+                      </td>
+                      <td className="py-3 px-3 font-mono text-[11px] text-slate-300 whitespace-nowrap">
+                        {project.targetHandoverDate}
+                      </td>
+                      <td className="py-3 px-3">
+                        <div className="flex items-center gap-1 flex-wrap">
+                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800/80 text-purple-300 border border-slate-700 flex items-center gap-0.5">
+                            <Users className="w-2.5 h-2.5" />
+                            {project.assignedWorkersCount || (project.assignedContractorIds || []).length}
+                          </span>
+                          {openRfis.length > 0 && (
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800" title={`${openRfis.length} Open RFIs`}>
+                              {openRfis.length} RFI
+                            </span>
+                          )}
+                          {pendingCOs.length > 0 && (
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800" title={`${pendingCOs.length} Pending COs`}>
+                              {pendingCOs.length} CO
+                            </span>
+                          )}
+                          {project.isPrivateAccounting && (
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-800">
+                              Private
+                            </span>
+                          )}
+                          {(project.progressPercentage >= 90 || project.status === 'HANDED_OVER' || project.status === 'COMPLETED') && (
+                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-800">
+                              Surplus
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center justify-end gap-1">
+                          {(project.progressPercentage >= 90 || project.status === 'HANDED_OVER' || project.status === 'COMPLETED') && (
+                            <button
+                              onClick={() => openReallocationModal(project)}
+                              className="p-1.5 bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-700 text-indigo-300 rounded-lg transition cursor-pointer"
+                              title="Reallocate Surplus Workforce"
+                            >
+                              <Users className="w-3.5 h-3.5 text-indigo-400" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setSelectedProject(project)}
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-amber-400 hover:bg-slate-800 transition cursor-pointer"
+                            title="View Project Profile"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          {isAdmin && (
+                            <button
+                              onClick={() => {
+                                setSelectedProject(project);
+                                openEditModal(project);
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
+                              title="Edit Project Profile"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {isAdmin && (
+                            <button
+                              onClick={() => handleDelete(project.id)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
+                              title="Delete Project"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredProjects.map((project) => {
-          const collectionRate = project.budget > 0 ? Math.round((project.fundsCollected / project.budget) * 100) : 0;
-          const remainingFunds = Math.max(0, project.budget - project.fundsCollected);
-          
-          const pRfis = rfis.filter(r => r.projectId === project.id || (r.projectName && r.projectName.toLowerCase() === project.name.toLowerCase()));
-          const openRfis = pRfis.filter(r => r.status === 'OPEN' || r.status === 'UNDER_REVIEW');
-          const pCOs = changeOrders.filter(co => co.projectId === project.id || (co.projectName && co.projectName.toLowerCase() === project.name.toLowerCase()));
-          const pendingCOs = pCOs.filter(co => co.status === 'PENDING');
+            const collectionRate = project.budget > 0 ? Math.round((project.fundsCollected / project.budget) * 100) : 0;
+            const pRfis = rfis.filter(r => r.projectId === project.id || (r.projectName && r.projectName.toLowerCase() === project.name.toLowerCase()));
+            const openRfis = pRfis.filter(r => r.status === 'OPEN' || r.status === 'UNDER_REVIEW');
+            const pCOs = changeOrders.filter(co => co.projectId === project.id || (co.projectName && co.projectName.toLowerCase() === project.name.toLowerCase()));
+            const pendingCOs = pCOs.filter(co => co.status === 'PENDING');
 
-          return (
-            <div
-              key={project.id}
-              className="group bg-slate-900/70 border border-slate-800 hover:border-amber-500/50 rounded-2xl p-6 transition-all duration-300 hover:shadow-xl hover:shadow-amber-500/5 relative overflow-hidden flex flex-col justify-between"
-            >
-              <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/5 rounded-bl-full pointer-events-none group-hover:bg-amber-500/10 transition" />
+            return (
+              <div
+                key={project.id}
+                className="group bg-slate-900/70 border border-slate-800 hover:border-amber-500/50 rounded-xl p-5 transition-all duration-200 hover:shadow-lg relative overflow-hidden flex flex-col justify-between"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold">
+                        {project.id}
+                      </span>
+                      <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${
+                        project.status === 'COMPLETED' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800' :
+                        project.status === 'PUNCHLIST_QA' ? 'bg-purple-950/80 text-purple-300 border-purple-800' :
+                        project.status === 'PLANNING' ? 'bg-blue-950/80 text-blue-300 border-blue-800' :
+                        'bg-amber-950/80 text-amber-300 border-amber-800'
+                      }`}>
+                        {project.status.replace('_', ' ')}
+                      </span>
+                      {openRfis.length > 0 && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800 font-semibold flex items-center gap-1">
+                          <HelpCircle className="w-3 h-3 text-cyan-400" />
+                          <span>{openRfis.length} RFI</span>
+                        </span>
+                      )}
+                      {pendingCOs.length > 0 && (
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800 font-semibold flex items-center gap-1">
+                          <FileSpreadsheet className="w-3 h-3 text-amber-400" />
+                          <span>{pendingCOs.length} CO</span>
+                        </span>
+                      )}
+                    </div>
 
-              <div>
-                {/* Status Badge & Code & Quick Actions */}
-                <div className="flex items-center justify-between gap-2 mb-3">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold">
-                      {project.id}
-                    </span>
-                    <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${
-                      project.status === 'COMPLETED' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800' :
-                      project.status === 'PUNCHLIST_QA' ? 'bg-purple-950/80 text-purple-300 border-purple-800' :
-                      project.status === 'PLANNING' ? 'bg-blue-950/80 text-blue-300 border-blue-800' :
-                      'bg-amber-950/80 text-amber-300 border-amber-800'
-                    }`}>
-                      {project.status.replace('_', ' ')}
-                    </span>
-                    {openRfis.length > 0 && (
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800 font-semibold flex items-center gap-1" title={`${openRfis.length} Open RFIs`}>
-                        <HelpCircle className="w-3 h-3 text-cyan-400" />
-                        <span>{openRfis.length} RFI</span>
-                      </span>
-                    )}
-                    {pendingCOs.length > 0 && (
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800 font-semibold flex items-center gap-1" title={`${pendingCOs.length} Pending Change Orders`}>
-                        <FileSpreadsheet className="w-3 h-3 text-amber-400" />
-                        <span>{pendingCOs.length} CO</span>
-                      </span>
-                    )}
-                    {project.isPrivateAccounting && (
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-800 font-semibold flex items-center gap-1">
-                        <ShieldCheck className="w-3 h-3 text-rose-400" />
-                        <span>Private</span>
-                      </span>
-                    )}
+                    <div className="flex items-center gap-1">
+                      {(project.progressPercentage >= 90 || project.status === 'HANDED_OVER' || project.status === 'COMPLETED') && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            openReallocationModal(project);
+                          }}
+                          className="px-2 py-1 bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-700 text-indigo-300 text-[10px] font-bold rounded-lg flex items-center gap-1 transition cursor-pointer"
+                          title="Surplus Workforce Detected — Click to Reassign"
+                        >
+                          <Users className="w-3 h-3 text-indigo-400" />
+                          <span>Reallocate</span>
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedProject(project);
+                            openEditModal(project);
+                          }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
+                          title="Edit Project Profile"
+                        >
+                          <Edit3 className="w-4 h-4" />
+                        </button>
+                      )}
+                      {isAdmin && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(project.id);
+                          }}
+                          className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
+                          title="Delete Project"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  <div className="flex items-center gap-1">
-                    {(project.progressPercentage >= 90 || project.status === 'HANDED_OVER' || project.status === 'COMPLETED') && (
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openReallocationModal(project);
-                        }}
-                        className="px-2 py-1 bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-700 text-indigo-300 text-[10px] font-bold rounded-lg flex items-center gap-1 transition cursor-pointer"
-                        title="Surplus Workforce Detected — Click to Reassign"
-                      >
-                        <Users className="w-3 h-3 text-indigo-400" />
-                        <span>Reallocate</span>
-                      </button>
-                    )}
-                    {isAdmin && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setSelectedProject(project);
-                        openEditModal(project);
-                      }}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-amber-300 hover:bg-slate-800 transition cursor-pointer"
-                      title="Edit Project Profile"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                    </button>
-                    )}
-                    {isAdmin && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDelete(project.id);
-                      }}
-                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition cursor-pointer"
-                      title="Delete Project"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                    )}
+                  <h3 
+                    onClick={() => setSelectedProject(project)}
+                    className="text-base font-bold text-white group-hover:text-amber-400 transition-colors cursor-pointer"
+                  >
+                    {project.name}
+                  </h3>
+                  <div className="text-xs text-amber-400/90 font-medium">{project.clientName}</div>
+                  
+                  <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1">
+                    <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    <span className="truncate">{project.location}</span>
                   </div>
-                </div>
 
-                {/* Project Title & Client */}
-                <h3 
-                  onClick={() => setSelectedProject(project)}
-                  className="text-xl font-bold text-white group-hover:text-amber-300 transition cursor-pointer"
-                >
-                  {project.name}
-                </h3>
-                <p className="text-xs text-amber-400 font-medium mt-0.5">
-                  {project.clientName}
-                </p>
-
-                {/* Description */}
-                <p className="text-xs text-slate-400 mt-2 line-clamp-2 leading-relaxed">
-                  {project.description}
-                </p>
-
-                {/* Location & Weather Station Coordinates */}
-                <div className="flex items-center justify-between gap-2 text-xs text-slate-400 mt-3 flex-wrap">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    <span className="truncate">{project.location || 'Location Unspecified'}</span>
+                  <div className="mt-4 space-y-1">
+                    <div className="flex justify-between items-center text-xs font-mono">
+                      <span className="text-slate-400">Progress</span>
+                      <span className="text-amber-400 font-bold">{project.progressPercentage}%</span>
+                    </div>
+                    <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
+                      <div
+                        className="bg-amber-500 h-full rounded-full transition-all"
+                        style={{ width: `${project.progressPercentage}%` }}
+                      />
+                    </div>
                   </div>
-                  {project.latitude && project.longitude ? (
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0 flex items-center gap-1" title={`Weather station coordinates: ${project.latitude}, ${project.longitude}`}>
-                      <CloudSun className="w-3 h-3 text-emerald-400" />
-                      {Number(project.latitude).toFixed(2)}°, {Number(project.longitude).toFixed(2)}°
-                    </span>
+
+                  {project.isPrivateAccounting && !isAdmin ? (
+                    <div className="mt-3 bg-rose-950/40 p-2.5 rounded-lg border border-rose-800/70 text-xs text-rose-300 font-mono">
+                      Confidential Accounting
+                    </div>
                   ) : (
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-400 shrink-0">
-                      Auto-Geocoded
-                    </span>
+                    <div className="grid grid-cols-2 gap-2 mt-3 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 text-xs font-mono">
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase block">Budget</span>
+                        <span className="font-bold text-white">₱{project.budget.toLocaleString()}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 uppercase block">Collected</span>
+                        <span className="font-bold text-emerald-400">₱{project.fundsCollected.toLocaleString()}</span>
+                      </div>
+                    </div>
                   )}
                 </div>
 
-                {/* Progress Bar - Auto-Synced from Master CPM Gantt & Task Kanban */}
-                <div className="mt-5 space-y-1.5">
-                  <div className="flex justify-between items-center text-xs font-mono">
-                    <span className="text-slate-400">Execution Progress</span>
-                    <span className="text-amber-400 font-bold">{project.progressPercentage}%</span>
-                  </div>
-                  <div className="w-full bg-slate-950 rounded-full h-2.5 overflow-hidden border border-slate-800 relative">
-                    <div
-                      className="bg-gradient-to-r from-amber-500 to-amber-400 h-full rounded-full transition-all duration-300"
-                      style={{ width: `${project.progressPercentage}%` }}
-                    />
-                  </div>
-                  {/* Read-Only Auto-Sync Indicator */}
-                  <div className="flex items-center gap-1.5 pt-1 text-[11px] text-amber-400 font-mono font-medium">
-                    <span>⚡ Auto-Synced from Master CPM Gantt & Task Kanban</span>
-                  </div>
+                <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+                  <span className="font-mono text-[11px]">Due: {project.targetHandoverDate}</span>
+                  <button
+                    onClick={() => setSelectedProject(project)}
+                    className="flex items-center gap-1 text-amber-400 font-medium hover:text-amber-300 transition-colors cursor-pointer text-xs"
+                  >
+                    View Details <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-
-                {/* Assigned Project Manager Badge */}
-                <div className="flex items-center gap-1.5 mt-3 text-xs text-amber-300 font-mono">
-                  <HardHat className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span className="truncate">{project.assignedProjectManagerName || 'PM: Unassigned'}</span>
-                </div>
-
-                {/* Financial Health Split */}
-                {project.isPrivateAccounting && !isAdmin ? (
-                  <div className="mt-4 bg-rose-950/40 p-3 rounded-xl border border-rose-800/70 flex items-center gap-2.5 text-xs text-rose-300 font-mono">
-                    <ShieldCheck className="w-4 h-4 text-rose-400 shrink-0" />
-                    <div className="flex flex-col">
-                      <span className="font-bold text-[11px]">Confidential Accounting</span>
-                      <span className="text-[10px] text-rose-400/80">Restricted Access — Admin Authorization Required</span>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4 bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
-                    <div>
-                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Contract Budget</span>
-                      <span className="text-sm font-bold text-white font-mono">₱{project.budget.toLocaleString()}</span>
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Funds Collected</span>
-                      <span className="text-sm font-bold text-emerald-400 font-mono">₱{project.fundsCollected.toLocaleString()} ({collectionRate}%)</span>
-                    </div>
-                    <div className="col-span-2 sm:col-span-1">
-                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Expenses (Paid)</span>
-                      <span className="text-sm font-bold text-sky-400 font-mono">₱{(project.paidExpenses ?? project.totalExpenses ?? 0).toLocaleString()}</span>
-                    </div>
-                  </div>
-                )}
               </div>
-
-              {/* Card Footer Metrics */}
-              <div className="mt-5 pt-4 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono">
-                  <span className="flex items-center gap-1">
-                    <Users className="w-3.5 h-3.5 text-purple-400" />
-                    {project.assignedWorkersCount} Workers
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <Layers className="w-3.5 h-3.5 text-blue-400" />
-                    {project.tasksCount} Tasks
-                  </span>
-                  <span className="flex items-center gap-1">
-                    <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
-                    {project.milestonesCount} Milestones
-                  </span>
-                </div>
-
-                <button
-                  onClick={() => setSelectedProject(project)}
-                  className="flex items-center gap-1 text-amber-400 font-medium hover:translate-x-1 transition-transform cursor-pointer ml-auto sm:ml-0"
-                >
-                  View Profile <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
       )}
 
-      {/* Detailed Project Profile Modal */}
+      
+      {/* Detailed Project Profile Modal with Tabs */}
       {selectedProject && !showEditModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] overflow-y-auto shadow-2xl p-4 sm:p-8 relative my-auto">
-            <button
-              onClick={() => setSelectedProject(null)}
-              className="absolute top-3 right-3 sm:top-5 sm:right-5 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer z-10"
-            >
-              <X className="w-5 h-5" />
-            </button>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-4xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] flex flex-col shadow-2xl overflow-hidden my-auto">
+            {/* Modal Header */}
+            <div className="p-5 sm:p-6 pb-4 border-b border-slate-800 relative bg-slate-900/90">
+              <button
+                onClick={() => setSelectedProject(null)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer z-10"
+              >
+                <X className="w-5 h-5" />
+              </button>
 
-            {/* Profile Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-800 pr-8 sm:pr-0">
-              <div>
-                <div className="flex items-center gap-2 mb-1.5">
-                  <span className="text-xs font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold">
-                    {selectedProject.id}
-                  </span>
-                  <span className="text-xs text-slate-400">Commercial Fit-Out Profile</span>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pr-8 sm:pr-0">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold">
+                      {selectedProject.id}
+                    </span>
+                    <span className="text-xs text-slate-400">Commercial Fit-Out Profile</span>
+                  </div>
+                  <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">{selectedProject.name}</h2>
+                  <p className="text-xs sm:text-sm text-amber-400 font-medium">{selectedProject.clientName}</p>
                 </div>
-                <h2 className="text-2xl font-bold text-white">{selectedProject.name}</h2>
-                <p className="text-sm text-amber-400 font-medium">{selectedProject.clientName}</p>
-                <div className="flex flex-wrap items-center gap-4 mt-1.5 text-xs text-slate-400">
-                  <span className="flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-slate-500" />
-                    {selectedProject.location}
-                  </span>
-                  <span className="flex items-center gap-1.5 text-amber-300/90 font-mono">
-                    <HardHat className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Lead PM: {selectedProject.assignedProjectManagerName || 'Unassigned'}</span>
-                  </span>
-                </div>
-              </div>
 
-              <div className="flex flex-col sm:items-end items-start gap-2">
-                <div className="flex items-center gap-2">
-                  {isAdmin && (
-                  <button
-                    onClick={() => openEditModal(selectedProject)}
-                    className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold transition"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" /> Edit Profile
-                  </button>
-                  )}
-                  <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
                     selectedProject.status === 'COMPLETED' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' :
                     selectedProject.status === 'PUNCHLIST_QA' ? 'bg-purple-950 text-purple-300 border-purple-800' :
                     'bg-amber-950 text-amber-300 border-amber-800'
                   }`}>
                     {selectedProject.status.replace('_', ' ')}
                   </span>
-                </div>
-                <span className="text-xs text-slate-400 font-mono">
-                  Target Handover: {selectedProject.targetHandoverDate}
-                </span>
-              </div>
-            </div>
-
-            {/* Scope & Description */}
-            <div className="mt-6 bg-slate-950/60 p-4 rounded-xl border border-slate-800">
-              <h4 className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">Fit-Out Scope & Architectural Brief</h4>
-              <p className="text-sm text-slate-300 leading-relaxed">{selectedProject.description}</p>
-            </div>
-
-            {/* Financial Status Breakdown */}
-            {selectedProject.isPrivateAccounting && !isAdmin ? (
-              <div className="mt-6 p-5 bg-rose-950/40 border border-rose-800/80 rounded-xl flex items-center gap-3.5">
-                <ShieldCheck className="w-7 h-7 text-rose-400 shrink-0" />
-                <div>
-                  <h4 className="text-sm font-bold text-rose-300">Confidential Accounting — Restricted Access</h4>
-                  <p className="text-xs text-rose-200/70 mt-0.5 leading-relaxed">
-                    Granular contract values, disbursement ledgers, and contractor profit margins for this project are restricted to Operations Directors only.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-6">
-                <h4 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
-                  <DollarSign className="w-4 h-4 text-emerald-400" />
-                  Financial Transparency & Installment Billing
-                </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <span className="text-xs text-slate-400 font-mono uppercase">Total Contract Value</span>
-                    <div className="text-xl font-bold text-white font-mono mt-1">₱{selectedProject.budget.toLocaleString()}</div>
-                    <span className="text-[10px] text-slate-500">Fixed Turnkey BOQ</span>
-                  </div>
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <span className="text-xs text-slate-400 font-mono uppercase">Funds Collected</span>
-                    <div className="text-xl font-bold text-emerald-400 font-mono mt-1">₱{selectedProject.fundsCollected.toLocaleString()}</div>
-                    <span className="text-[10px] text-emerald-500/80">
-                      {selectedProject.budget > 0 ? Math.round((selectedProject.fundsCollected / selectedProject.budget) * 100) : 0}% collected to date
-                    </span>
-                  </div>
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <span className="text-xs text-slate-400 font-mono uppercase">Outstanding Balance</span>
-                    <div className="text-xl font-bold text-amber-400 font-mono mt-1">
-                      ₱{Math.max(0, selectedProject.budget - selectedProject.fundsCollected).toLocaleString()}
-                    </div>
-                    <span className="text-[10px] text-amber-500/80">Progress billing installment schedule</span>
-                  </div>
-                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
-                    <span className="text-xs text-slate-400 font-mono uppercase">Disbursed (Paid) Expenses</span>
-                    <div className="text-xl font-bold text-sky-400 font-mono mt-1">
-                      ₱{(selectedProject.paidExpenses ?? selectedProject.totalExpenses ?? 0).toLocaleString()}
-                    </div>
-                    <span className="text-[10px] text-sky-500/80">
-                      Labor: ₱{(selectedProject.paidLaborExpenses ?? selectedProject.laborExpenses ?? 0).toLocaleString()} | AP: ₱{(selectedProject.paidSubcontractorExpenses ?? selectedProject.subcontractorExpenses ?? 0).toLocaleString()}
-                    </span>
-                    {(selectedProject.approvedExpenses ?? 0) > 0 && (
-                      <span className="text-[10px] text-amber-400/80 block mt-0.5 font-mono">
-                        Approved/Pending: ₱{selectedProject.approvedExpenses?.toLocaleString()}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Execution Progress Bar - Auto-Synced from Master CPM Gantt & Task Kanban */}
-            <div className="mt-6 bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="text-xs font-mono text-slate-300 font-bold uppercase tracking-wider">Overall Site Progress</span>
-                <span className="text-sm font-bold text-amber-400 font-mono">
-                  {calculateProjectProgress(selectedProject.id, tasks, selectedProject.progressPercentage)}% Complete
-                </span>
-              </div>
-              <div className="w-full bg-slate-900 rounded-full h-3 overflow-hidden border border-slate-800">
-                <div
-                  className="bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-400 h-full rounded-full transition-all"
-                  style={{ width: `${calculateProjectProgress(selectedProject.id, tasks, selectedProject.progressPercentage)}%` }}
-                />
-              </div>
-              <div className="flex items-center gap-2 pt-1 text-xs text-amber-400 font-mono font-medium">
-                <span>⚡ Auto-Synced from Master CPM Gantt & Task Kanban</span>
-              </div>
-            </div>
-
-            {/* Milestones Roadmap */}
-            <div className="mt-6">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <ShieldCheck className="w-4 h-4 text-amber-400" />
-                  Fit-Out Milestones & Deliverable Gates ({selectedProject.milestonesCount} Phases)
-                </h4>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                {[
-                  { 
-                    title: '1. Demolition & MEP Roughing', 
-                    pct: selectedProject.progressPercentage >= 25 ? 100 : Math.min(100, Math.round(selectedProject.progressPercentage * 4)), 
-                    done: selectedProject.progressPercentage >= 25 
-                  },
-                  { 
-                    title: '2. Framing & Acoustic Walls', 
-                    pct: selectedProject.progressPercentage >= 50 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 25) * 4))), 
-                    done: selectedProject.progressPercentage >= 50 
-                  },
-                  { 
-                    title: '3. Millwork & Finishes', 
-                    pct: selectedProject.progressPercentage >= 80 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 50) * (100 / 30)))), 
-                    done: selectedProject.progressPercentage >= 80 
-                  },
-                  { 
-                    title: '4. Testing & QA Punch-List', 
-                    pct: selectedProject.progressPercentage >= 100 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 80) * 5))), 
-                    done: selectedProject.progressPercentage >= 100 
-                  },
-                ].map((m, idx) => (
-                  <div key={idx} className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <span className="text-xs font-bold text-white">{m.title}</span>
-                        {m.done ? (
-                          <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                        ) : (
-                          <Clock className="w-4 h-4 text-amber-400 shrink-0" />
-                        )}
-                      </div>
-                      <div className="w-full bg-slate-900 rounded-full h-1.5 mt-2 overflow-hidden">
-                        <div className={`h-full rounded-full ${m.done ? 'bg-emerald-400' : 'bg-amber-400'}`} style={{ width: `${m.pct}%` }} />
-                      </div>
-                    </div>
-                    <span className="text-[10px] font-mono text-slate-500 mt-2">
-                      {m.done ? 'Completed' : `${m.pct}% in progress`}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Interactive Assigned Workforce Panel */}
-            <div className="mt-6">
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Users className="w-4 h-4 text-purple-400" />
-                  Assigned Workers
-                  <span className="text-xs font-mono bg-purple-950 text-purple-300 border border-purple-800 px-2 py-0.5 rounded-full">
-                    {(selectedProject.assignedContractorIds || []).length} assigned
-                  </span>
-                </h4>
-              </div>
-
-              {/* Currently assigned workers */}
-              {(selectedProject.assignedContractorIds || []).length === 0 ? (
-                <div className="text-center py-8 bg-slate-950/60 border border-dashed border-slate-700 rounded-xl">
-                  <Users className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-                  <p className="text-sm text-slate-500">No workers assigned yet.</p>
-                  <p className="text-xs text-slate-600 mt-1">Use the search below to add team members.</p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
-                  {contractors
-                    .filter(c => (selectedProject.assignedContractorIds || []).includes(c.id))
-                    .map(c => {
-                      const initials = c.name.split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
-                      return (
-                        <div key={c.id} className="bg-slate-950 border border-slate-800 rounded-xl p-3 flex items-center gap-3">
-                          {c.avatar ? (
-                            <img src={c.avatar} alt={c.name} className="w-9 h-9 rounded-full object-cover border border-slate-700 shrink-0" />
-                          ) : (
-                            <div className="w-9 h-9 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-purple-400 font-bold text-xs shrink-0">
-                              {initials}
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-bold text-white truncate">{c.name}</div>
-                            <div className="text-[10px] text-amber-400 truncate">{c.specialty || c.roleTitle}</div>
-                          </div>
-                          <button
-                            onClick={async () => {
-                              setIsAssigningWorker(true);
-                              try {
-                                const res = await fetch(`/api/projects/${selectedProject.id}/workers`, {
-                                  method: 'PUT',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ workerId: c.id, action: 'remove' })
-                                });
-                                if (res.ok) {
-                                  const data = await res.json();
-                                  const updated = { ...selectedProject, assignedContractorIds: data.assignedContractorIds, assignedWorkersCount: data.assignedWorkersCount };
-                                  setSelectedProject(updated);
-                                  setLocalProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
-                                }
-                              } finally { setIsAssigningWorker(false); }
-                            }}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer shrink-0"
-                            title="Remove from project"
-                          >
-                            <X className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                </div>
-              )}
-
-              {/* Add Worker Search */}
-              <div className="border border-dashed border-slate-700 rounded-xl p-3 bg-slate-950/40">
-                <p className="text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-2">+ Add Worker from Roster</p>
-                <input
-                  type="text"
-                  value={workerSearchQuery}
-                  onChange={e => setWorkerSearchQuery(e.target.value)}
-                  placeholder="Search by name, role, or specialty..."
-                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-purple-500 mb-2"
-                />
-                <div className="max-h-40 overflow-y-auto space-y-1.5 pr-1">
-                  {contractors
-                    .filter(c => !(selectedProject.assignedContractorIds || []).includes(c.id))
-                    .filter(c => {
-                      if (!workerSearchQuery.trim()) return true;
-                      const q = workerSearchQuery.toLowerCase();
-                      return c.name.toLowerCase().includes(q) || (c.specialty || '').toLowerCase().includes(q) || (c.roleTitle || '').toLowerCase().includes(q);
-                    })
-                    .map(c => {
-                      const initials = c.name.split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
-                      return (
-                        <div key={c.id} className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-800/60 transition group">
-                          {c.avatar ? (
-                            <img src={c.avatar} alt={c.name} className="w-7 h-7 rounded-full object-cover border border-slate-700 shrink-0" />
-                          ) : (
-                            <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-purple-300 font-bold text-[10px] shrink-0">
-                              {initials}
-                            </div>
-                          )}
-                          <div className="flex-1 min-w-0">
-                            <div className="text-xs font-bold text-white truncate">{c.name}</div>
-                            <div className="text-[10px] text-slate-400 truncate">{c.specialty || c.roleTitle}</div>
-                          </div>
-                          <button
-                            disabled={isAssigningWorker}
-                            onClick={async () => {
-                              setIsAssigningWorker(true);
-                              try {
-                                const res = await fetch(`/api/projects/${selectedProject.id}/workers`, {
-                                  method: 'PUT',
-                                  headers: { 'Content-Type': 'application/json' },
-                                  body: JSON.stringify({ workerId: c.id, action: 'add' })
-                                });
-                                if (res.ok) {
-                                  const data = await res.json();
-                                  const updated = { ...selectedProject, assignedContractorIds: data.assignedContractorIds, assignedWorkersCount: data.assignedWorkersCount };
-                                  setSelectedProject(updated);
-                                  setLocalProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
-                                  setWorkerSearchQuery('');
-                                }
-                              } finally { setIsAssigningWorker(false); }
-                            }}
-                            className="px-2.5 py-1 text-[10px] font-bold bg-purple-950/80 text-purple-400 border border-purple-800/60 rounded-lg hover:bg-purple-900/60 transition opacity-100 sm:opacity-0 sm:group-hover:opacity-100 cursor-pointer shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            + Assign
-                          </button>
-                        </div>
-                      );
-                    })}
-                  {contractors.filter(c => !(selectedProject.assignedContractorIds || []).includes(c.id)).filter(c => {
-                    if (!workerSearchQuery.trim()) return true;
-                    const q = workerSearchQuery.toLowerCase();
-                    return c.name.toLowerCase().includes(q) || (c.specialty || '').toLowerCase().includes(q) || (c.roleTitle || '').toLowerCase().includes(q);
-                  }).length === 0 && (
-                    <p className="text-center text-xs text-slate-600 py-3">
-                      {workerSearchQuery ? 'No workers match your search.' : 'All registered workers are already assigned.'}
-                    </p>
+                  {isAdmin && (
+                    <button
+                      onClick={() => openEditModal(selectedProject)}
+                      className="flex items-center gap-1 px-3 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 text-xs font-semibold transition cursor-pointer"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" /> Edit
+                    </button>
                   )}
                 </div>
               </div>
-            </div>
 
-            {/* Close / Action Footer */}
-            <div className="mt-8 pt-4 border-t border-slate-800 flex flex-col-reverse sm:flex-row sm:items-center justify-between gap-3">
-              <button
-                onClick={() => handleDelete(selectedProject.id)}
-                className="w-full sm:w-auto px-4 py-2 rounded-xl text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 text-xs font-medium transition text-center"
-              >
-                Delete Project
-              </button>
+              {/* Sub-meta */}
+              <div className="flex flex-wrap items-center gap-4 mt-2 text-xs text-slate-400">
+                <span className="flex items-center gap-1.5">
+                  <Building2 className="w-3.5 h-3.5 text-slate-500" />
+                  {selectedProject.location}
+                </span>
+                <span className="flex items-center gap-1.5 text-amber-300/90 font-mono">
+                  <HardHat className="w-3.5 h-3.5 text-amber-400" />
+                  <span>PM: {selectedProject.assignedProjectManagerName ? selectedProject.assignedProjectManagerName.split('(')[0].trim() : 'Unassigned'}</span>
+                </span>
+                <span className="flex items-center gap-1.5 text-slate-400 font-mono">
+                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Handover: {selectedProject.targetHandoverDate}</span>
+                </span>
+              </div>
 
-              <div className="flex items-center gap-2 sm:gap-3 w-full sm:w-auto">
+              {/* Logical Tabs Navigation */}
+              <div className="flex items-center gap-1 mt-4 border-t border-slate-800/80 pt-3">
                 <button
-                  onClick={() => openEditModal(selectedProject)}
-                  className="flex-1 sm:flex-initial px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-sm font-medium transition text-center"
+                  type="button"
+                  onClick={() => setActiveTabInsideProfile('OVERVIEW')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                    activeTabInsideProfile === 'OVERVIEW'
+                      ? 'bg-amber-500 text-slate-950 font-bold'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
                 >
-                  Edit Parameters
+                  <Layers className="w-3.5 h-3.5" />
+                  <span>Overview & Milestones</span>
                 </button>
                 <button
+                  type="button"
+                  onClick={() => setActiveTabInsideProfile('FINANCIALS')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                    activeTabInsideProfile === 'FINANCIALS'
+                      ? 'bg-amber-500 text-slate-950 font-bold'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  <DollarSign className="w-3.5 h-3.5" />
+                  <span>Financial Summary</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTabInsideProfile('WORKERS')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
+                    activeTabInsideProfile === 'WORKERS'
+                      ? 'bg-amber-500 text-slate-950 font-bold'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Assigned Crew ({(selectedProject.assignedContractorIds || []).length})</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body - Tab Content */}
+            <div className="flex-1 overflow-y-auto p-5 sm:p-6 space-y-5">
+              {activeTabInsideProfile === 'OVERVIEW' && (
+                <div className="space-y-5">
+                  {/* Scope & Description */}
+                  <div className="bg-slate-950/60 p-4 rounded-xl border border-slate-800">
+                    <h4 className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-1.5">Fit-Out Scope & Architectural Brief</h4>
+                    <p className="text-sm text-slate-300 leading-relaxed">{selectedProject.description || 'No detailed scope description provided.'}</p>
+                  </div>
+
+                  {/* Site Progress */}
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <span className="text-xs font-mono text-slate-300 font-bold uppercase tracking-wider">Overall Site Progress</span>
+                      <span className="text-sm font-bold text-amber-400 font-mono">
+                        {calculateProjectProgress(selectedProject.id, tasks, selectedProject.progressPercentage)}% Complete
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-900 rounded-full h-2.5 overflow-hidden border border-slate-800">
+                      <div
+                        className="bg-gradient-to-r from-amber-500 via-amber-400 to-emerald-400 h-full rounded-full transition-all"
+                        style={{ width: `${calculateProjectProgress(selectedProject.id, tasks, selectedProject.progressPercentage)}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 pt-0.5 text-xs text-amber-400 font-mono font-medium">
+                      <span>⚡ Auto-Synced from Master CPM Gantt & Task Kanban</span>
+                    </div>
+                  </div>
+
+                  {/* Milestones Roadmap */}
+                  <div>
+                    <h4 className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
+                      <ShieldCheck className="w-4 h-4 text-amber-400" />
+                      Fit-Out Milestones & Deliverable Gates ({selectedProject.milestonesCount} Phases)
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                      {[
+                        { 
+                          title: '1. Demolition & MEP Roughing', 
+                          pct: selectedProject.progressPercentage >= 25 ? 100 : Math.min(100, Math.round(selectedProject.progressPercentage * 4)), 
+                          done: selectedProject.progressPercentage >= 25 
+                        },
+                        { 
+                          title: '2. Framing & Acoustic Walls', 
+                          pct: selectedProject.progressPercentage >= 50 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 25) * 4))), 
+                          done: selectedProject.progressPercentage >= 50 
+                        },
+                        { 
+                          title: '3. Millwork & Finishes', 
+                          pct: selectedProject.progressPercentage >= 80 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 50) * (100 / 30)))), 
+                          done: selectedProject.progressPercentage >= 80 
+                        },
+                        { 
+                          title: '4. Testing & QA Punch-List', 
+                          pct: selectedProject.progressPercentage >= 100 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 80) * 5))), 
+                          done: selectedProject.progressPercentage >= 100 
+                        },
+                      ].map((m, idx) => (
+                        <div key={idx} className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between mb-1.5">
+                              <span className="text-xs font-bold text-white">{m.title}</span>
+                              {m.done ? (
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                              ) : (
+                                <Clock className="w-4 h-4 text-amber-400 shrink-0" />
+                              )}
+                            </div>
+                            <div className="w-full bg-slate-900 rounded-full h-1.5 mt-2 overflow-hidden">
+                              <div className={`h-full rounded-full ${m.done ? 'bg-emerald-400' : 'bg-amber-400'}`} style={{ width: `${m.pct}%` }} />
+                            </div>
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-500 mt-2">
+                            {m.done ? 'Completed' : `${m.pct}% in progress`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {activeTabInsideProfile === 'FINANCIALS' && (
+                <div className="space-y-4">
+                  {selectedProject.isPrivateAccounting && !isAdmin ? (
+                    <div className="p-5 bg-rose-950/40 border border-rose-800/80 rounded-xl flex items-center gap-3.5">
+                      <ShieldCheck className="w-7 h-7 text-rose-400 shrink-0" />
+                      <div>
+                        <h4 className="text-sm font-bold text-rose-300">Confidential Accounting — Restricted Access</h4>
+                        <p className="text-xs text-rose-200/70 mt-0.5 leading-relaxed">
+                          Granular contract values, disbursement ledgers, and contractor profit margins for this project are restricted to Operations Directors only.
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                          <span className="text-xs text-slate-400 font-mono uppercase">Total Contract Value</span>
+                          <div className="text-xl font-bold text-white font-mono mt-1">₱{selectedProject.budget.toLocaleString()}</div>
+                          <span className="text-[10px] text-slate-500">Fixed Turnkey BOQ</span>
+                        </div>
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                          <span className="text-xs text-slate-400 font-mono uppercase">Funds Collected</span>
+                          <div className="text-xl font-bold text-emerald-400 font-mono mt-1">₱{selectedProject.fundsCollected.toLocaleString()}</div>
+                          <span className="text-[10px] text-emerald-500/80">
+                            {selectedProject.budget > 0 ? Math.round((selectedProject.fundsCollected / selectedProject.budget) * 100) : 0}% collected to date
+                          </span>
+                        </div>
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                          <span className="text-xs text-slate-400 font-mono uppercase">Outstanding Balance</span>
+                          <div className="text-xl font-bold text-amber-400 font-mono mt-1">
+                            ₱{Math.max(0, selectedProject.budget - selectedProject.fundsCollected).toLocaleString()}
+                          </div>
+                          <span className="text-[10px] text-amber-500/80">Progress billing installment</span>
+                        </div>
+                        <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                          <span className="text-xs text-slate-400 font-mono uppercase">Disbursed (Paid)</span>
+                          <div className="text-xl font-bold text-sky-400 font-mono mt-1">
+                            ₱{(selectedProject.paidExpenses ?? selectedProject.totalExpenses ?? 0).toLocaleString()}
+                          </div>
+                          <span className="text-[10px] text-sky-500/80">
+                            Labor: ₱{(selectedProject.paidLaborExpenses ?? selectedProject.laborExpenses ?? 0).toLocaleString()} | AP: ₱{(selectedProject.paidSubcontractorExpenses ?? selectedProject.subcontractorExpenses ?? 0).toLocaleString()}
+                          </span>
+                          {(selectedProject.approvedExpenses ?? 0) > 0 && (
+                            <span className="text-[10px] text-amber-400/80 block mt-0.5 font-mono">
+                              Approved/Pending: ₱{selectedProject.approvedExpenses?.toLocaleString()}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTabInsideProfile === 'WORKERS' && (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">
+                      Assigned Project Roster ({(selectedProject.assignedContractorIds || []).length})
+                    </span>
+                  </div>
+
+                  {(selectedProject.assignedContractorIds || []).length === 0 ? (
+                    <div className="text-center py-6 bg-slate-950/60 border border-dashed border-slate-800 rounded-xl">
+                      <Users className="w-7 h-7 text-slate-600 mx-auto mb-1.5" />
+                      <p className="text-xs text-slate-500">No personnel currently assigned to this project site.</p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">Use the search box below to allocate crew members.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {contractors
+                        .filter(c => (selectedProject.assignedContractorIds || []).includes(c.id))
+                        .map(c => {
+                          const initials = c.name.split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
+                          return (
+                            <div key={c.id} className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 flex items-center gap-2.5">
+                              {c.avatar ? (
+                                <img src={c.avatar} alt={c.name} className="w-8 h-8 rounded-full object-cover border border-slate-700 shrink-0" />
+                              ) : (
+                                <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-purple-400 font-bold text-xs shrink-0">
+                                  {initials}
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-bold text-white truncate">{c.name}</div>
+                                <div className="text-[10px] text-amber-400 truncate">{c.specialty || c.roleTitle}</div>
+                              </div>
+                              <button
+                                onClick={async () => {
+                                  setIsAssigningWorker(true);
+                                  try {
+                                    const res = await fetch(`/api/projects/${selectedProject.id}/workers`, {
+                                      method: 'PUT',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ workerId: c.id, action: 'remove' })
+                                    });
+                                    if (res.ok) {
+                                      const data = await res.json();
+                                      const updated = { ...selectedProject, assignedContractorIds: data.assignedContractorIds, assignedWorkersCount: data.assignedWorkersCount };
+                                      setSelectedProject(updated);
+                                      setLocalProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+                                    }
+                                  } finally { setIsAssigningWorker(false); }
+                                }}
+                                className="p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 transition cursor-pointer shrink-0"
+                                title="Remove from project"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  )}
+
+                  {/* Add Worker Search */}
+                  <div className="border border-slate-800 rounded-xl p-3 bg-slate-950/60">
+                    <p className="text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-2">+ Add Personnel from Roster</p>
+                    <input
+                      type="text"
+                      value={workerSearchQuery}
+                      onChange={e => setWorkerSearchQuery(e.target.value)}
+                      placeholder="Search roster by name, role, or trade..."
+                      className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500 mb-2"
+                    />
+                    <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1">
+                      {contractors
+                        .filter(c => !(selectedProject.assignedContractorIds || []).includes(c.id))
+                        .filter(c => {
+                          if (!workerSearchQuery.trim()) return true;
+                          const q = workerSearchQuery.toLowerCase();
+                          return c.name.toLowerCase().includes(q) || (c.specialty || '').toLowerCase().includes(q) || (c.roleTitle || '').toLowerCase().includes(q);
+                        })
+                        .map(c => {
+                          const initials = c.name.split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
+                          return (
+                            <div key={c.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-800/60 transition group">
+                              {c.avatar ? (
+                                <img src={c.avatar} alt={c.name} className="w-6 h-6 rounded-full object-cover border border-slate-700 shrink-0" />
+                              ) : (
+                                <div className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-purple-300 font-bold text-[9px] shrink-0">
+                                  {initials}
+                                </div>
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="text-xs font-bold text-white truncate">{c.name}</div>
+                                <div className="text-[10px] text-slate-400 truncate">{c.specialty || c.roleTitle}</div>
+                              </div>
+                              <button
+                                disabled={isAssigningWorker}
+                                onClick={async () => {
+                                  setIsAssigningWorker(true);
+                                  try {
+                                    const res = await fetch(`/api/projects/${selectedProject.id}/workers`, {
+                                      method: 'PUT',
+                                      headers: { 'Content-Type': 'application/json' },
+                                      body: JSON.stringify({ workerId: c.id, action: 'add' })
+                                    });
+                                    if (res.ok) {
+                                      const data = await res.json();
+                                      const updated = { ...selectedProject, assignedContractorIds: data.assignedContractorIds, assignedWorkersCount: data.assignedWorkersCount };
+                                      setSelectedProject(updated);
+                                      setLocalProjects(prev => prev.map(p => p.id === updated.id ? updated : p));
+                                      setWorkerSearchQuery('');
+                                    }
+                                  } finally { setIsAssigningWorker(false); }
+                                }}
+                                className="px-2 py-0.5 text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded hover:bg-amber-500/30 transition cursor-pointer shrink-0 disabled:opacity-50"
+                              >
+                                + Assign
+                              </button>
+                            </div>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-800 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3">
+              {isAdmin && (
+                <button
+                  onClick={() => handleDelete(selectedProject.id)}
+                  className="px-3 py-1.5 rounded-lg text-rose-400 hover:text-rose-300 hover:bg-rose-950/40 text-xs font-medium transition cursor-pointer"
+                >
+                  Delete Project
+                </button>
+              )}
+
+              <div className="flex items-center gap-2 ml-auto">
+                <button
                   onClick={() => setSelectedProject(null)}
-                  className="flex-1 sm:flex-initial px-5 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-sm transition text-center"
+                  className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition cursor-pointer"
                 >
                   Done
                 </button>
@@ -1214,349 +1395,311 @@ export default function ProjectProfileHub({
         </div>
       )}
 
-      {/* New Project Modal */}
+      {/* New Project Modal with Tabs */}
       {showNewModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] overflow-y-auto shadow-2xl p-4 sm:p-6 relative my-auto">
-            <button
-              onClick={() => setShowNewModal(false)}
-              className="absolute top-3 right-3 sm:top-5 sm:right-5 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition z-10"
-            >
-              <X className="w-5 h-5" />
-            </button>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] flex flex-col shadow-2xl overflow-hidden my-auto">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 relative bg-slate-900">
+              <button
+                type="button"
+                onClick={() => setShowNewModal(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer z-10"
+              >
+                <X className="w-5 h-5" />
+              </button>
 
-            <div className="flex items-center gap-2 mb-4">
-              <Building2 className="w-5 h-5 text-amber-400" />
-              <h3 className="text-lg font-bold text-white">Create Commercial Project Profile</h3>
+              <div className="flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-amber-400" />
+                <h3 className="text-base sm:text-lg font-bold text-white">Create Commercial Project Profile</h3>
+              </div>
+
+              {/* Form Tabs */}
+              <div className="flex items-center gap-1 mt-3 border-t border-slate-800/80 pt-2.5">
+                <button
+                  type="button"
+                  onClick={() => setModalTab('general')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                    modalTab === 'general' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  1. General & Location
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalTab('timeline')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                    modalTab === 'timeline' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  2. Budget & Timeline
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalTab('personnel')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                    modalTab === 'personnel' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  3. Leadership & Crew ({formAssignedWorkerIds.length})
+                </button>
+              </div>
             </div>
 
-            <form onSubmit={handleCreateSubmit} className="space-y-4">
-              {isTimelineInvalid && (
-                <div className="flex items-center gap-2 p-3 bg-red-950/80 border border-red-500/60 rounded-xl text-red-300 text-xs font-semibold animate-fadeIn">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                  <span>Validation Alert: Target Handover Date cannot be earlier than Project Start Date.</span>
-                </div>
-              )}
+            {/* Scrollable Form Body */}
+            <form onSubmit={handleCreateSubmit} className="flex-1 overflow-y-auto flex flex-col">
+              <div className="p-4 sm:p-6 space-y-4 flex-1">
+                {isTimelineInvalid && (
+                  <div className="flex items-center gap-2 p-3 bg-red-950/80 border border-red-500/60 rounded-xl text-red-300 text-xs font-semibold">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span>Validation Alert: Target Handover Date cannot precede Start Date.</span>
+                  </div>
+                )}
 
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Project Name</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g., NexBridge Software Hub Phase 2"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                />
-              </div>
+                {modalTab === 'general' && (
+                  <div className="space-y-3.5">
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Project Name *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g., NexBridge Software Hub Phase 2"
+                        value={formName}
+                        onChange={(e) => setFormName(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
 
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Client / Corporate Account</label>
-                <input
-                  type="text"
-                  placeholder="e.g., Summit Holdings Philippines"
-                  value={formClient}
-                  onChange={(e) => setFormClient(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                />
-              </div>
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Client / Corporate Account</label>
+                      <input
+                        type="text"
+                        placeholder="e.g., Summit Holdings Philippines"
+                        value={formClient}
+                        onChange={(e) => setFormClient(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Site Location / Address</label>
-                  <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
-                    <CloudSun className="w-3 h-3" /> Auto-syncs Live Site Diary Weather
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  placeholder="e.g., Cabuyao, Laguna (or BGC Taguig, Cebu City, Clark Pampanga, etc.)"
-                  value={formLocation}
-                  onChange={(e) => setFormLocation(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                />
-                
-                {/* Real-time Geocoded Coordinate Preview */}
-                {formLocation.trim() && (
-                  <div className={`mt-2 p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all ${
-                    detectedCoords 
-                      ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
-                      : 'bg-slate-900 border-slate-800 text-slate-400'
-                  }`}>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <MapPin className={`w-4 h-4 shrink-0 ${detectedCoords ? 'text-emerald-400' : 'text-slate-500'}`} />
-                      <div className="truncate">
-                        {detectedCoords ? (
-                          <span>
-                            <strong className="text-white">Weather Station: {detectedCoords.name}</strong>
-                            <span className="text-[11px] font-mono opacity-80 ml-1.5">
-                              ({detectedCoords.lat.toFixed(4)}° N, {detectedCoords.lon.toFixed(4)}° E)
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-mono text-slate-400 uppercase">Site Location / Address</label>
+                        <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
+                          <CloudSun className="w-3 h-3" /> Live Weather Sync
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="e.g., Cabuyao, Laguna (or BGC, Makati, Cebu, Clark)"
+                        value={formLocation}
+                        onChange={(e) => setFormLocation(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                      />
+                      {formLocation.trim() && (
+                        <div className={`mt-2 p-2 rounded-lg border text-xs flex items-center justify-between ${
+                          detectedCoords ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-slate-950 border-slate-800 text-slate-400'
+                        }`}>
+                          <div className="flex items-center gap-2 truncate">
+                            <MapPin className={`w-3.5 h-3.5 shrink-0 ${detectedCoords ? 'text-emerald-400' : 'text-slate-500'}`} />
+                            <span className="truncate">
+                              {detectedCoords ? (
+                                <>Weather Station: <strong className="text-white">{detectedCoords.name}</strong> ({detectedCoords.lat.toFixed(3)}°N, {detectedCoords.lon.toFixed(3)}°E)</>
+                              ) : (
+                                'Resolving weather station telemetry...'
+                              )}
                             </span>
-                          </span>
-                        ) : (
-                          <span>{isGeocoding ? 'Detecting coordinates...' : 'Resolving site coordinates...'}</span>
-                        )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Scope & Description</label>
+                      <textarea
+                        rows={3}
+                        placeholder="e.g., Turnkey architectural fit-out, MEP roughing, HVAC, glass partitions."
+                        value={formDescription}
+                        onChange={(e) => setFormDescription(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {modalTab === 'timeline' && (
+                  <div className="space-y-3.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Contract Budget (PHP)</label>
+                        <input
+                          type="number"
+                          value={formBudget}
+                          onChange={(e) => setFormBudget(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Initial Progress %</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={formProgress}
+                          onChange={(e) => setFormProgress(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                        />
                       </div>
                     </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 font-bold ml-2">
-                      {detectedCoords?.confidence === 'EXACT_COORDINATES' ? 'GPS Coords' : 'Weather Synced'}
-                    </span>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Project Status</label>
+                        <select
+                          value={formStatus}
+                          onChange={(e) => setFormStatus(e.target.value as any)}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                        >
+                          <option value="PLANNING">Planning Phase</option>
+                          <option value="IN_PROGRESS">In Progress</option>
+                          <option value="PUNCHLIST_QA">Punchlist & QA</option>
+                          <option value="HANDED_OVER">Handed Over</option>
+                          <option value="COMPLETED">Completed</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Deliverable Milestones</label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={10}
+                          value={formMilestonesCount}
+                          onChange={(e) => setFormMilestonesCount(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Start Date</label>
+                        <input
+                          type="date"
+                          value={formStartDate}
+                          onChange={(e) => setFormStartDate(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Target Handover Date</label>
+                        <input
+                          type="date"
+                          value={formEndDate}
+                          onChange={(e) => setFormEndDate(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {modalTab === 'personnel' && (
+                  <div className="space-y-3.5">
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Lead Project Manager</label>
+                      <select
+                        value={formPMId}
+                        onChange={(e) => {
+                          setFormPMId(e.target.value);
+                          const pm = availablePMs.find(p => p.id === e.target.value);
+                          setFormPMName(pm ? pm.name : '');
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                      >
+                        <option value="">Select Project Lead...</option>
+                        {availablePMs.map(pm => (
+                          <option key={pm.id} value={pm.id}>{pm.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-2 p-2.5 bg-slate-950 rounded-lg border border-slate-800">
+                      <input
+                        type="checkbox"
+                        id="new-private-accounting"
+                        checked={formIsPrivateAccounting}
+                        onChange={(e) => setFormIsPrivateAccounting(e.target.checked)}
+                        className="w-4 h-4 rounded text-amber-500 focus:ring-0 bg-slate-900 border-slate-700 cursor-pointer"
+                      />
+                      <label htmlFor="new-private-accounting" className="text-xs text-slate-300 cursor-pointer select-none">
+                        Confidential Accounting (Restricted to Operations Directors)
+                      </label>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-mono text-slate-400 uppercase">
+                          Assign Personnel ({formAssignedWorkerIds.length} Selected)
+                        </label>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Filter available contractors..."
+                        value={modalWorkerSearchQuery}
+                        onChange={(e) => setModalWorkerSearchQuery(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-xs focus:border-amber-500 focus:outline-none mb-2"
+                      />
+                      <div className="max-h-40 overflow-y-auto space-y-1 pr-1 border border-slate-800 rounded-lg p-2 bg-slate-950/60">
+                        {contractors
+                          .filter(w => {
+                            if (!modalWorkerSearchQuery.trim()) return true;
+                            const q = modalWorkerSearchQuery.toLowerCase();
+                            return w.name.toLowerCase().includes(q) || (w.tradeType || '').toLowerCase().includes(q);
+                          })
+                          .map(worker => {
+                            const isSelected = formAssignedWorkerIds.includes(worker.id);
+                            return (
+                              <div
+                                key={worker.id}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setFormAssignedWorkerIds(prev => prev.filter(id => id !== worker.id));
+                                  } else {
+                                    setFormAssignedWorkerIds(prev => [...prev, worker.id]);
+                                  }
+                                }}
+                                className={`p-1.5 rounded flex items-center justify-between text-xs cursor-pointer transition ${
+                                  isSelected ? 'bg-amber-500/10 border border-amber-500/30 text-white' : 'hover:bg-slate-800 text-slate-300'
+                                }`}
+                              >
+                                <span className="truncate">{worker.name} ({worker.tradeType || 'General'})</span>
+                                <div className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] ${
+                                  isSelected ? 'bg-amber-500 border-amber-500 text-slate-950' : 'border-slate-700'
+                                }`}>
+                                  {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
 
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Total Estimated Budget (₱)</label>
-                <input
-                  type="number"
-                  min={0}
-                  placeholder="e.g., 15,000,000"
-                  value={formBudget || ''}
-                  onChange={(e) => setFormBudget(Number(e.target.value))}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none font-mono"
-                />
-                <p className="text-[10px] text-slate-500 mt-1 font-mono">
-                  Initial collected funds start at ₱0.00 and are updated strictly via verified payments in the Finance & Installments Ledger.
-                </p>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">
-                    Progress (%) <span className="text-amber-400 text-[10px]">(Auto-Synced)</span>
-                  </label>
-                  <input
-                    type="number"
-                    readOnly
-                    disabled
-                    value={formProgress}
-                    className="w-full bg-slate-900 border border-slate-800 text-slate-400 rounded-xl px-3 py-2 text-sm font-mono cursor-not-allowed"
-                  />
-                  <span className="text-[10px] text-slate-500 font-mono mt-1 block">⚡ Auto-Synced from Master CPM Gantt & Task Kanban</span>
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Assigned Workers</label>
-                    {formAssignedWorkerIds.length > 0 && (
-                      <span className="text-[10px] text-amber-400 font-mono font-bold flex items-center gap-1">
-                        <Check className="w-2.5 h-2.5" /> Auto-synced
-                      </span>
-                    )}
-                  </div>
-                  <input
-                    type="number"
-                    min={0}
-                    placeholder="e.g., 0"
-                    value={formAssignedWorkerIds.length > 0 ? formAssignedWorkerIds.length : (formWorkers || '')}
-                    onChange={(e) => setFormWorkers(Number(e.target.value))}
-                    disabled={formAssignedWorkerIds.length > 0}
-                    className={`w-full bg-slate-950 border rounded-xl px-3 py-2 text-sm font-mono focus:outline-none transition ${
-                      formAssignedWorkerIds.length > 0
-                        ? 'border-amber-500/50 bg-amber-500/10 text-amber-300 cursor-not-allowed font-bold'
-                        : 'border-slate-700 text-white focus:border-amber-500'
-                    }`}
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    {formAssignedWorkerIds.length > 0
-                      ? `Locked to ${formAssignedWorkerIds.length} registered artisan${formAssignedWorkerIds.length > 1 ? 's' : ''} below`
-                      : 'Or select registered workers below'}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Status</label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value as ProjectProfile['status'])}
-                    className={`w-full bg-slate-950 border border-slate-700 rounded-xl px-2 py-2 text-xs focus:border-amber-500 focus:outline-none ${!formStatus ? 'text-slate-400' : 'text-white'}`}
-                  >
-                    <option value="" disabled className="text-slate-500">e.g., Planning</option>
-                    <option value="PLANNING">Planning</option>
-                    <option value="IN_PROGRESS">In Progress</option>
-                    <option value="PUNCHLIST_QA">Punchlist & QA</option>
-                    <option value="HANDED_OVER">Handed Over</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    required
-                    value={formStartDate}
-                    onChange={(e) => setFormStartDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Target Handover Date</label>
-                  <input
-                    type="date"
-                    required
-                    min={formStartDate}
-                    value={formEndDate}
-                    onChange={(e) => setFormEndDate(e.target.value)}
-                    className={`w-full bg-slate-950 border text-white rounded-xl px-3 py-2 text-sm focus:outline-none ${
-                      isTimelineInvalid ? 'border-red-500 focus:border-red-400' : 'border-slate-700 focus:border-amber-500'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Designated Project Manager Selector */}
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1 flex items-center gap-1.5">
-                  <HardHat className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Designated Project Manager (PM Execution Lead)</span>
-                </label>
-                <select
-                  value={formPMId}
-                  onChange={(e) => {
-                    const selected = availablePMs.find(p => p.id === e.target.value);
-                    setFormPMId(e.target.value);
-                    setFormPMName(selected ? selected.name : '');
-                  }}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                >
-                  <option value="">-- Unassigned (Designate Later) --</option>
-                  {availablePMs.map(pm => (
-                    <option key={pm.id} value={pm.id}>{pm.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Confidential Accounting Flag */}
-              <div className="flex items-center justify-between p-3 bg-slate-950 border border-slate-800 rounded-xl">
-                <div>
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-amber-400" />
-                    <span>Confidential Accounting (Restricted Access)</span>
-                  </div>
-                  <div className="text-[11px] text-slate-400">
-                    Restricts granular ledgers, profit margins, and contractor rates to Administrator only
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={formIsPrivateAccounting}
-                  onChange={(e) => setFormIsPrivateAccounting(e.target.checked)}
-                  className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
-                />
-              </div>
-
-              {/* Assign Initial Workforce & Trade Contractors */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-mono text-slate-400 uppercase flex items-center gap-1.5">
-                    <Users className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Assign Registered Workers & Contractors (Optional)</span>
-                  </label>
-                  <span className="text-[11px] font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
-                    {formAssignedWorkerIds.length} Selected
-                  </span>
-                </div>
-
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-500" />
-                  <input
-                    type="text"
-                    placeholder="Filter workers by name or trade..."
-                    value={modalWorkerSearchQuery}
-                    onChange={(e) => setModalWorkerSearchQuery(e.target.value)}
-                    className="w-full bg-slate-900/80 border border-slate-800 text-white rounded-lg pl-8 pr-3 py-1.5 text-xs placeholder-slate-500 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-
-                <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-                  {contractors.length === 0 ? (
-                    <div className="text-center py-3 text-xs text-slate-500 italic">No registered workers found in roster.</div>
-                  ) : (
-                    contractors
-                      .filter(c => {
-                        if (!modalWorkerSearchQuery.trim()) return true;
-                        const q = modalWorkerSearchQuery.toLowerCase();
-                        return (
-                          c.name.toLowerCase().includes(q) ||
-                          (c.tradeType && c.tradeType.toLowerCase().includes(q)) ||
-                          (c.specialty && c.specialty.toLowerCase().includes(q))
-                        );
-                      })
-                      .map(worker => {
-                        const isSelected = formAssignedWorkerIds.includes(worker.id);
-                        return (
-                          <div
-                            key={worker.id}
-                            onClick={() => toggleWorkerSelection(worker.id)}
-                            className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition border text-xs ${
-                              isSelected
-                                ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
-                              : 'bg-slate-900/40 border-slate-800/80 hover:bg-slate-800/50 text-slate-300'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <div className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
-                                {worker.avatar ? (
-                                  <img src={worker.avatar} alt={worker.name} className="w-full h-full object-cover" />
-                                ) : (
-                                  <span className="text-[10px] font-bold text-amber-400">
-                                    {worker.name.charAt(0)}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="truncate">
-                                <span className="font-semibold">{worker.name}</span>
-                                <span className="text-[10px] text-slate-400 ml-1.5 font-mono">
-                                  ({worker.tradeType || 'General'})
-                                </span>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0">
-                              {worker.activeProjectSite && (
-                                <span className="text-[9px] font-mono text-slate-500 hidden sm:inline truncate max-w-[100px]">
-                                  {worker.activeProjectSite}
-                                </span>
-                              )}
-                              <div
-                                className={`w-4 h-4 rounded flex items-center justify-center border transition ${
-                                  isSelected
-                                    ? 'bg-amber-500 border-amber-500 text-slate-950'
-                                    : 'border-slate-700 bg-slate-950'
-                                }`}
-                              >
-                                {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                  )}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Scope & Description</label>
-                <textarea
-                  rows={2}
-                  placeholder="e.g., Land clearing, road network grading, and drainage civil works."
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="pt-3 flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+              {/* Pinned Sticky Footer - Always Visible */}
+              <div className="p-4 border-t border-slate-800 bg-slate-900 flex items-center justify-between gap-3">
                 <button
                   type="button"
                   onClick={() => setShowNewModal(false)}
-                  className="w-full sm:w-auto px-4 py-2 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-sm font-medium cursor-pointer text-center"
+                  className="px-4 py-1.5 rounded-lg text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-xs font-medium cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isTimelineInvalid || !formName.trim()}
-                  className="w-full sm:w-auto px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs transition-colors cursor-pointer text-center"
+                  className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs transition cursor-pointer"
                 >
                   Save Project Profile
                 </button>
@@ -1566,355 +1709,308 @@ export default function ProjectProfileHub({
         </div>
       )}
 
-      {/* Edit Project Modal */}
+      {/* Edit Project Modal with Tabs */}
       {showEditModal && selectedProject && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] overflow-y-auto shadow-2xl p-4 sm:p-6 relative my-auto">
-            <button
-              onClick={() => setShowEditModal(false)}
-              className="absolute top-3 right-3 sm:top-5 sm:right-5 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer z-10"
-            >
-              <X className="w-5 h-5" />
-            </button>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] flex flex-col shadow-2xl overflow-hidden my-auto">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-800 relative bg-slate-900">
+              <button
+                type="button"
+                onClick={() => setShowEditModal(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer z-10"
+              >
+                <X className="w-5 h-5" />
+              </button>
 
-            <div className="flex items-center gap-2 mb-4">
-              <Edit3 className="w-5 h-5 text-amber-400" />
-              <h3 className="text-lg font-bold text-white">Edit Profile: {selectedProject.name}</h3>
+              <div className="flex items-center gap-2">
+                <Edit3 className="w-5 h-5 text-amber-400" />
+                <h3 className="text-base sm:text-lg font-bold text-white">Edit Profile: {selectedProject.name}</h3>
+              </div>
+
+              {/* Form Tabs */}
+              <div className="flex items-center gap-1 mt-3 border-t border-slate-800/80 pt-2.5">
+                <button
+                  type="button"
+                  onClick={() => setModalTab('general')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                    modalTab === 'general' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  1. General & Location
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalTab('timeline')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                    modalTab === 'timeline' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  2. Budget & Timeline
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setModalTab('personnel')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
+                    modalTab === 'personnel' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  }`}
+                >
+                  3. Leadership & Crew ({formAssignedWorkerIds.length})
+                </button>
+              </div>
             </div>
 
-            <form onSubmit={handleEditSubmit} className="space-y-4">
-              {isTimelineInvalid && (
-                <div className="flex items-center gap-2 p-3 bg-red-950/80 border border-red-500/60 rounded-xl text-red-300 text-xs font-semibold animate-fadeIn">
-                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
-                  <span>Validation Alert: Target Handover Date cannot be earlier than Project Start Date.</span>
-                </div>
-              )}
+            {/* Scrollable Form Body */}
+            <form onSubmit={handleEditSubmit} className="flex-1 overflow-y-auto flex flex-col">
+              <div className="p-4 sm:p-6 space-y-4 flex-1">
+                {isTimelineInvalid && (
+                  <div className="flex items-center gap-2 p-3 bg-red-950/80 border border-red-500/60 rounded-xl text-red-300 text-xs font-semibold">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span>Validation Alert: Target Handover Date cannot precede Start Date.</span>
+                  </div>
+                )}
 
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Project Name</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g., NexBridge Software Hub Phase 2"
-                  value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                />
-              </div>
+                {modalTab === 'general' && (
+                  <div className="space-y-3.5">
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Project Name *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g., NexBridge Software Hub Phase 2"
+                        value={formName}
+                        onChange={(e) => setFormName(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
 
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Client / Corporate Account</label>
-                <input
-                  type="text"
-                  placeholder="e.g., Summit Holdings Philippines"
-                  value={formClient}
-                  onChange={(e) => setFormClient(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                />
-              </div>
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Client / Corporate Account</label>
+                      <input
+                        type="text"
+                        placeholder="e.g., Summit Holdings Philippines"
+                        value={formClient}
+                        onChange={(e) => setFormClient(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-mono text-slate-400 uppercase">Site Location</label>
-                  <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
-                    <CloudSun className="w-3 h-3" /> Auto-syncs Live Site Diary Weather
-                  </span>
-                </div>
-                <input
-                  type="text"
-                  placeholder="e.g., Cabuyao Technopark, Laguna (or BGC, Makati, Cebu, etc.)"
-                  value={formLocation}
-                  onChange={(e) => setFormLocation(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                />
-                
-                {/* Real-time Geocoded Coordinate Preview */}
-                {formLocation.trim() && (
-                  <div className={`mt-2 p-2.5 rounded-xl border text-xs flex items-center justify-between transition-all ${
-                    detectedCoords 
-                      ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300'
-                      : 'bg-slate-900 border-slate-800 text-slate-400'
-                  }`}>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <MapPin className={`w-4 h-4 shrink-0 ${detectedCoords ? 'text-emerald-400' : 'text-slate-500'}`} />
-                      <div className="truncate">
-                        {detectedCoords ? (
-                          <span>
-                            <strong className="text-white">Weather Station: {detectedCoords.name}</strong>
-                            <span className="text-[11px] font-mono opacity-80 ml-1.5">
-                              ({detectedCoords.lat.toFixed(4)}° N, {detectedCoords.lon.toFixed(4)}° E)
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <label className="text-xs font-mono text-slate-400 uppercase">Site Location</label>
+                        <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
+                          <CloudSun className="w-3 h-3" /> Live Weather Sync
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="e.g., Cabuyao Technopark, Laguna"
+                        value={formLocation}
+                        onChange={(e) => setFormLocation(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                      />
+                      {formLocation.trim() && (
+                        <div className={`mt-2 p-2 rounded-lg border text-xs flex items-center justify-between ${
+                          detectedCoords ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-slate-950 border-slate-800 text-slate-400'
+                        }`}>
+                          <div className="flex items-center gap-2 truncate">
+                            <MapPin className={`w-3.5 h-3.5 shrink-0 ${detectedCoords ? 'text-emerald-400' : 'text-slate-500'}`} />
+                            <span className="truncate">
+                              {detectedCoords ? (
+                                <>Weather Station: <strong className="text-white">{detectedCoords.name}</strong> ({detectedCoords.lat.toFixed(3)}°N, {detectedCoords.lon.toFixed(3)}°E)</>
+                              ) : (
+                                'Resolving weather station telemetry...'
+                              )}
                             </span>
-                          </span>
-                        ) : (
-                          <span>{isGeocoding ? 'Detecting coordinates...' : 'Resolving site coordinates...'}</span>
-                        )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Scope & Description</label>
+                      <textarea
+                        rows={3}
+                        value={formDescription}
+                        onChange={(e) => setFormDescription(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {modalTab === 'timeline' && (
+                  <div className="space-y-3.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Contract Budget (PHP)</label>
+                        <input
+                          type="number"
+                          value={formBudget}
+                          onChange={(e) => setFormBudget(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Funds Collected (PHP)</label>
+                        <input
+                          type="number"
+                          value={formCollected}
+                          onChange={(e) => setFormCollected(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                        />
                       </div>
                     </div>
-                    <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0 font-bold ml-2">
-                      {detectedCoords?.confidence === 'EXACT_COORDINATES' ? 'GPS Coords' : 'Weather Synced'}
-                    </span>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Project Status</label>
+                        <select
+                          value={formStatus}
+                          onChange={(e) => setFormStatus(e.target.value as any)}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                        >
+                          <option value="PLANNING">Planning Phase</option>
+                          <option value="IN_PROGRESS">In Progress</option>
+                          <option value="PUNCHLIST_QA">Punchlist & QA</option>
+                          <option value="HANDED_OVER">Handed Over</option>
+                          <option value="COMPLETED">Completed</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Progress %</label>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={formProgress}
+                          onChange={(e) => setFormProgress(Number(e.target.value))}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Start Date</label>
+                        <input
+                          type="date"
+                          value={formStartDate}
+                          onChange={(e) => setFormStartDate(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Target Handover Date</label>
+                        <input
+                          type="date"
+                          value={formEndDate}
+                          onChange={(e) => setFormEndDate(e.target.value)}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {modalTab === 'personnel' && (
+                  <div className="space-y-3.5">
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Lead Project Manager</label>
+                      <select
+                        value={formPMId}
+                        onChange={(e) => {
+                          setFormPMId(e.target.value);
+                          const pm = availablePMs.find(p => p.id === e.target.value);
+                          setFormPMName(pm ? pm.name : '');
+                        }}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                      >
+                        <option value="">Select Project Lead...</option>
+                        {availablePMs.map(pm => (
+                          <option key={pm.id} value={pm.id}>{pm.name}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex items-center gap-2 p-2.5 bg-slate-950 rounded-lg border border-slate-800">
+                      <input
+                        type="checkbox"
+                        id="edit-private-accounting"
+                        checked={formIsPrivateAccounting}
+                        onChange={(e) => setFormIsPrivateAccounting(e.target.checked)}
+                        className="w-4 h-4 rounded text-amber-500 focus:ring-0 bg-slate-900 border-slate-700 cursor-pointer"
+                      />
+                      <label htmlFor="edit-private-accounting" className="text-xs text-slate-300 cursor-pointer select-none">
+                        Confidential Accounting (Restricted to Operations Directors)
+                      </label>
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-1.5">
+                        <label className="text-xs font-mono text-slate-400 uppercase">
+                          Assign Personnel ({formAssignedWorkerIds.length} Selected)
+                        </label>
+                      </div>
+                      <input
+                        type="text"
+                        placeholder="Filter available contractors..."
+                        value={modalWorkerSearchQuery}
+                        onChange={(e) => setModalWorkerSearchQuery(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-xs focus:border-amber-500 focus:outline-none mb-2"
+                      />
+                      <div className="max-h-40 overflow-y-auto space-y-1 pr-1 border border-slate-800 rounded-lg p-2 bg-slate-950/60">
+                        {contractors
+                          .filter(w => {
+                            if (!modalWorkerSearchQuery.trim()) return true;
+                            const q = modalWorkerSearchQuery.toLowerCase();
+                            return w.name.toLowerCase().includes(q) || (w.tradeType || '').toLowerCase().includes(q);
+                          })
+                          .map(worker => {
+                            const isSelected = formAssignedWorkerIds.includes(worker.id);
+                            return (
+                              <div
+                                key={worker.id}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setFormAssignedWorkerIds(prev => prev.filter(id => id !== worker.id));
+                                  } else {
+                                    setFormAssignedWorkerIds(prev => [...prev, worker.id]);
+                                  }
+                                }}
+                                className={`p-1.5 rounded flex items-center justify-between text-xs cursor-pointer transition ${
+                                  isSelected ? 'bg-amber-500/10 border border-amber-500/30 text-white' : 'hover:bg-slate-800 text-slate-300'
+                                }`}
+                              >
+                                <span className="truncate">{worker.name} ({worker.tradeType || 'General'})</span>
+                                <div className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] ${
+                                  isSelected ? 'bg-amber-500 border-amber-500 text-slate-950' : 'border-slate-700'
+                                }`}>
+                                  {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
+                                </div>
+                              </div>
+                            );
+                          })}
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Total Budget (₱)</label>
-                  <input
-                    type="number"
-                    value={formBudget}
-                    onChange={(e) => setFormBudget(Number(e.target.value))}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none font-mono"
-                  />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Funds Collected (₱)</label>
-                    <span className="text-[10px] text-emerald-400 font-mono font-semibold flex items-center gap-1">
-                      <Lock className="w-2.5 h-2.5" /> Finance Ledger (Read-Only)
-                    </span>
-                  </div>
-                  <input
-                    type="text"
-                    readOnly
-                    disabled
-                    value={`₱${Number(formCollected || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                    className="w-full bg-slate-900/60 border border-slate-800 text-emerald-400 rounded-xl px-3 py-2 text-sm font-mono cursor-not-allowed select-none"
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1 font-mono">
-                    Governed strictly via Finance & Installment Payment receipts.
-                  </p>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">
-                    Progress (%) <span className="text-amber-400 text-[10px]">(Auto-Synced)</span>
-                  </label>
-                  <input
-                    type="number"
-                    readOnly
-                    disabled
-                    value={formProgress}
-                    className="w-full bg-slate-900 border border-slate-800 text-slate-400 rounded-xl px-3 py-2 text-sm font-mono cursor-not-allowed"
-                  />
-                  <span className="text-[10px] text-slate-500 font-mono mt-1 block">⚡ Auto-Synced from Master CPM Gantt & Task Kanban</span>
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-mono text-slate-400 uppercase">Workers Count</label>
-                    {formAssignedWorkerIds.length > 0 && (
-                      <span className="text-[10px] text-amber-400 font-mono font-bold flex items-center gap-1">
-                        <Check className="w-2.5 h-2.5" /> Auto-synced
-                      </span>
-                    )}
-                  </div>
-                  <input
-                    type="number"
-                    min={0}
-                    value={formAssignedWorkerIds.length > 0 ? formAssignedWorkerIds.length : formWorkers}
-                    onChange={(e) => setFormWorkers(Number(e.target.value))}
-                    disabled={formAssignedWorkerIds.length > 0}
-                    className={`w-full bg-slate-950 border rounded-xl px-3 py-2 text-sm font-mono focus:outline-none transition ${
-                      formAssignedWorkerIds.length > 0
-                        ? 'border-amber-500/50 bg-amber-500/10 text-amber-300 cursor-not-allowed font-bold'
-                        : 'border-slate-700 text-white focus:border-amber-500'
-                    }`}
-                  />
-                  <p className="text-[10px] text-slate-500 mt-1">
-                    {formAssignedWorkerIds.length > 0
-                      ? `Locked to ${formAssignedWorkerIds.length} registered artisan${formAssignedWorkerIds.length > 1 ? 's' : ''} below`
-                      : 'Or select registered workers below'}
-                  </p>
-                </div>
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Status</label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value as ProjectProfile['status'])}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-2 py-2 text-xs focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="PLANNING">Planning</option>
-                    <option value="IN_PROGRESS">In Progress</option>
-                    <option value="PUNCHLIST_QA">Punchlist & QA</option>
-                    <option value="HANDED_OVER">Handed Over</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Start Date</label>
-                  <input
-                    type="date"
-                    value={formStartDate}
-                    onChange={(e) => setFormStartDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Target Handover Date</label>
-                  <input
-                    type="date"
-                    min={formStartDate}
-                    value={formEndDate}
-                    onChange={(e) => setFormEndDate(e.target.value)}
-                    className={`w-full bg-slate-950 border text-white rounded-xl px-3 py-2 text-sm focus:outline-none ${
-                      isTimelineInvalid ? 'border-red-500 focus:border-red-400' : 'border-slate-700 focus:border-amber-500'
-                    }`}
-                  />
-                </div>
-              </div>
-
-              {/* Designated Project Manager Selector */}
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1 flex items-center gap-1.5">
-                  <HardHat className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Designated Project Manager (PM Execution Lead)</span>
-                </label>
-                <select
-                  value={formPMId}
-                  onChange={(e) => {
-                    const selected = availablePMs.find(p => p.id === e.target.value);
-                    setFormPMId(e.target.value);
-                    setFormPMName(selected ? selected.name : '');
-                  }}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                >
-                  <option value="">-- Unassigned (Designate Later) --</option>
-                  {availablePMs.map(pm => (
-                    <option key={pm.id} value={pm.id}>{pm.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Confidential Accounting Flag */}
-              <div className="flex items-center justify-between p-3 bg-slate-950 border border-slate-800 rounded-xl">
-                <div>
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-amber-400" />
-                    <span>Confidential Accounting (Restricted Access)</span>
-                  </div>
-                  <div className="text-[11px] text-slate-400">
-                    Restricts granular ledgers, profit margins, and contractor rates to Administrator only
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={formIsPrivateAccounting}
-                  onChange={(e) => setFormIsPrivateAccounting(e.target.checked)}
-                  className="w-4 h-4 accent-amber-500 rounded cursor-pointer"
-                />
-              </div>
-
-              {/* Edit Assigned Workforce & Trade Contractors */}
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-mono text-slate-400 uppercase flex items-center gap-1.5">
-                    <Users className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Assigned Workers & Trade Contractors</span>
-                  </label>
-                  <span className="text-[11px] font-mono font-bold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
-                    {formAssignedWorkerIds.length} Assigned
-                  </span>
-                </div>
-
-                <div className="relative">
-                  <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-slate-500" />
-                  <input
-                    type="text"
-                    placeholder="Filter workers by name or trade..."
-                    value={modalWorkerSearchQuery}
-                    onChange={(e) => setModalWorkerSearchQuery(e.target.value)}
-                    className="w-full bg-slate-900/80 border border-slate-800 text-white rounded-lg pl-8 pr-3 py-1.5 text-xs placeholder-slate-500 focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-
-                <div className="max-h-36 overflow-y-auto space-y-1.5 pr-1 scrollbar-thin scrollbar-thumb-slate-800">
-                  {contractors
-                    .filter(c => {
-                      if (!modalWorkerSearchQuery.trim()) return true;
-                      const q = modalWorkerSearchQuery.toLowerCase();
-                      return (
-                        c.name.toLowerCase().includes(q) ||
-                        (c.tradeType && c.tradeType.toLowerCase().includes(q)) ||
-                        (c.specialty && c.specialty.toLowerCase().includes(q))
-                      );
-                    })
-                    .map(worker => {
-                      const isSelected = formAssignedWorkerIds.includes(worker.id);
-                      return (
-                        <div
-                          key={worker.id}
-                          onClick={() => toggleWorkerSelection(worker.id)}
-                          className={`flex items-center justify-between p-2 rounded-lg cursor-pointer transition border text-xs ${
-                            isSelected
-                              ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
-                              : 'bg-slate-900/40 border-slate-800/80 hover:bg-slate-800/50 text-slate-300'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 min-w-0">
-                            <div className="w-6 h-6 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden shrink-0">
-                              {worker.avatar ? (
-                                <img src={worker.avatar} alt={worker.name} className="w-full h-full object-cover" />
-                              ) : (
-                                <span className="text-[10px] font-bold text-amber-400">
-                                  {worker.name.charAt(0)}
-                                </span>
-                              )}
-                            </div>
-                            <div className="truncate">
-                              <span className="font-semibold">{worker.name}</span>
-                              <span className="text-[10px] text-slate-400 ml-1.5 font-mono">
-                                ({worker.tradeType || 'General'})
-                              </span>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            {worker.activeProjectSite && (
-                              <span className="text-[9px] font-mono text-slate-500 hidden sm:inline truncate max-w-[100px]">
-                                {worker.activeProjectSite}
-                              </span>
-                            )}
-                            <div
-                              className={`w-4 h-4 rounded flex items-center justify-center border transition ${
-                                isSelected
-                                  ? 'bg-amber-500 border-amber-500 text-slate-950'
-                                  : 'border-slate-700 bg-slate-950'
-                              }`}
-                            >
-                              {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Scope & Description</label>
-                <textarea
-                  rows={2}
-                  value={formDescription}
-                  onChange={(e) => setFormDescription(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <div className="pt-3 flex flex-wrap items-center justify-end gap-2 sm:gap-3">
+              {/* Pinned Sticky Footer - Always Visible */}
+              <div className="p-4 border-t border-slate-800 bg-slate-900 flex items-center justify-between gap-3">
                 <button
                   type="button"
                   onClick={() => setShowEditModal(false)}
-                  className="w-full sm:w-auto px-4 py-2 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-sm font-medium cursor-pointer text-center"
+                  className="px-4 py-1.5 rounded-lg text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-xs font-medium cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={isTimelineInvalid || !formName.trim()}
-                  className="w-full sm:w-auto px-5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/20 cursor-pointer text-center"
+                  className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs transition cursor-pointer"
                 >
                   Update Profile
                 </button>
@@ -1923,6 +2019,7 @@ export default function ProjectProfileHub({
           </div>
         </div>
       )}
+
 
       {/* Workforce Reallocation Modal */}
       {showReallocationModal && activeReallocProject && (
