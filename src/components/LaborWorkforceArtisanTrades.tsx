@@ -735,7 +735,12 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                                   {rec.source === 'GEMINI_AI' ? (
                                     <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border bg-indigo-950/80 text-indigo-300 border-indigo-700/80 flex items-center gap-1 shadow-xs">
                                       <Sparkles className="w-3 h-3 text-indigo-400" />
-                                      <span>Gemini AI ({rec.aiModel || 'gemini-3.8-flash'})</span>
+                                      <span>Gemini AI ({rec.aiModel || 'gemini-3.1-flash-lite'})</span>
+                                    </span>
+                                  ) : rec.source === 'GROQ_AI' ? (
+                                    <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border bg-amber-950/80 text-amber-300 border-amber-700/80 flex items-center gap-1 shadow-xs">
+                                      <Bot className="w-3 h-3 text-amber-400" />
+                                      <span>Groq AI ({rec.aiModel || 'openai/gpt-oss-20b'})</span>
                                     </span>
                                   ) : (
                                     <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border bg-slate-900 text-amber-300 border-amber-800/80 flex items-center gap-1 shadow-xs">
@@ -913,7 +918,9 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                                   <span className="truncate max-w-[45%] text-teal-300 font-semibold">{targetDisplay}</span>
                                 </div>
                                 <div className="flex items-center justify-between text-[10px] font-mono text-slate-400 pt-1.5 border-t border-emerald-900/40">
-                                  <span className="text-emerald-400/80">{rec.source === 'GEMINI_AI' ? 'Source: Gemini AI' : 'Source: Rule-Based'}</span>
+                                  <span className="text-emerald-400/80">
+                                    {rec.source === 'GEMINI_AI' ? 'Source: Gemini AI' : rec.source === 'GROQ_AI' ? 'Source: Groq AI' : 'Source: Rule-Based Fallback'}
+                                  </span>
                                   <span className="text-slate-400 truncate max-w-[50%]">{rec.approvedByUserName ? `By: ${rec.approvedByUserName}` : 'Approved'}</span>
                                 </div>
                               </div>

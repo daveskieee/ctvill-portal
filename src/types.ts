@@ -426,7 +426,8 @@ export interface AIManpowerRecommendation {
   workerId?: string;
   workerName?: string;
   tradeType?: string;
-  source?: 'GEMINI_AI' | 'RULE_BASED_FALLBACK';
+  source?: 'GEMINI_AI' | 'GROQ_AI' | 'RULE_BASED_FALLBACK';
+  provider?: 'gemini' | 'groq' | 'heuristic';
   aiModel?: string;
   ruleBasedFitScore?: number;
   confidenceScore?: number;

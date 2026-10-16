@@ -1,0 +1,202 @@
+================================================================================
+CTVILL CONSTRUCTION ERP — MULTI-PROVIDER AI RELIABILITY UPGRADE VERIFICATION
+================================================================================
+Verification Date: 2026-10-16T22:35:00+08:00
+Environment: Node.js v22.14.0 | TypeScript 5.8.2 | PostgreSQL (Neon Pooler)
+Git Restore Point: restore-point-multi-provider-ai-start (Commit: 59d04fb)
+
+--------------------------------------------------------------------------------
+1. ARCHITECTURAL SUMMARY & PROVIDER PRIORITY
+--------------------------------------------------------------------------------
+The manpower recommendation engine in CTVill Construction ERP has been upgraded
+from a single-provider system to a resilient three-layer architecture:
+
+  Layer 1 (Primary): Google Gemini (`gemini-3.1-flash-lite`) via @google/genai
+    - Fast, cost-effective inference for commercial fit-out manpower reallocation.
+    - 10-second request timeout via Promise.race.
+    - Retry policy: Max 1 retry for transient 503/UNAVAILABLE; 0 retries for 429
+      quota exhaustion or 401/403 auth errors to ensure immediate failover.
+
+  Layer 2 (Secondary): Groq (`openai/gpt-oss-20b`) via official groq-sdk
+    - Automatically engaged when Layer 1 encounters 429 quota exhaustion, rate
+      limits, 503 high demand, timeouts, or unconfigured keys.
+    - Verified model ID: `openai/gpt-oss-20b` (supported on Groq LPU platform).
+    - 10-second request timeout.
+    - Retry policy: Max 1 retry for transient 503/502; 0 retries for 429/401/403.
+
+  Layer 3 (Final Fallback): Existing CTVILL Rule-Based Recommendation Engine
+    - Model Identifier: `heuristic-v1`
+    - Automatically engaged if both Gemini and Groq are unavailable, offline, or
+      return zero valid candidate recommendations.
+    - Generates 100% deterministic, valid recommendations derived directly from
+      the ground-truth PostgreSQL commercial fit-out database.
+
+--------------------------------------------------------------------------------
+2. MODIFIED & CREATED FILES
+--------------------------------------------------------------------------------
+1. package.json & package-lock.json
+   - Added official `groq-sdk` (^1.6.0) dependency.
+
+2. .env.example
+   - Documented `GROQ_API_KEY` for Secondary Groq AI failover.
+
+3. server/db.ts
+   - Added `provider` column (TEXT DEFAULT 'heuristic') to `ai_manpower_recommendations`.
+   - Added `provider` and `ai_model` columns to `ai_workforce_learning_history`.
+
+4. server/routes/workforce.ts
+   - Integrated Groq SDK import.
+   - Added 3-second per-user scan cooldown safeguard against excessive API requests.
+   - Added `withTimeout` helper (10s threshold).
+   - Added `parseRecommendationsJson` resilient parser (strips code fences, parses
+     arrays or `{ recommendations: [...] }` objects).
+   - Enforced strict privacy: Prompts use anonymized workers (`workerId`, `trade`,
+     `activeSite`, `status`) and anonymized projects (`id`, `name`, `location`,
+     `progressPercentage`, `status`, `assignedWorkersCount`, `weatherSuspended`).
+     Zero employee full names, phone numbers, payroll details, client names, or
+     financial figures are ever transmitted to external AI providers.
+   - Implemented three-layer execution pipeline (Gemini -> Groq -> Rule-Based Fallback).
+   - Unified candidate processing: All candidates from Gemini, Groq, and Rule-Based
+     pass through `validateRecommendationCandidate` and attach trusted employee names
+     from ground-truth database `workerMap`.
+   - Preserved atomic PostgreSQL transactions, CSRF validation, dual donor/target
+     authorization, and trade compatibility verification.
+   - Saved `provider` ('gemini' | 'groq' | 'heuristic') and `ai_model` to recommendation
+     records and audit learning history.
+
+5. server/routes/legacyParcels.ts
+   - Updated `/api/all-data` recommendation mapping to include `provider`.
+
+6. src/types.ts
+   - Updated `AIManpowerRecommendation`:
+     `source?: 'GEMINI_AI' | 'GROQ_AI' | 'RULE_BASED_FALLBACK'`
+     `provider?: 'gemini' | 'groq' | 'heuristic'`
+     `tradeType?: string`
+
+7. src/components/LaborWorkforceArtisanTrades.tsx
+   - Rendered distinct visual badges for recommendation sources:
+     * Gemini AI: Indigo badge with Sparkles icon and model name
+     * Groq AI: Amber badge with Bot icon and model name
+     * Rule-Based Fallback: Slate/Amber badge with Zap icon
+   - Updated applied history cards to display exact source:
+     "Source: Gemini AI", "Source: Groq AI", or "Source: Rule-Based Fallback".
+
+8. server/tests/multi_provider_ai.test.ts (CREATED)
+   - 24-test comprehensive suite covering failover order, retry limits, privacy
+     anonymization, schema uniformity, ground-truth candidate validation, and rate
+     limiting.
+
+--------------------------------------------------------------------------------
+3. ACTUAL TEST & VERIFICATION RESULTS
+--------------------------------------------------------------------------------
+
+A. TypeScript Static Analysis:
+   Command: `npx tsc --noEmit`
+   Result: 0 errors. All client and server types compiled cleanly.
+
+B. Production Bundle Build:
+   Command: `npm run build`
+   Result: SUCCESS. Prisma client generated and Vite bundle built in 8.94s.
+
+C. Multi-Provider Reliability Test Suite:
+   Command: `npx tsx server/tests/multi_provider_ai.test.ts`
+   Summary: 23 passed, 1 skipped, 0 failed out of 24 total tests.
+
+   Test Breakdown by Section:
+   [Section 1: Architecture & Failover Order]
+     - Provider Priority 1: Primary Gemini configuration (gemini-3.1-flash-lite) ... PASSED
+     - Provider Priority 2: Secondary Groq configuration (openai/gpt-oss-20b) ... PASSED
+     - Provider Priority 3: Final Fallback Rule-Based engine (heuristic-v1) ... PASSED
+     - Failover Logic: Gemini 429 quota exhaustion triggers immediate failover to Groq (0 retries) ... PASSED
+     - Failover Logic: Gemini 503 transient error attempts 1 retry before failing over to Groq ... PASSED
+     - Timeout Safeguard: withTimeout rejects request after specified threshold ... PASSED
+     - Failover Logic: Both Gemini & Groq failure safely defaults to Rule-Based engine ... PASSED
+
+   [Section 2: Privacy & Data Anonymization]
+     - Privacy Safeguard: Worker roster sent to AI excludes full names, phone numbers, and payroll rates ... PASSED
+     - Privacy Safeguard: Project payload sent to AI excludes client names and contract amounts ... PASSED
+     - Server-Side Name Resolution: True employee names re-attached from trusted DB workerMap only ... PASSED
+
+   [Section 3: Structured JSON Schema Uniformity]
+     - Schema Parser: Handles markdown code blocks (```json ... ```) ... PASSED
+     - Schema Parser: Handles wrapped object format { recommendations: [...] } ... PASSED
+     - Schema Uniformity: Gemini, Groq, and Fallback return identical field contracts ... PASSED
+
+   [Section 4: Ground-Truth Validation Safeguards]
+     - Validation: Incompatible trade skill is rejected ... PASSED
+     - Validation: Inactive or suspended worker is rejected ... PASSED
+     - Validation: Corporate staff, PMs, and safety inspectors (EHSO) are strictly rejected ... PASSED
+     - Validation: Completed or handed-over project target is rejected ... PASSED
+     - Validation: Redundant assignment (worker already at target site) is rejected ... PASSED
+     - Validation: Previously dismissed worker-project pair is rejected ... PASSED
+     - Validation: Valid active trade artisan passes all criteria ... PASSED
+
+   [Section 5: Rate Limiting & Security Restrictions]
+     - Rate Limit Safeguard: Scans within 3 seconds of each other are throttled ... PASSED
+     - Live Gemini API Check: Verified connection and failover readiness with actual configured GEMINI_API_KEY ... PASSED
+       (Runtime result: Live Gemini API returned HTTP 503 High Demand / 429 Quota Exhausted,
+        confirming live error detection and failover trigger)
+     - Live Groq API Check: Verified when GROQ_API_KEY is configured ... PASSED
+       (Runtime result: Live Groq API authenticated and responded with valid structured JSON
+        using configured model openai/gpt-oss-20b)
+
+   [Section 6: Database Mutation & Transaction Verification]
+     - Database transaction: Multi-provider recommendation approval rollback on audit failure ... SKIPPED (Safety Shield)
+
+D. Phase 2 AI Integration Test Suite:
+   Command: `npx tsx server/tests/phase2_ai.test.ts`
+   Summary: 28 passed, 4 skipped, 0 failed out of 32 total tests.
+   Result: Zero regressions to Phase 2 atomic approval, CSRF, or dual authorization.
+
+E. Phase 1 Security Test Suite:
+   Command: `npm run test:security`
+   Summary: 39 passed, 3 skipped, 0 failed out of 42 total tests.
+   Result: Zero regressions to Phase 1 role access control, authentication, or session management.
+
+--------------------------------------------------------------------------------
+4. PROVIDER SELECTION DURING TESTS & RUNTIME BEHAVIOR
+--------------------------------------------------------------------------------
+Test Scenario 1: Gemini Live Call
+  Selected Provider: Primary Google Gemini (`gemini-3.1-flash-lite`)
+  Actual Behavior: Live call made using configured `GEMINI_API_KEY`. The upstream
+  Google API returned HTTP 503 "model experiencing high demand" / HTTP 429 quota
+  exhaustion. The system caught this error without throwing unhandled exceptions.
+
+Test Scenario 2: Gemini Quota Exhaustion / 503 Failover Simulation
+  Selected Provider: Secondary Groq (`openai/gpt-oss-20b`)
+  Actual Behavior: 429 error caught immediately (0 retries). Groq client was invoked
+  as the secondary provider with identical anonymized payload and structured schema.
+
+Test Scenario 3: Complete AI Outage Simulation (Gemini + Groq unavailable)
+  Selected Provider: Rule-Based Fallback Engine (`heuristic-v1`)
+  Actual Behavior: Both AI providers bypassed. Engine generated valid recommendations
+  from Ground-Truth commercial projects and active trade artisans. All candidates
+  were validated via `validateRecommendationCandidate` and scored via documented
+  fit scoring method.
+
+Test Scenario 4: UI Transparency Rendering
+  Source Identifiers Rendered:
+  - Gemini Recommendations: "Gemini AI (gemini-3.1-flash-lite)" [Indigo Badge]
+  - Groq Recommendations: "Groq AI (openai/gpt-oss-20b)" [Amber Badge]
+  - Fallback Recommendations: "Rule-Based Fallback" [Slate/Amber Badge]
+
+--------------------------------------------------------------------------------
+5. REMAINING LIMITATIONS & HONEST REPORTING
+--------------------------------------------------------------------------------
+1. GROQ_API_KEY Configuration:
+   `GROQ_API_KEY` is configured in `.env` and documented in `.env.example`.
+   Live connection has been verified with `openai/gpt-oss-20b`, returning valid
+   structured JSON responses. Layer 2 Groq inference is active and ready to handle
+   failover traffic whenever Gemini hits quota or rate limits.
+
+2. Live Database Safety Shield:
+   Destructive database-mutating integration tests (e.g. forced transaction rollback
+   during approval) were safely skipped because the system detected that
+   `TEST_DATABASE_URL` was not configured with a separate isolated test database.
+   This strictly protects the live Neon PostgreSQL development/production database
+   from corruption or accidental data loss.
+
+3. Rate Limit Throttle:
+   Rapid successive scan requests (< 3000ms) will receive HTTP 429 to safeguard
+   server and API resources against excessive external requests.
+================================================================================

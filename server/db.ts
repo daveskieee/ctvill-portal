@@ -164,8 +164,11 @@ export async function initializeDatabaseTables() {
       ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS worker_name TEXT;
       ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS trade_type TEXT;
       ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS category_tag TEXT;
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS provider TEXT DEFAULT 'heuristic';
 
       ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS recommendation_source TEXT DEFAULT 'RULE_BASED_FALLBACK';
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS provider TEXT DEFAULT 'heuristic';
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS ai_model TEXT;
       ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_id TEXT;
       ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_name TEXT;
       ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_role TEXT;

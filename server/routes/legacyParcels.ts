@@ -540,6 +540,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       workerName: r.worker_name || r.contractor_name,
       tradeType: r.trade_type || 'Artisan',
       source: r.source || 'RULE_BASED_FALLBACK',
+      provider: r.provider || (r.source === 'GEMINI_AI' ? 'gemini' : r.source === 'GROQ_AI' ? 'groq' : 'heuristic'),
       aiModel: r.ai_model || 'heuristic-v1',
       ruleBasedFitScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,
       confidenceScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,

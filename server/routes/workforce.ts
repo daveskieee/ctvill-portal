@@ -5,6 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
+import { Groq } from 'groq-sdk';
 import { prisma, pool } from '../db';
 import { broadcastChange, invalidateAllDataCache } from '../events';
 import { requireAuth, requireRole, checkUserProjectAccess } from '../middleware/auth';
@@ -764,8 +765,9 @@ workforceRouter.get('/ai-recommendations', async (req: Request, res: Response) =
         workerId: r.worker_id || r.contractor_id,
         workerName: r.worker_name || r.contractor_name,
         tradeType: r.trade_type || 'Artisan',
-        source: (r.source === 'GEMINI_AI' ? 'GEMINI_AI' : 'RULE_BASED_FALLBACK') as 'GEMINI_AI' | 'RULE_BASED_FALLBACK',
-        aiModel: r.ai_model || (r.source === 'GEMINI_AI' ? 'gemini-3.8-flash' : 'heuristic-v1'),
+        source: (r.source === 'GEMINI_AI' ? 'GEMINI_AI' : r.source === 'GROQ_AI' ? 'GROQ_AI' : 'RULE_BASED_FALLBACK') as 'GEMINI_AI' | 'GROQ_AI' | 'RULE_BASED_FALLBACK',
+        provider: (r.provider || (r.source === 'GEMINI_AI' ? 'gemini' : r.source === 'GROQ_AI' ? 'groq' : 'heuristic')) as 'gemini' | 'groq' | 'heuristic',
+        aiModel: r.ai_model || (r.source === 'GEMINI_AI' ? (process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite') : r.source === 'GROQ_AI' ? (process.env.GROQ_MODEL || 'openai/gpt-oss-20b') : 'heuristic-v1'),
         ruleBasedFitScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,
         confidenceScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,
         approvedByUserId: r.approved_by_user_id || null,
@@ -975,15 +977,20 @@ workforceRouter.post('/labor-allocations/apply-ai-rec', requireRole(['ADMIN', 'E
       }
     }
 
+    const recProvider = rec.provider || (rec.source === 'GEMINI_AI' ? 'gemini' : rec.source === 'GROQ_AI' ? 'groq' : 'heuristic');
+    const recModel = rec.ai_model || (rec.source === 'GEMINI_AI' ? (process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite') : rec.source === 'GROQ_AI' ? (process.env.GROQ_MODEL || 'openai/gpt-oss-20b') : 'heuristic-v1');
+
     // 9. Record audit entry in ai_workforce_learning_history within the same transaction
     await client.query(`
       INSERT INTO ai_workforce_learning_history 
-      (id, recommendation_id, action, recommendation_source, approving_user_id, approving_user_name, approving_user_role, applied_at, donor_project_name, target_project_name, worker_name, trade_type, headcount_change, rationale)
-      VALUES ($1, $2, 'ACCEPTED', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      (id, recommendation_id, action, recommendation_source, provider, ai_model, approving_user_id, approving_user_name, approving_user_role, applied_at, donor_project_name, target_project_name, worker_name, trade_type, headcount_change, rationale)
+      VALUES ($1, $2, 'ACCEPTED', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
     `, [
       `HIST-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       rec.id,
       rec.source || 'RULE_BASED_FALLBACK',
+      recProvider,
+      recModel,
       approvingUserId,
       approvingUserName,
       approvingUserRole,
@@ -1007,7 +1014,7 @@ workforceRouter.post('/labor-allocations/apply-ai-rec', requireRole(['ADMIN', 'E
       'AI_RECOMMENDATION_APPROVED',
       approvingUserName,
       approvingUserRole,
-      `Approved ${rec.source || 'AI'} workforce reallocation: transferred ${worker.name} (${rec.trade_type || worker.specialty}) from "${effectiveDonorProjName}" to "${targetProj.name}".`,
+      `Approved ${rec.source || 'AI'} (${recProvider}/${recModel}) workforce reallocation: transferred ${worker.name} (${rec.trade_type || worker.specialty}) from "${effectiveDonorProjName}" to "${targetProj.name}".`,
       appliedTimestamp
     ]);
 
@@ -1091,15 +1098,19 @@ workforceRouter.post('/ai-recommendations/dismiss', requireRole(['ADMIN', 'ENGIN
     const dismissingUserId = req.user?.id || 'admin';
     const dismissingUserName = req.user?.name || 'Administrator';
     const dismissingUserRole = req.user?.role || 'ADMIN';
+    const recProvider = rec.provider || (rec.source === 'GEMINI_AI' ? 'gemini' : rec.source === 'GROQ_AI' ? 'groq' : 'heuristic');
+    const recModel = rec.ai_model || (rec.source === 'GEMINI_AI' ? (process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite') : rec.source === 'GROQ_AI' ? (process.env.GROQ_MODEL || 'openai/gpt-oss-20b') : 'heuristic-v1');
 
     await pool.query(`
       INSERT INTO ai_workforce_learning_history 
-      (id, recommendation_id, action, recommendation_source, approving_user_id, approving_user_name, approving_user_role, applied_at, donor_project_name, target_project_name, worker_name, trade_type, headcount_change, rationale, manager_notes)
-      VALUES ($1, $2, 'DISMISSED', $3, $4, $5, $6, CURRENT_TIMESTAMP, $7, $8, $9, $10, $11, $12, $13)
+      (id, recommendation_id, action, recommendation_source, provider, ai_model, approving_user_id, approving_user_name, approving_user_role, applied_at, donor_project_name, target_project_name, worker_name, trade_type, headcount_change, rationale, manager_notes)
+      VALUES ($1, $2, 'DISMISSED', $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP, $9, $10, $11, $12, $13, $14, $15)
     `, [
       `HIST-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
       rec.id,
       rec.source || 'RULE_BASED_FALLBACK',
+      recProvider,
+      recModel,
       dismissingUserId,
       dismissingUserName,
       dismissingUserRole,
@@ -1120,12 +1131,138 @@ workforceRouter.post('/ai-recommendations/dismiss', requireRole(['ADMIN', 'ENGIN
   }
 });
 
+// Safeguard against excessive API requests: 3-second cooldown per user
+const lastScanTimestampByUser = new Map<string, number>();
+
+// Promise timeout helper to prevent hanging requests
+function withTimeout<T>(promise: Promise<T>, ms: number, errorMsg: string): Promise<T> {
+  let timer: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(errorMsg)), ms);
+  });
+  return Promise.race([
+    promise.then((res) => {
+      clearTimeout(timer);
+      return res;
+    }),
+    timeoutPromise.catch((err) => {
+      clearTimeout(timer);
+      throw err;
+    })
+  ]);
+}
+
+// Resilient JSON parser for LLM responses (strips markdown fences, handles JSON array or { recommendations: [...] } object)
+function parseRecommendationsJson(rawText: string): any[] {
+  let cleaned = rawText.trim();
+  if (cleaned.startsWith('```')) {
+    cleaned = cleaned.replace(/^```[a-zA-Z]*\n?/, '').replace(/\n?```$/, '').trim();
+  }
+  try {
+    const parsed = JSON.parse(cleaned);
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && Array.isArray(parsed.recommendations)) return parsed.recommendations;
+    if (parsed && Array.isArray(parsed.data)) return parsed.data;
+  } catch (e) {
+    const startIdx = cleaned.indexOf('[');
+    const endIdx = cleaned.lastIndexOf(']');
+    if (startIdx !== -1 && endIdx > startIdx) {
+      try {
+        const sub = cleaned.substring(startIdx, endIdx + 1);
+        const parsed = JSON.parse(sub);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {}
+    }
+  }
+  return [];
+}
+
+// Validate candidate items from external AI providers against ground-truth database maps
+function processAndValidateCandidates(
+  candidates: any[],
+  source: 'GEMINI_AI' | 'GROQ_AI',
+  provider: 'gemini' | 'groq',
+  modelName: string,
+  workerMap: Map<string, any>,
+  projectMap: Map<string, any>,
+  dismissedPairs: Set<string>
+): any[] {
+  const validated: any[] = [];
+  for (const item of candidates) {
+    if (!item || !item.workerId || !item.targetProjectId) continue;
+    const validation = validateRecommendationCandidate(
+      {
+        workerId: item.workerId,
+        targetProjectId: item.targetProjectId,
+        donorProjectId: item.donorProjectId,
+        workerTrade: item.tradeType
+      },
+      workerMap,
+      projectMap,
+      dismissedPairs
+    );
+
+    if (validation.valid) {
+      const verifiedWorker = workerMap.get(item.workerId)!;
+      const verifiedTarget = projectMap.get(item.targetProjectId)!;
+      const verifiedDonor = item.donorProjectId ? projectMap.get(item.donorProjectId) : null;
+      const verifiedTrade = item.tradeType || verifiedWorker.specialty || 'Artisan';
+
+      const isStandby = !verifiedDonor || (verifiedDonor.name || '').toLowerCase().includes('standby');
+      const isTargetBehind = Boolean(verifiedTarget.weather_suspended || verifiedTarget.status === 'BEHIND_SCHEDULE');
+
+      validated.push({
+        id: `REC-${provider.toUpperCase()}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        title: `Deploy ${verifiedWorker.name} (${verifiedTrade}) to "${verifiedTarget.name}"`,
+        donorProjectId: verifiedDonor ? verifiedDonor.id : null,
+        donorProjectName: verifiedDonor ? verifiedDonor.name : (item.donorProjectName || 'General Standby Pool'),
+        targetProjectId: verifiedTarget.id,
+        targetProjectName: verifiedTarget.name,
+        workerId: verifiedWorker.id,
+        workerName: verifiedWorker.name,
+        tradeType: verifiedTrade,
+        contractorId: verifiedWorker.id,
+        contractorName: verifiedWorker.company || verifiedWorker.name,
+        currentHeadcount: Number(item.currentHeadcount || verifiedWorker.activeManpower || 1),
+        recommendedHeadcount: Number(item.recommendedHeadcount || (verifiedWorker.activeManpower || 1)),
+        rationale: item.rationale || `Deploying ${verifiedWorker.name} reinforces critical fit-out timeline at ${verifiedTarget.name}.`,
+        categoryTag: item.categoryTag || (isStandby ? 'Idle Labor Mitigation' : isTargetBehind ? 'Critical Path Expedite' : 'Trade Deficit Offset'),
+        priority: item.priority === 'HIGH' ? 'HIGH' : 'MEDIUM',
+        source,
+        provider,
+        aiModel: modelName,
+        confidenceScore: calculateRecommendationFitScore({
+          tradeMatch: true,
+          targetBehindSchedule: isTargetBehind,
+          isFromStandby: isStandby,
+          donorProgress: verifiedDonor ? Number(verifiedDonor.progress_percentage || 0) : undefined
+        })
+      });
+    } else {
+      console.log(`[${provider.toUpperCase()} Candidate Discarded]: ${validation.reason}`);
+    }
+  }
+  return validated;
+}
+
 // POST /api/ai-recommendations/scan
 workforceRouter.post('/ai-recommendations/scan', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
+    // 0. Safeguard: rate limit cooldown (3-second minimum between scans per user)
+    const scanUserId = req.user?.id || 'admin';
+    const now = Date.now();
+    const lastScan = lastScanTimestampByUser.get(scanUserId) || 0;
+    if (now - lastScan < 3000) {
+      return res.status(429).json({
+        error: 'Too Many Requests: Please wait at least 3 seconds between workforce scans to safeguard system resources.'
+      });
+    }
+    lastScanTimestampByUser.set(scanUserId, now);
+
     // Ensure all required columns exist in database
     await pool.query(`
       ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'RULE_BASED_FALLBACK';
+      ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS provider TEXT DEFAULT 'heuristic';
       ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS ai_model TEXT;
       ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS confidence_score NUMERIC DEFAULT 90;
       ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS approved_by_user_id TEXT;
@@ -1133,6 +1270,8 @@ workforceRouter.post('/ai-recommendations/scan', requireRole(['ADMIN', 'ENGINEER
       ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP WITH TIME ZONE;
       ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS category_tag TEXT;
       ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS recommendation_source TEXT DEFAULT 'RULE_BASED_FALLBACK';
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS provider TEXT DEFAULT 'heuristic';
+      ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS ai_model TEXT;
       ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_id TEXT;
       ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_name TEXT;
       ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_role TEXT;
@@ -1181,52 +1320,52 @@ workforceRouter.post('/ai-recommendations/scan', requireRole(['ADMIN', 'ENGINEER
     const projectMap = new Map<string, any>(projects.map(p => [p.id, p]));
 
     let newRecommendations: any[] = [];
-    let scanSource: 'GEMINI_AI' | 'RULE_BASED_FALLBACK' = 'RULE_BASED_FALLBACK';
-    const configuredModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+    let scanSource: 'GEMINI_AI' | 'GROQ_AI' | 'RULE_BASED_FALLBACK' = 'RULE_BASED_FALLBACK';
+    let usedProvider: 'gemini' | 'groq' | 'heuristic' = 'heuristic';
     let usedAiModel: string = 'heuristic-v1';
-    let aiErrorMessage: string | null = null;
+    let geminiErrorMessage: string | null = null;
+    let groqErrorMessage: string | null = null;
 
-    // STEP 1: Attempt Gemini AI Recommendation Generation
-    if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 20 && projects.length > 0 && eligibleWorkers.length > 0) {
-      try {
-        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-        const prompt = `You are an expert Commercial Construction Workforce Optimization AI for CTVill Builders Corporation.
-Analyze active commercial fit-out projects and artisan workforce to generate 4 to 8 targeted, actionable labor reallocation recommendations.
+    // Build anonymized privacy prompt: NO employee names, NO phone numbers, NO payroll/rates, NO client names, NO contract costs
+    const anonymizedProjects = projects.map((p: any) => ({
+      id: p.id,
+      name: p.name,
+      location: p.location,
+      progressPercentage: Number(p.progress_percentage || 0),
+      status: p.status,
+      assignedWorkersCount: Number(p.assigned_workers_count || 0),
+      weatherSuspended: Boolean(p.weather_suspended)
+    }));
+
+    const anonymizedWorkers = eligibleWorkers.map((c: any) => ({
+      workerId: c.id,
+      trade: c.tradeType || c.specialty || 'General Artisan',
+      activeSite: c.activeProjectSite || 'Unassigned / Standby',
+      status: c.status
+    }));
+
+    const prompt = `You are an expert Commercial Construction Workforce Optimization AI for CTVill Builders Corporation.
+Analyze active commercial fit-out projects and the anonymized artisan workforce roster to generate 4 to 8 targeted, actionable labor reallocation recommendations.
 Only include field trade artisans and laborers. Strictly EXCLUDE corporate executives, office staff, finance, HR, legal, project managers (PMs), and permanent safety officers (EHSO).
 
 CRITICAL ACCURACY RULES:
-1. You MUST ONLY select workerId from the provided WORKFORCE ROSTER. Never invent or hallucinate worker IDs.
+1. You MUST ONLY select workerId from the provided WORKFORCE ROSTER. Never invent worker IDs.
 2. You MUST ONLY select targetProjectId and donorProjectId from the provided ACTIVE PROJECTS list. Never invent project IDs.
 3. Never reallocate a worker to the site they are already working on.
 4. donorProjectId can be null if the worker is in standby or unassigned.
 
 ACTIVE PROJECTS:
-${JSON.stringify(projects.map((p: any) => ({
-  id: p.id,
-  name: p.name,
-  location: p.location,
-  progressPercentage: Number(p.progress_percentage || 0),
-  status: p.status,
-  assignedWorkersCount: Number(p.assigned_workers_count || 0),
-  weatherSuspended: Boolean(p.weather_suspended)
-})))}
+${JSON.stringify(anonymizedProjects)}
 
-WORKFORCE ROSTER (ELIGIBLE ARTISANS ONLY):
-${JSON.stringify(eligibleWorkers.map((c: any) => ({
-  id: c.id,
-  name: c.name,
-  trade: c.tradeType || c.specialty || 'General Artisan',
-  activeSite: c.activeProjectSite || 'Unassigned / Standby',
-  status: c.status
-})))}
+WORKFORCE ROSTER (ANONYMIZED FIELD ARTISANS):
+${JSON.stringify(anonymizedWorkers)}
 
-Return a strict JSON array of objects with fields:
+Return a strict JSON object with a "recommendations" array containing objects with:
 - donorProjectId: string or null
 - donorProjectName: string
 - targetProjectId: string
 - targetProjectName: string
 - workerId: string
-- workerName: string
 - tradeType: string
 - recommendedHeadcount: number
 - currentHeadcount: number
@@ -1234,22 +1373,40 @@ Return a strict JSON array of objects with fields:
 - categoryTag: "Trade Deficit Offset" | "Idle Labor Mitigation" | "Timeline Compression" | "Critical Path Expedite"
 - priority: "HIGH" | "MEDIUM"
 `;
+
+    // =========================================================================
+    // LAYER 1: Primary AI Provider — Google Gemini (gemini-3.1-flash-lite)
+    // =========================================================================
+    const configuredGeminiModel = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+    let geminiSuccess = false;
+
+    if (process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY.length > 20 && projects.length > 0 && eligibleWorkers.length > 0) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
         let responseText: string | null = null;
-        for (let attempt = 1; attempt <= 3; attempt++) {
+
+        // Max 1 retry for transient 503 only; 0 retries for 429 quota exhaustion or 401/403
+        for (let attempt = 1; attempt <= 2; attempt++) {
           try {
-            const response = await ai.models.generateContent({
-              model: configuredModel,
+            const generatePromise = ai.models.generateContent({
+              model: configuredGeminiModel,
               contents: prompt,
               config: { responseMimeType: 'application/json' }
             });
+            const response = await withTimeout(generatePromise, 10000, 'Gemini request timed out after 10000ms');
             if (response && response.text) {
               responseText = response.text;
               break;
             }
           } catch (callErr: any) {
             const errStr = callErr?.message || String(callErr);
-            if (attempt < 3 && (errStr.includes('503') || errStr.includes('UNAVAILABLE') || errStr.includes('high demand'))) {
-              await new Promise(r => setTimeout(r, 1200 * attempt));
+            // Fail over immediately if 429 quota/rate limit or 401/403
+            if (errStr.includes('429') || errStr.includes('RESOURCE_EXHAUSTED') || errStr.includes('quota') || errStr.includes('401') || errStr.includes('403')) {
+              throw callErr;
+            }
+            // Retry once on 503 or transient network failure
+            if (attempt === 1 && (errStr.includes('503') || errStr.includes('UNAVAILABLE') || errStr.includes('high demand') || errStr.includes('ECONNRESET'))) {
+              await new Promise(r => setTimeout(r, 1200));
               continue;
             }
             throw callErr;
@@ -1257,73 +1414,113 @@ Return a strict JSON array of objects with fields:
         }
 
         if (responseText) {
-          const parsed = JSON.parse(responseText);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            // Validate each Gemini-generated recommendation against ground-truth database
-            for (const item of parsed) {
-              const validation = validateRecommendationCandidate(
-                {
-                  workerId: item.workerId,
-                  targetProjectId: item.targetProjectId,
-                  donorProjectId: item.donorProjectId,
-                  workerTrade: item.tradeType
-                },
-                workerMap,
-                projectMap,
-                dismissedPairs
-              );
-
-              if (validation.valid) {
-                const verifiedWorker = workerMap.get(item.workerId)!;
-                const verifiedTarget = projectMap.get(item.targetProjectId)!;
-                const verifiedDonor = item.donorProjectId ? projectMap.get(item.donorProjectId) : null;
-
-                newRecommendations.push({
-                  id: `REC-GEMINI-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                  title: `Deploy ${verifiedWorker.name} (${item.tradeType || verifiedWorker.specialty}) to "${verifiedTarget.name}"`,
-                  donorProjectId: verifiedDonor ? verifiedDonor.id : null,
-                  donorProjectName: verifiedDonor ? verifiedDonor.name : (item.donorProjectName || 'General Standby Pool'),
-                  targetProjectId: verifiedTarget.id,
-                  targetProjectName: verifiedTarget.name,
-                  workerId: verifiedWorker.id,
-                  workerName: verifiedWorker.name,
-                  tradeType: item.tradeType || verifiedWorker.specialty || 'Artisan',
-                  contractorId: verifiedWorker.id,
-                  contractorName: verifiedWorker.company || verifiedWorker.name,
-                  currentHeadcount: Number(item.currentHeadcount || verifiedWorker.activeManpower || 1),
-                  recommendedHeadcount: Number(item.recommendedHeadcount || (verifiedWorker.activeManpower || 1)),
-                  rationale: item.rationale || `Deploying ${verifiedWorker.name} reinforces critical fit-out timeline at ${verifiedTarget.name}.`,
-                  categoryTag: item.categoryTag || 'Trade Deficit Offset',
-                  priority: item.priority === 'HIGH' ? 'HIGH' : 'MEDIUM',
-                  source: 'GEMINI_AI',
-                  aiModel: configuredModel,
-                  confidenceScore: calculateRecommendationFitScore({
-                    tradeMatch: true,
-                    targetBehindSchedule: Boolean(verifiedTarget.weather_suspended || verifiedTarget.status === 'BEHIND_SCHEDULE'),
-                    isFromStandby: Boolean(!verifiedDonor || (verifiedDonor.name || '').toLowerCase().includes('standby')),
-                    donorProgress: verifiedDonor ? Number(verifiedDonor.progress_percentage || 0) : undefined
-                  })
-                });
-              } else {
-                console.log(`[Gemini Recommendation Discarded]: ${validation.reason}`);
-              }
-            }
-
-            if (newRecommendations.length > 0) {
-              scanSource = 'GEMINI_AI';
-              usedAiModel = configuredModel;
-            }
+          const candidates = parseRecommendationsJson(responseText);
+          const validatedRecs = processAndValidateCandidates(
+            candidates,
+            'GEMINI_AI',
+            'gemini',
+            configuredGeminiModel,
+            workerMap,
+            projectMap,
+            dismissedPairs
+          );
+          if (validatedRecs.length > 0) {
+            newRecommendations = validatedRecs;
+            scanSource = 'GEMINI_AI';
+            usedProvider = 'gemini';
+            usedAiModel = configuredGeminiModel;
+            geminiSuccess = true;
           }
         }
-      } catch (geminiError: any) {
-        aiErrorMessage = geminiError?.message || String(geminiError);
-        console.log('Gemini API call failed, falling back to heuristic engine:', aiErrorMessage);
+      } catch (err: any) {
+        geminiErrorMessage = err?.message || String(err);
+        console.log(`[Multi-Provider AI] Primary Gemini (${configuredGeminiModel}) unavailable: ${geminiErrorMessage}. Triggering failover to Groq...`);
       }
+    } else {
+      geminiErrorMessage = 'Gemini API key not configured';
     }
 
-    // STEP 2: Rule-Based Fallback Engine (when Gemini is unavailable or yields zero valid recommendations)
-    if (newRecommendations.length === 0 && projects.length > 0 && eligibleWorkers.length > 0) {
+    // =========================================================================
+    // LAYER 2: Secondary AI Provider — Groq (openai/gpt-oss-20b)
+    // Automatically activated upon Gemini quota exhaustion, rate limit, timeout, or error
+    // =========================================================================
+    const configuredGroqModel = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+    let groqSuccess = false;
+
+    if (!geminiSuccess && process.env.GROQ_API_KEY && process.env.GROQ_API_KEY.length > 10 && projects.length > 0 && eligibleWorkers.length > 0) {
+      try {
+        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+        let responseText: string | null = null;
+
+        // Max 1 retry for transient 503/502 only; 0 retries for 429 quota or 401/403
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          try {
+            const chatPromise = groq.chat.completions.create({
+              model: configuredGroqModel,
+              messages: [
+                {
+                  role: 'system',
+                  content: 'You are an expert Commercial Construction Workforce Optimization AI for CTVill Builders Corporation. You generate labor reallocation recommendations in valid JSON format only.'
+                },
+                {
+                  role: 'user',
+                  content: prompt
+                }
+              ],
+              response_format: { type: 'json_object' }
+            });
+            const completion = await withTimeout(chatPromise, 10000, 'Groq request timed out after 10000ms');
+            if (completion?.choices?.[0]?.message?.content) {
+              responseText = completion.choices[0].message.content;
+              break;
+            }
+          } catch (callErr: any) {
+            const errStr = callErr?.message || String(callErr);
+            if (errStr.includes('429') || errStr.includes('rate_limit') || errStr.includes('401') || errStr.includes('403')) {
+              throw callErr;
+            }
+            if (attempt === 1 && (errStr.includes('503') || errStr.includes('502') || errStr.includes('UNAVAILABLE') || errStr.includes('ECONNRESET'))) {
+              await new Promise(r => setTimeout(r, 1200));
+              continue;
+            }
+            throw callErr;
+          }
+        }
+
+        if (responseText) {
+          const candidates = parseRecommendationsJson(responseText);
+          const validatedRecs = processAndValidateCandidates(
+            candidates,
+            'GROQ_AI',
+            'groq',
+            configuredGroqModel,
+            workerMap,
+            projectMap,
+            dismissedPairs
+          );
+          if (validatedRecs.length > 0) {
+            newRecommendations = validatedRecs;
+            scanSource = 'GROQ_AI';
+            usedProvider = 'groq';
+            usedAiModel = configuredGroqModel;
+            groqSuccess = true;
+          }
+        }
+      } catch (err: any) {
+        groqErrorMessage = err?.message || String(err);
+        console.log(`[Multi-Provider AI] Secondary Groq (${configuredGroqModel}) unavailable: ${groqErrorMessage}. Triggering final fallback to Rule-Based engine...`);
+      }
+    } else if (!geminiSuccess) {
+      groqErrorMessage = !process.env.GROQ_API_KEY ? 'GROQ_API_KEY not configured' : 'Bypassed Groq';
+    }
+
+    // =========================================================================
+    // LAYER 3: Final Fallback — Existing CTVILL Rule-Based Recommendation Engine
+    // Automatically activated when both Gemini and Groq fail or are unavailable
+    // =========================================================================
+    if (!geminiSuccess && !groqSuccess && projects.length > 0 && eligibleWorkers.length > 0) {
       scanSource = 'RULE_BASED_FALLBACK';
+      usedProvider = 'heuristic';
       usedAiModel = 'heuristic-v1';
 
       const recipientProjects = projects.filter((p: any) => 
@@ -1345,7 +1542,6 @@ Return a strict JSON array of objects with fields:
         const trade = worker.tradeType || worker.specialty || 'General Trade';
         const isStandby = !worker.activeProjectSite || worker.activeProjectSite === 'STANDBY' || worker.allocationStatus === 'STANDBY';
 
-        // Find matching recipient project that is NOT the worker's current active site
         const targetProj = recipientProjects.find((p: any) => {
           if (!p || !p.id) return false;
           if (worker.activeProjectSite && p.name.toLowerCase().trim() === worker.activeProjectSite.toLowerCase().trim()) {
@@ -1360,7 +1556,6 @@ Return a strict JSON array of objects with fields:
 
         if (!targetProj) continue;
 
-        // Strict validation check
         const donorProj = projects.find((p: any) => 
           worker.activeProjectSite && p.name && p.name.toLowerCase().trim() === worker.activeProjectSite.toLowerCase().trim()
         );
@@ -1428,6 +1623,7 @@ Return a strict JSON array of objects with fields:
           categoryTag,
           priority,
           source: 'RULE_BASED_FALLBACK',
+          provider: 'heuristic',
           aiModel: 'heuristic-v1',
           confidenceScore: calculateRecommendationFitScore({
             tradeMatch: true,
@@ -1458,8 +1654,8 @@ Return a strict JSON array of objects with fields:
         INSERT INTO ai_manpower_recommendations 
         (id, title, target_lots, contractor_id, contractor_name, current_headcount, recommended_headcount, rationale, priority, applied, dismissed,
          donor_project_id, donor_project_name, target_project_id, target_project_name, worker_id, worker_name, trade_type, category_tag,
-         source, ai_model, confidence_score)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, false, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+         source, provider, ai_model, confidence_score)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, false, false, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
         ON CONFLICT (id) DO UPDATE SET
           title = EXCLUDED.title,
           target_lots = EXCLUDED.target_lots,
@@ -1474,6 +1670,7 @@ Return a strict JSON array of objects with fields:
           trade_type = EXCLUDED.trade_type,
           category_tag = EXCLUDED.category_tag,
           source = EXCLUDED.source,
+          provider = EXCLUDED.provider,
           ai_model = EXCLUDED.ai_model,
           confidence_score = EXCLUDED.confidence_score
       `, [
@@ -1495,6 +1692,7 @@ Return a strict JSON array of objects with fields:
         rec.tradeType,
         rec.categoryTag || 'Trade Deficit Offset',
         rec.source || 'RULE_BASED_FALLBACK',
+        rec.provider || 'heuristic',
         rec.aiModel || 'heuristic-v1',
         rec.confidenceScore || 88
       ]);
@@ -1525,8 +1723,9 @@ Return a strict JSON array of objects with fields:
       workerId: r.worker_id || r.contractor_id,
       workerName: r.worker_name || r.contractor_name,
       tradeType: r.trade_type || 'Artisan',
-      source: (r.source === 'GEMINI_AI' ? 'GEMINI_AI' : 'RULE_BASED_FALLBACK') as 'GEMINI_AI' | 'RULE_BASED_FALLBACK',
-      aiModel: r.ai_model || (r.source === 'GEMINI_AI' ? configuredModel : 'heuristic-v1'),
+      source: (r.source === 'GEMINI_AI' ? 'GEMINI_AI' : r.source === 'GROQ_AI' ? 'GROQ_AI' : 'RULE_BASED_FALLBACK') as 'GEMINI_AI' | 'GROQ_AI' | 'RULE_BASED_FALLBACK',
+      provider: (r.provider || (r.source === 'GEMINI_AI' ? 'gemini' : r.source === 'GROQ_AI' ? 'groq' : 'heuristic')) as 'gemini' | 'groq' | 'heuristic',
+      aiModel: r.ai_model || (r.source === 'GEMINI_AI' ? configuredGeminiModel : r.source === 'GROQ_AI' ? configuredGroqModel : 'heuristic-v1'),
       ruleBasedFitScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,
       confidenceScore: r.confidence_score !== null && r.confidence_score !== undefined ? Number(r.confidence_score) : undefined,
       approvedByUserId: r.approved_by_user_id || null,
@@ -1534,13 +1733,19 @@ Return a strict JSON array of objects with fields:
       appliedAt: r.applied_at ? (r.applied_at instanceof Date ? r.applied_at.toISOString() : String(r.applied_at)) : null
     }));
 
-    const statusMessage = scanSource === 'GEMINI_AI'
-      ? `Live AI Labor Optimization: ${returnedRecs.length} recommendations generated via Gemini AI (${usedAiModel}).`
-      : `Gemini AI service unavailable (${aiErrorMessage || 'rate limited / quota'}). ${returnedRecs.length} recommendations generated via Rule-Based Fallback engine.`;
+    let statusMessage = '';
+    if (scanSource === 'GEMINI_AI') {
+      statusMessage = `Live AI Labor Optimization: ${returnedRecs.length} recommendations generated via Primary Gemini AI (${usedAiModel}).`;
+    } else if (scanSource === 'GROQ_AI') {
+      statusMessage = `Primary Gemini unavailable (${geminiErrorMessage || 'quota/timeout'}). Failover: ${returnedRecs.length} recommendations generated via Secondary Groq AI (${usedAiModel}).`;
+    } else {
+      statusMessage = `AI services unavailable (Gemini: ${geminiErrorMessage || 'quota/offline'}; Groq: ${groqErrorMessage || 'not configured/offline'}). ${returnedRecs.length} recommendations generated via Rule-Based Fallback engine.`;
+    }
 
     res.json({
       success: true,
       source: scanSource,
+      provider: usedProvider,
       aiModel: usedAiModel,
       message: statusMessage,
       count: returnedRecs.length,
