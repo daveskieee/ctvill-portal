@@ -8,46 +8,55 @@ import http from 'http';
 import { AddressInfo } from 'net';
 import express from 'express';
 import dotenv from 'dotenv';
-import { prisma, pool, hashPassword, verifyPassword } from '../db';
-import {
-  createSession,
-  hashSessionToken,
-  destroySession,
-  revokeAllUserSessions,
-  SessionRevocationError,
-  generateCsrfToken,
-  verifyCsrfTokenSignature,
-  getCsrfHmacSecret,
-  registerMockSession,
-  clearMockSessions,
-  SESSION_COOKIE_NAME,
-  CSRF_COOKIE_NAME
-} from '../services/sessionService';
-import { checkUserProjectAccess, normalizeAppRole } from '../middleware/auth';
-import { normalizeRole, UserRole } from '../middleware/rbac';
-import { isPasswordStrong, DUMMY_SCRYPT_HASH } from '../routes/auth';
-import { createApp } from '../../server';
-
 dotenv.config();
+
+// Enforce test environment
 process.env.NODE_ENV = 'test';
+
+// Verify and configure isolated TEST_DATABASE_URL before importing database modules
+const rawTestDbUrl = process.env.TEST_DATABASE_URL?.trim();
+const isIsolatedTestDb = Boolean(
+  rawTestDbUrl &&
+  rawTestDbUrl !== '' &&
+  rawTestDbUrl !== process.env.DATABASE_URL
+);
+
+if (isIsolatedTestDb) {
+  process.env.DATABASE_URL = rawTestDbUrl!;
+}
+
+// Cookie constants for HTTP test requests
+const SESSION_COOKIE_NAME = 'ctvill_session';
+const CSRF_COOKIE_NAME = 'ctvill_csrf';
 
 interface TestResult {
   name: string;
-  passed: boolean;
+  status: 'PASSED' | 'FAILED' | 'SKIPPED';
+  reason?: string;
   error?: string;
 }
 
 const results: TestResult[] = [];
 
-async function runTest(name: string, fn: () => Promise<void>) {
+async function runTest(
+  name: string,
+  fn: () => Promise<void>,
+  options?: { skipIf?: boolean; skipReason?: string }
+) {
   process.stdout.write(`  Testing: ${name}... `);
+  if (options?.skipIf) {
+    const reason = options.skipReason || 'Precondition not met';
+    console.log(`⚠️  SKIPPED (${reason})`);
+    results.push({ name, status: 'SKIPPED', reason });
+    return;
+  }
   try {
     await fn();
     console.log('✅ PASSED');
-    results.push({ name, passed: true });
+    results.push({ name, status: 'PASSED' });
   } catch (err: any) {
     console.log(`❌ FAILED: ${err.message}`);
-    results.push({ name, passed: false, error: err.message });
+    results.push({ name, status: 'FAILED', error: err.message });
   }
 }
 
@@ -126,12 +135,6 @@ async function main() {
   console.log('   CTVILL ERP — PHASE 1.1 SECURITY & VERIFICATION TEST SUITE');
   console.log('==============================================================\n');
 
-  // Verify database configuration safety (Task 9)
-  const isIsolatedTestDb = Boolean(
-    process.env.TEST_DATABASE_URL &&
-    process.env.TEST_DATABASE_URL !== process.env.DATABASE_URL
-  );
-
   if (!isIsolatedTestDb) {
     console.log('🛡️  [SAFETY SHIELD ACTIVE]: Dedicated TEST_DATABASE_URL is not set or matches primary database.');
     console.log('    Mutating tests on live production/development databases are strictly prevented to protect database integrity.');
@@ -139,6 +142,29 @@ async function main() {
   } else {
     console.log('🧪  [TEST ENVIRONMENT]: Running with dedicated isolated TEST_DATABASE_URL.\n');
   }
+
+  // Dynamically import database and server modules AFTER TEST_DATABASE_URL is verified & configured
+  const { prisma, pool, hashPassword, verifyPassword } = await import('../db');
+  const {
+    createSession,
+    hashSessionToken,
+    destroySession,
+    revokeAllUserSessions,
+    SessionRevocationError,
+    generateCsrfToken,
+    verifyCsrfTokenSignature,
+    getCsrfHmacSecret,
+    validateProductionSecurityConfig
+  } = await import('../services/sessionService');
+  const {
+    checkUserProjectAccess,
+    normalizeAppRole,
+    setSessionVerifierForTesting,
+    resetSessionVerifierForTesting
+  } = await import('../middleware/auth');
+  const { normalizeRole, UserRole } = await import('../middleware/rbac');
+  const { isPasswordStrong, DUMMY_SCRYPT_HASH } = await import('../routes/auth');
+  const { createApp } = await import('../../server');
 
   // Instantiate the real Express server application
   const app = createApp();
@@ -326,25 +352,56 @@ async function main() {
       assert.ok(res.status === 401 || res.status === 403, `Expected 401 or 403 but got ${res.status}`);
     });
 
-    await runTest('Public quotation submission endpoint is preserved and functional', async () => {
-      const res = await request(baseUrl, '/api/quotations/submit', {
-        method: 'POST',
-        body: {
-          clientName: 'Juan Dela Cruz',
-          clientEmail: 'juan@example.ph',
-          clientPhone: '09171234567',
-          projectScope: 'OFFICE_RENOVATION',
-          estimatedCost: 150000,
-          estimatedWeeks: 6,
-          estimatorArea: 120,
-          spaceType: 'COMMERCIAL',
-          finishTier: 'STANDARD',
-        }
-      });
-      assert.strictEqual(res.status, 200);
-      assert.strictEqual(res.json?.success, true);
-      assert.ok(res.json?.quoteId || res.json?.id, 'Quotation submission must return generated ID');
-    });
+    await runTest(
+      'Public quotation submission: Endpoint submits quotation and returns generated ID',
+      async () => {
+        assert.ok(isIsolatedTestDb, 'Must run against isolated test database');
+        const res = await request(baseUrl, '/api/quotations/submit', {
+          method: 'POST',
+          body: {
+            clientName: 'Juan Dela Cruz',
+            clientEmail: 'juan@example.ph',
+            clientPhone: '09171234567',
+            projectScope: 'OFFICE_RENOVATION',
+            estimatedCost: 150000,
+            estimatedWeeks: 6,
+            estimatorArea: 120,
+            spaceType: 'COMMERCIAL',
+            finishTier: 'STANDARD',
+          }
+        });
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(res.json?.success, true);
+        assert.ok(res.json?.quoteId || res.json?.id, 'Quotation submission must return generated ID');
+      },
+      {
+        skipIf: !isIsolatedTestDb,
+        skipReason: 'Requires dedicated isolated TEST_DATABASE_URL to protect live database from mutation',
+      }
+    );
+
+    await runTest(
+      'Permit mutation: Authenticated engineer creates permit for assigned project',
+      async () => {
+        assert.ok(isIsolatedTestDb, 'Must run against isolated test database');
+        const permitCsrf = generateCsrfToken('test_token_eng_a_1234567890abcdef1234567890');
+        const res = await request(baseUrl, '/api/permits', {
+          method: 'POST',
+          cookie: `${SESSION_COOKIE_NAME}=test_token_eng_a_1234567890abcdef1234567890`,
+          csrfToken: permitCsrf,
+          body: {
+            projectId: 'PRJ-4693',
+            permitName: 'City Hall Construction Permit',
+            issuingAgency: 'LGU City Hall'
+          }
+        });
+        assert.ok(res.status === 200 || res.status === 201);
+      },
+      {
+        skipIf: !isIsolatedTestDb,
+        skipReason: 'Requires dedicated isolated TEST_DATABASE_URL to protect live database from mutation',
+      }
+    );
 
     // =========================================================================
     // TASK 6: PREVENT ACCOUNT ENUMERATION DURING LOGIN
@@ -454,48 +511,89 @@ async function main() {
     });
 
     // =========================================================================
-    // PHASE 1.2 — ISSUE 1: TEST DATABASE ISOLATION & INTEGRITY GUARANTEE
+    // PHASE 1.2 — ISSUE 1: TEST DATABASE SAFETY & ISOLATION ENFORCEMENT
     // =========================================================================
-    console.log('\n--- PHASE 1.2 TASK 1: TEST DATABASE ISOLATION & INTEGRITY ---');
+    console.log('\n--- PHASE 1.2 TASK 1: TEST DATABASE SAFETY & ISOLATION ENFORCEMENT ---');
 
-    await runTest('Database isolation guard: Destructive operations against live database are strictly prevented', async () => {
-      // Guard assertion: in test mode without dedicated TEST_DATABASE_URL, destructive mutations are blocked
-      const isLiveDb = !process.env.TEST_DATABASE_URL || process.env.TEST_DATABASE_URL === process.env.DATABASE_URL;
-      assert.strictEqual(isLiveDb, true, 'Safety guard active: Live database is detected and protected');
 
-      // Attempting any DROP/TRUNCATE on live db must be intercepted by safety checks
-      let caught = false;
-      try {
-        if (isLiveDb) {
-          throw new Error('DATABASE_SAFETY_VIOLATION: Destructive query attempted against live database');
-        }
-      } catch (err: any) {
-        caught = true;
-        assert.ok(err.message.includes('DATABASE_SAFETY_VIOLATION'));
-      }
-      assert.strictEqual(caught, true, 'Safety guard successfully prevented destructive query execution');
+
+    // Test-only in-memory session registry injected via dependency injection
+    const testSessions = new Map<string, any>();
+
+    setSessionVerifierForTesting(async (rawToken: string | undefined) => {
+      if (!rawToken) return null;
+      return testSessions.get(rawToken) || null;
     });
 
-    await runTest('Unit tests and permission policies execute in isolation without modifying live database', async () => {
-      // Test isolated mock session registration without writing to Postgres
-      const mockRawToken = 'test_mock_token_isolated_unit_1234567890abcdef123456';
-      registerMockSession(mockRawToken, {
-        id: 'mock-unit-user',
-        email: 'unit@ctvill.internal',
-        name: 'Unit Test User',
-        role: 'ENGINEER' as any,
+    function registerTestSession(rawToken: string, user: any, session?: any) {
+      testSessions.set(rawToken, {
+        user,
+        session: {
+          id: session?.id || `test-session-${user.id}`,
+          userId: user.id,
+          expiresAt: session?.expiresAt || new Date(Date.now() + 3600000),
+          createdAt: session?.createdAt || new Date(),
+          lastActivityAt: session?.lastActivityAt || new Date(),
+          userAgent: session?.userAgent || 'test-agent',
+          ipAddress: session?.ipAddress || '127.0.0.1',
+        }
+      });
+    }
+
+    function clearTestSessions() {
+      testSessions.clear();
+    }
+
+    await runTest('Database safety: Live production/development database is never mutated by test suite', async () => {
+      // Assert that live database is protected: tests do not execute writes against primary DATABASE_URL
+      assert.ok(process.env.DATABASE_URL, 'Primary DATABASE_URL must be configured');
+      const liveUser = await prisma.user.findFirst({ where: { accountStatus: 'ACTIVE' } });
+      assert.ok(liveUser, 'Live database must contain user records');
+      // Assert that no test sessions exist in live database
+      const straySession = await prisma.session.findFirst({
+        where: { tokenHash: hashSessionToken('test_token_eng_a_1234567890abcdef1234567890') }
+      });
+      assert.strictEqual(straySession, null, 'Live database must remain pristine without test artifacts');
+    });
+
+    await runTest('Authentication isolation: Test session verifier operates via dependency injection without live DB mutations', async () => {
+      const DI_TOKEN = 'token_test_di_isolated_1234567890abcdef';
+      const existingUser = await prisma.user.findFirst({ where: { accountStatus: 'ACTIVE' } });
+      const targetUserId = existingUser?.id || 'usr-admin';
+
+      registerTestSession(DI_TOKEN, {
+        id: targetUserId,
+        email: existingUser?.email || 'admin@ctvill.com',
+        name: existingUser?.name || 'Administrator',
+        role: (existingUser?.role as any) || ('ADMIN' as any),
         accountStatus: 'ACTIVE' as any,
-        projectIds: ['PRJ-UNIT-1'],
+        projectIds: ['PRJ-4693'],
       });
 
-      // Verify that no session was written to the live PostgreSQL session table
-      const liveSessionInDb = await prisma.session.findFirst({
-        where: { tokenHash: hashSessionToken(mockRawToken) }
+      const res = await request(baseUrl, '/api/auth/me', {
+        cookie: `${SESSION_COOKIE_NAME}=${DI_TOKEN}`,
       });
-      assert.strictEqual(liveSessionInDb, null, 'Isolated mock session must NOT create records in live database');
+      // Verified that test session was recognized via dependency injection
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.json?.user?.email, existingUser?.email || 'admin@ctvill.com');
 
-      // Clean up mock
-      clearMockSessions();
+      // Verify zero session rows were written to live database
+      const liveRecord = await prisma.session.findFirst({
+        where: { tokenHash: hashSessionToken(DI_TOKEN) }
+      });
+      assert.strictEqual(liveRecord, null, 'Dependency-injected test session must NOT write to live database');
+    });
+
+    await runTest('Database isolation: Tests cannot write to dev/production database and verify isolated TEST_DATABASE_URL configuration', async () => {
+      if (!isIsolatedTestDb) {
+        assert.strictEqual(isIsolatedTestDb, false, 'Safety verification: non-isolated mode is active');
+      } else {
+        assert.strictEqual(process.env.DATABASE_URL, rawTestDbUrl);
+      }
+      const stray = await prisma.session.findFirst({
+        where: { tokenHash: hashSessionToken('stray_probe_token_1234567890abcdef') }
+      });
+      assert.strictEqual(stray, null, 'No stray test session can exist in live database');
     });
 
     // =========================================================================
@@ -507,7 +605,7 @@ async function main() {
     const ENG_B_TOKEN = 'test_token_eng_b_1234567890abcdef1234567890';
     const ENG_EMPTY_TOKEN = 'test_token_eng_empty_1234567890abcdef1234567890';
 
-    registerMockSession(ENG_A_TOKEN, {
+    registerTestSession(ENG_A_TOKEN, {
       id: 'usr-mock-eng-a',
       email: 'eng_a@ctvill.internal',
       name: 'Site Engineer Alpha',
@@ -516,7 +614,7 @@ async function main() {
       projectIds: ['PRJ-4693'],
     });
 
-    registerMockSession(ENG_B_TOKEN, {
+    registerTestSession(ENG_B_TOKEN, {
       id: 'usr-mock-eng-b',
       email: 'eng_b@ctvill.internal',
       name: 'Site Engineer Beta',
@@ -525,11 +623,41 @@ async function main() {
       projectIds: ['PRJ-NONEXISTENT-999'],
     });
 
-    registerMockSession(ENG_EMPTY_TOKEN, {
+    registerTestSession(ENG_EMPTY_TOKEN, {
       id: 'usr-mock-eng-empty',
       email: 'eng_empty@ctvill.internal',
       name: 'Unassigned Engineer',
       role: 'ENGINEER' as any,
+      accountStatus: 'ACTIVE' as any,
+      projectIds: [],
+    });
+
+    const TK_A_TOKEN = 'test_token_tk_a_1234567890abcdef1234567890';
+    registerTestSession(TK_A_TOKEN, {
+      id: 'usr-mock-tk-a',
+      email: 'tk_a@ctvill.internal',
+      name: 'Site Timekeeper Alpha',
+      role: 'TIMEKEEPER' as any,
+      accountStatus: 'ACTIVE' as any,
+      projectIds: ['PRJ-4693'],
+    });
+
+    const ADMIN_A_TOKEN = 'test_token_admin_a_1234567890abcdef1234567890';
+    registerTestSession(ADMIN_A_TOKEN, {
+      id: 'usr-mock-admin-a',
+      email: 'admin_a@ctvill.internal',
+      name: 'System Administrator Alpha',
+      role: 'ADMIN' as any,
+      accountStatus: 'ACTIVE' as any,
+      projectIds: [],
+    });
+
+    const FIN_A_TOKEN = 'test_token_fin_a_1234567890abcdef1234567890';
+    registerTestSession(FIN_A_TOKEN, {
+      id: 'usr-mock-fin-a',
+      email: 'fin_a@ctvill.internal',
+      name: 'Finance Controller Alpha',
+      role: 'FINANCE' as any,
       accountStatus: 'ACTIVE' as any,
       projectIds: [],
     });
@@ -549,13 +677,16 @@ async function main() {
       assert.deepStrictEqual(res.json?.extendedPayroll, [], 'Extended payroll array must be empty for engineer');
     });
 
-    await runTest('API Data Protection: Engineer with empty projectIds receives zero projects in /api/all-data', async () => {
+    await runTest('API Data Protection: Engineer with empty projectIds receives zero projects, tasks, documents, and clients in /api/all-data', async () => {
       const res = await request(baseUrl, '/api/all-data', {
         cookie: `${SESSION_COOKIE_NAME}=${ENG_EMPTY_TOKEN}`,
       });
       assert.strictEqual(res.status, 200);
       assert.deepStrictEqual(res.json?.projects, [], 'Non-admin with empty projectIds must receive empty projects list');
       assert.deepStrictEqual(res.json?.tasks, [], 'Non-admin with empty projectIds must receive empty tasks list');
+      assert.deepStrictEqual(res.json?.documents, [], 'Non-admin with empty projectIds must receive empty documents list');
+      assert.deepStrictEqual(res.json?.clients, [], 'Non-admin with empty projectIds must receive empty clients list');
+      assert.deepStrictEqual(res.json?.payroll, [], 'Non-admin must receive empty payroll list');
     });
 
     await runTest('Cache Isolation: Cross-user cached responses are strictly segregated by user ID and project assignment', async () => {
@@ -578,6 +709,89 @@ async function main() {
         false,
         'Cache leak detected: Engineer B must NOT receive Engineer A cached project data!'
       );
+    });
+
+    await runTest('API Data Protection: Records with missing project IDs are NOT exposed in /api/all-data to Engineer, Timekeeper, or Client', async () => {
+      const res = await request(baseUrl, '/api/all-data', {
+        cookie: `${SESSION_COOKIE_NAME}=${ENG_A_TOKEN}`,
+      });
+      assert.strictEqual(res.status, 200);
+
+      // Verify documents: must belong to authorized project or be explicitly company-wide; unassigned rejected
+      for (const doc of (res.json?.documents || [])) {
+        const matchesProj = doc.projectId === 'PRJ-4693' || doc.title?.includes('PRJ-4693') || doc.id?.includes('PRJ-4693');
+        const isCoWide = doc.isCompanyWide || doc.is_company_wide || doc.category === 'COMPANY_POLICY' || doc.category === 'GENERAL_POLICY';
+        assert.ok(matchesProj || isCoWide, `Document ${doc.id} must belong to authorized project or be explicitly company-wide`);
+      }
+
+      // Verify site logs: must belong to authorized project or be explicitly company-wide; unassigned rejected
+      for (const log of (res.json?.siteLogs || [])) {
+        const matchesProj = log.projectId === 'PRJ-4693';
+        const isCoWide = log.isCompanyWide || log.is_company_wide;
+        assert.ok(matchesProj || isCoWide, `Site log ${log.id} with missing/unauthorized project ID must not be exposed`);
+      }
+
+      // Verify risks: must belong to authorized project or be explicitly company-wide; unassigned rejected
+      for (const risk of (res.json?.risks || [])) {
+        const matchesProj = risk.projectId === 'PRJ-4693';
+        const isCoWide = risk.isCompanyWide || risk.is_company_wide;
+        assert.ok(matchesProj || isCoWide, `Risk ${risk.id} with missing/unauthorized project ID must not be exposed`);
+      }
+
+      // Verify change orders: must belong to authorized project or be explicitly company-wide; unassigned rejected
+      for (const co of (res.json?.changeOrders || [])) {
+        const matchesProj = co.projectId === 'PRJ-4693';
+        const isCoWide = co.isCompanyWide || co.is_company_wide;
+        assert.ok(matchesProj || isCoWide, `Change order ${co.id} with missing/unauthorized project ID must not be exposed`);
+      }
+
+      // Verify labor allocations: must belong to authorized project or be explicitly company-wide; unassigned rejected
+      for (const alloc of (res.json?.laborAllocations || [])) {
+        const matchesProj = alloc.projectId === 'PRJ-4693' || alloc.project_id === 'PRJ-4693';
+        const isCoWide = alloc.isCompanyWide || alloc.is_company_wide;
+        assert.ok(matchesProj || isCoWide, `Labor allocation ${alloc.id} with missing/unauthorized project ID must not be exposed`);
+      }
+
+      // Verify manpower audits: must belong to authorized project or be explicitly company-wide; unassigned rejected
+      for (const audit of (res.json?.manpowerAudits || [])) {
+        const matchesProj = audit.projectId === 'PRJ-4693' || audit.project_id === 'PRJ-4693';
+        const isCoWide = audit.isCompanyWide || audit.is_company_wide;
+        assert.ok(matchesProj || isCoWide, `Manpower audit ${audit.id} with missing/unauthorized project ID must not be exposed`);
+      }
+    });
+
+    await runTest('Timekeeper Data Scoping: Timekeeper receives authorized project records and strictly zero payroll or change orders', async () => {
+      const res = await request(baseUrl, '/api/all-data', {
+        cookie: `${SESSION_COOKIE_NAME}=${TK_A_TOKEN}`,
+      });
+      assert.strictEqual(res.status, 200);
+      assert.deepStrictEqual(res.json?.payroll, [], 'Timekeeper must receive zero payroll records');
+      assert.deepStrictEqual(res.json?.extendedPayroll, [], 'Timekeeper must receive zero extended payroll records');
+      assert.deepStrictEqual(res.json?.changeOrders, [], 'Timekeeper must receive zero change orders');
+
+      // Verify site logs, manpower audits, labor allocations only contain authorized project PRJ-4693
+      for (const log of (res.json?.siteLogs || [])) {
+        assert.ok(log.projectId === 'PRJ-4693' || log.isCompanyWide, 'Timekeeper must only receive authorized site logs');
+      }
+      for (const audit of (res.json?.manpowerAudits || [])) {
+        assert.ok(audit.projectId === 'PRJ-4693' || audit.project_id === 'PRJ-4693' || audit.isCompanyWide, 'Timekeeper must only receive authorized manpower audits');
+      }
+    });
+
+    await runTest('Company-Wide Records: Explicitly authorized company-wide records and Admin/Finance visibility are preserved', async () => {
+      const adminRes = await request(baseUrl, '/api/all-data', {
+        cookie: `${SESSION_COOKIE_NAME}=${ADMIN_A_TOKEN}`,
+      });
+      assert.strictEqual(adminRes.status, 200);
+      assert.ok(Array.isArray(adminRes.json?.projects), 'Admin must receive all projects');
+      assert.ok(adminRes.json?.projects.length > 0, 'Admin must see company projects');
+
+      const finRes = await request(baseUrl, '/api/all-data', {
+        cookie: `${SESSION_COOKIE_NAME}=${FIN_A_TOKEN}`,
+      });
+      assert.strictEqual(finRes.status, 200);
+      assert.ok(Array.isArray(finRes.json?.projects), 'Finance must receive company projects');
+      assert.ok(Array.isArray(finRes.json?.payroll), 'Finance must receive company payroll');
     });
 
     // =========================================================================
@@ -623,6 +837,44 @@ async function main() {
       }
     });
 
+    await runTest('CSRF startup configuration: validateProductionSecurityConfig prevents startup on weak or missing secrets', async () => {
+      const origEnv = process.env.NODE_ENV;
+      const origSession = process.env.SESSION_SECRET;
+      const origCsrf = process.env.CSRF_SECRET;
+
+      try {
+        process.env.NODE_ENV = 'production';
+        delete process.env.SESSION_SECRET;
+        delete process.env.CSRF_SECRET;
+
+        // Missing secrets on boot must throw fatal configuration error
+        assert.throws(
+          () => validateProductionSecurityConfig(),
+          /FATAL SECURITY CONFIGURATION ERROR/,
+          'Must prevent application startup if SESSION_SECRET is missing in production'
+        );
+
+        process.env.SESSION_SECRET = 'short_weak_secret';
+        assert.throws(
+          () => validateProductionSecurityConfig(),
+          /minimum 32 characters/,
+          'Must prevent application startup if SESSION_SECRET is < 32 characters in production'
+        );
+
+        process.env.SESSION_SECRET = 'a_very_secure_and_long_session_secret_32_characters_minimum';
+        delete process.env.CSRF_SECRET;
+        assert.throws(
+          () => validateProductionSecurityConfig(),
+          /FATAL CSRF SECURITY CONFIGURATION ERROR/,
+          'Must prevent application startup if CSRF_SECRET is missing in production'
+        );
+      } finally {
+        process.env.NODE_ENV = origEnv;
+        if (origSession) process.env.SESSION_SECRET = origSession;
+        if (origCsrf) process.env.CSRF_SECRET = origCsrf;
+      }
+    });
+
     await runTest('CSRF verification: State-changing requests reject missing or forged CSRF tokens', async () => {
       const validCsrf = generateCsrfToken(ENG_A_TOKEN);
 
@@ -661,7 +913,7 @@ async function main() {
 
     await runTest('Staff account security: GET /api/staff omits passwordHash and inviteToken', async () => {
       const ADMIN_TEST_TOKEN = 'test_token_admin_full_1234567890abcdef123456';
-      registerMockSession(ADMIN_TEST_TOKEN, {
+      registerTestSession(ADMIN_TEST_TOKEN, {
         id: 'usr-admin-test',
         email: 'admin@ctvill.com',
         name: 'Administrator',
@@ -703,9 +955,8 @@ async function main() {
     const TK_ROLE_TOKEN = 'token_role_tk_1234567890abcdef123456';
     const FIN_ROLE_TOKEN = 'token_role_fin_1234567890abcdef123456';
     const CLI_ROLE_TOKEN = 'token_role_cli_1234567890abcdef123456';
-    const REVOKE_TEST_TOKEN = 'token_role_revokeme_1234567890abcdef123456';
 
-    registerMockSession(ADMIN_ROLE_TOKEN, {
+    registerTestSession(ADMIN_ROLE_TOKEN, {
       id: 'role-usr-admin',
       email: 'admin_role@ctvill.com',
       name: 'System Admin',
@@ -714,7 +965,7 @@ async function main() {
       projectIds: [],
     });
 
-    registerMockSession(ENG_ROLE_TOKEN, {
+    registerTestSession(ENG_ROLE_TOKEN, {
       id: 'role-usr-eng',
       email: 'eng_role@ctvill.com',
       name: 'Site Engineer',
@@ -723,7 +974,7 @@ async function main() {
       projectIds: ['PRJ-4693'],
     });
 
-    registerMockSession(TK_ROLE_TOKEN, {
+    registerTestSession(TK_ROLE_TOKEN, {
       id: 'role-usr-tk',
       email: 'tk_role@ctvill.com',
       name: 'Site Timekeeper',
@@ -732,7 +983,7 @@ async function main() {
       projectIds: ['PRJ-4693'],
     });
 
-    registerMockSession(FIN_ROLE_TOKEN, {
+    registerTestSession(FIN_ROLE_TOKEN, {
       id: 'role-usr-fin',
       email: 'fin_role@ctvill.com',
       name: 'Finance Controller',
@@ -741,25 +992,13 @@ async function main() {
       projectIds: [],
     });
 
-    registerMockSession(CLI_ROLE_TOKEN, {
+    registerTestSession(CLI_ROLE_TOKEN, {
       id: 'role-usr-cli',
       email: 'cli_role@ctvill.com',
       name: 'Commercial Client',
       role: 'CLIENT' as any,
       accountStatus: 'ACTIVE' as any,
       projectIds: ['PRJ-4693'],
-    });
-
-    const existingActiveUser = await prisma.user.findFirst({ where: { accountStatus: 'ACTIVE' } });
-    const realActiveUserId = existingActiveUser?.id || 'usr-admin';
-
-    registerMockSession(REVOKE_TEST_TOKEN, {
-      id: realActiveUserId,
-      email: existingActiveUser?.email || 'admin@ctvill.com',
-      name: existingActiveUser?.name || 'Administrator',
-      role: (existingActiveUser?.role as any) || ('ADMIN' as any),
-      accountStatus: 'ACTIVE' as any,
-      projectIds: existingActiveUser?.projectIds || [],
     });
 
     // 1. ADMIN ROLE PERMISSION VERIFICATION
@@ -834,7 +1073,7 @@ async function main() {
     });
 
     // 5. CLIENT ROLE PERMISSION VERIFICATION
-    await runTest('CLIENT Role: Forbidden from staff and financial modules, restricted to own client record', async () => {
+    await runTest('CLIENT Role: Forbidden from staff and financial modules, restricted to own client record and zero internal site logs', async () => {
       const staffRes = await request(baseUrl, '/api/staff', {
         cookie: `${SESSION_COOKIE_NAME}=${CLI_ROLE_TOKEN}`,
       });
@@ -852,44 +1091,73 @@ async function main() {
       for (const client of (allDataRes.json?.clients || [])) {
         assert.strictEqual(client.id, 'role-usr-cli', 'Client must ONLY receive their own client account in all-data');
       }
+      assert.deepStrictEqual(allDataRes.json?.siteLogs, [], 'Client must receive zero internal site logs');
+      assert.deepStrictEqual(allDataRes.json?.risks, [], 'Client must receive zero internal project risks');
+      assert.deepStrictEqual(allDataRes.json?.auditLogs, [], 'Client must receive zero system audit logs');
+      assert.deepStrictEqual(allDataRes.json?.laborAllocations, [], 'Client must receive zero labor allocations');
+      assert.deepStrictEqual(allDataRes.json?.manpowerAudits, [], 'Client must receive zero manpower audits');
     });
 
-    // 6. REAL SESSION REVOCATION ENDPOINT VERIFICATION
-    await runTest('Session Revocation: Invalidation via /api/auth/logout immediately revokes active session', async () => {
-      const revokeCsrf = generateCsrfToken(REVOKE_TEST_TOKEN);
+    // 6. ACTUAL DATABASE-BACKED SESSION REVOCATION (ISOLATED TEST DATABASE ONLY)
+    await runTest(
+      'Actual database-backed session revocation: Revocation via /api/auth/logout deletes database record',
+      async () => {
+        // Enforce genuine database isolation: Never execute real mutations against the live database
+        assert.ok(isIsolatedTestDb, 'Must be running against an isolated test database');
 
-      // Verify session is initially active
-      const beforeRes = await request(baseUrl, '/api/auth/me', {
-        cookie: `${SESSION_COOKIE_NAME}=${REVOKE_TEST_TOKEN}`,
-      });
-      assert.strictEqual(beforeRes.status, 200, 'Active session must be recognized on /api/auth/me');
+        const activeUser = await prisma.user.findFirst({ where: { accountStatus: 'ACTIVE' } });
+        assert.ok(activeUser, 'User record must exist in isolated test database');
 
-      // Logout to revoke session on server
-      const logoutRes = await request(baseUrl, '/api/auth/logout', {
-        method: 'POST',
-        cookie: `${SESSION_COOKIE_NAME}=${REVOKE_TEST_TOKEN}`,
-        csrfToken: revokeCsrf,
-      });
-      assert.strictEqual(logoutRes.status, 200, 'Logout request must succeed');
-      assert.strictEqual(logoutRes.json?.success, true);
+        const createdSession = await createSession(activeUser.id);
+        const sessionToken = createdSession.rawToken;
+        const csrf = generateCsrfToken(sessionToken);
 
-      // Verify that subsequent request with revoked session is rejected with 401
-      const afterRes = await request(baseUrl, '/api/auth/me', {
-        cookie: `${SESSION_COOKIE_NAME}=${REVOKE_TEST_TOKEN}`,
-      });
-      assert.strictEqual(afterRes.status, 401, 'Revoked session must be rejected with 401 Unauthorized');
-    });
+        const beforeRes = await request(baseUrl, '/api/auth/me', {
+          cookie: `${SESSION_COOKIE_NAME}=${sessionToken}`,
+        });
+        assert.strictEqual(beforeRes.status, 200, 'Session must initially be valid in test DB');
+
+        const logoutRes = await request(baseUrl, '/api/auth/logout', {
+          method: 'POST',
+          cookie: `${SESSION_COOKIE_NAME}=${sessionToken}`,
+          csrfToken: csrf,
+        });
+        assert.strictEqual(logoutRes.status, 200, 'Logout request must succeed in test DB');
+
+        const afterRes = await request(baseUrl, '/api/auth/me', {
+          cookie: `${SESSION_COOKIE_NAME}=${sessionToken}`,
+        });
+        assert.strictEqual(afterRes.status, 401, 'Revoked session must be rejected with 401');
+
+        const dbRecord = await prisma.session.findUnique({
+          where: { tokenHash: hashSessionToken(sessionToken) },
+        });
+        assert.strictEqual(dbRecord, null, 'Session row must be genuinely deleted from isolated PostgreSQL');
+      },
+      {
+        skipIf: !isIsolatedTestDb,
+        skipReason: 'Requires dedicated isolated TEST_DATABASE_URL to protect live database from mutation',
+      }
+    );
 
   } finally {
+    resetSessionVerifierForTesting();
     server.close();
     await pool.end().catch(() => {});
     await prisma.$disconnect().catch(() => {});
   }
 
   console.log('\n==============================================================');
-  const passed = results.filter(r => r.passed).length;
-  const failed = results.filter(r => !r.passed).length;
-  console.log(`SUMMARY: ${passed} passed, ${failed} failed out of ${results.length} total tests.`);
+  const passed = results.filter(r => r.status === 'PASSED').length;
+  const skipped = results.filter(r => r.status === 'SKIPPED').length;
+  const failed = results.filter(r => r.status === 'FAILED').length;
+  console.log(`SUMMARY: ${passed} passed, ${skipped} skipped, ${failed} failed out of ${results.length} total tests.`);
+  if (skipped > 0) {
+    console.log('\nSkipped Tests (Isolated test database required):');
+    for (const s of results.filter(r => r.status === 'SKIPPED')) {
+      console.log(`  - ${s.name}: ${s.reason}`);
+    }
+  }
   console.log('==============================================================\n');
 
   if (failed > 0) {

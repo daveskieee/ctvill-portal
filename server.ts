@@ -8,7 +8,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { prisma, initializeDatabaseTables } from './server/db';
-import { cleanupExpiredSessions } from './server/services/sessionService';
+import { cleanupExpiredSessions, validateProductionSecurityConfig } from './server/services/sessionService';
 import { cookieParserMiddleware } from './server/middleware/cookies';
 import { 
   corsMiddleware, 
@@ -33,6 +33,9 @@ import { workersRouter } from './server/routes/workers';
 import { documentsRouter } from './server/routes/documents';
 
 dotenv.config();
+
+// Strict production security configuration validation: halts startup if secrets are missing or weak
+validateProductionSecurityConfig();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

@@ -43,6 +43,32 @@ export function hashSessionToken(rawToken: string): string {
 let ephemeralDevCsrfSecret: string | null = null;
 
 /**
+ * Validate that mandatory cryptographic secrets are configured when running in production.
+ * Must be invoked on application boot to prevent startup if secrets are missing or weak.
+ */
+export function validateProductionSecurityConfig(): void {
+  const isProduction = process.env.NODE_ENV === 'production';
+  if (!isProduction) return;
+
+  const sessionSecret = process.env.SESSION_SECRET;
+  const csrfSecret = process.env.CSRF_SECRET;
+
+  if (!sessionSecret || typeof sessionSecret !== 'string' || sessionSecret.trim().length < 32) {
+    throw new Error(
+      'FATAL SECURITY CONFIGURATION ERROR: A strong SESSION_SECRET environment variable ' +
+      '(minimum 32 characters) is strictly required when running in production mode. Refusing application startup.'
+    );
+  }
+
+  if (!csrfSecret || typeof csrfSecret !== 'string' || csrfSecret.trim().length < 32) {
+    throw new Error(
+      'FATAL CSRF SECURITY CONFIGURATION ERROR: A strong CSRF_SECRET environment variable ' +
+      '(minimum 32 characters) is strictly required when running in production mode. Refusing application startup.'
+    );
+  }
+}
+
+/**
  * Resolves the CSRF HMAC secret key:
  * - In production: CSRF_SECRET or SESSION_SECRET is strictly required and must be >= 32 characters.
  *   Throws a fatal error if missing or insufficiently long.
@@ -185,29 +211,6 @@ export async function createSession(
   };
 }
 
-// In-memory mock session registry for isolated security tests & unit testing
-const inMemoryMockSessions = new Map<string, { user: VerifiedSessionUser; session: SessionData }>();
-
-export function registerMockSession(rawToken: string, user: VerifiedSessionUser, session?: Partial<SessionData>) {
-  const tokenHash = hashSessionToken(rawToken.trim());
-  inMemoryMockSessions.set(tokenHash, {
-    user,
-    session: {
-      id: session?.id || `mock-session-${user.id}`,
-      userId: user.id,
-      expiresAt: session?.expiresAt || new Date(Date.now() + 3600000),
-      createdAt: session?.createdAt || new Date(),
-      lastActivityAt: session?.lastActivityAt || new Date(),
-      userAgent: session?.userAgent || 'test-agent',
-      ipAddress: session?.ipAddress || '127.0.0.1',
-    }
-  });
-}
-
-export function clearMockSessions() {
-  inMemoryMockSessions.clear();
-}
-
 /**
  * Verify a session by its raw token and load the active user.
  * Returns null if token is missing, expired, not found, or user is not ACTIVE.
@@ -222,16 +225,6 @@ export async function verifySession(rawToken: string | undefined): Promise<{
 
   const tokenHash = hashSessionToken(rawToken.trim());
   const now = new Date();
-
-  // Check in-memory mock session store first (used by isolated unit and security tests)
-  const mockResult = inMemoryMockSessions.get(tokenHash);
-  if (mockResult) {
-    if (mockResult.session.expiresAt <= now || mockResult.user.accountStatus !== AccountStatus.ACTIVE) {
-      inMemoryMockSessions.delete(tokenHash);
-      return null;
-    }
-    return mockResult;
-  }
 
   // Find session with associated user
   const record = await prisma.session.findUnique({
@@ -303,10 +296,6 @@ export async function verifySession(rawToken: string | undefined): Promise<{
 export async function destroySession(rawToken: string | undefined): Promise<boolean> {
   if (!rawToken || typeof rawToken !== 'string') return false;
   const tokenHash = hashSessionToken(rawToken.trim());
-  if (inMemoryMockSessions.has(tokenHash)) {
-    inMemoryMockSessions.delete(tokenHash);
-    return true;
-  }
   try {
     await prisma.session.deleteMany({
       where: { tokenHash },
@@ -324,18 +313,11 @@ export async function destroySession(rawToken: string | undefined): Promise<bool
  */
 export async function revokeAllUserSessions(userId: string): Promise<number> {
   if (!userId) return 0;
-  let mockRevoked = 0;
-  for (const [hash, entry] of inMemoryMockSessions.entries()) {
-    if (entry.user.id === userId) {
-      inMemoryMockSessions.delete(hash);
-      mockRevoked++;
-    }
-  }
   try {
     const result = await prisma.session.deleteMany({
       where: { userId },
     });
-    return result.count + mockRevoked;
+    return result.count;
   } catch (err: any) {
     console.error(`Session revocation database error for user ${userId}:`, err?.message || err);
     throw new SessionRevocationError(`Failed to revoke sessions for user ${userId}`, err);

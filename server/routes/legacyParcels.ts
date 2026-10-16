@@ -255,7 +255,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
 
     const presenceMap = new Map((dbContractorPresencesRes.rows || []).map((r: any) => [r.id, r.active_presence || r.status]));
 
-    const parcels = dbParcels.map(p => ({
+    const allMappedParcels = dbParcels.map(p => ({
       id: p.id,
       name: p.name,
       location: p.location,
@@ -276,7 +276,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       })),
     }));
 
-    const slots = dbSlots.map(s => ({
+    const allMappedSlots = dbSlots.map(s => ({
       id: s.id,
       parcelId: s.parcelId,
       slotNumber: s.slotNumber,
@@ -290,7 +290,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       assignedClientId: s.clientPackage?.userId || null,
     }));
 
-    const clients = await Promise.all(dbClients.map(c => mapUserToClient(c)));
+    const allMappedClients = await Promise.all(dbClients.map(c => mapUserToClient(c)));
 
     const contractors = dbContractors.map(c => {
       const rawP = presenceMap.get(c.id) || (c as any).status || 'ACTIVE';
@@ -348,11 +348,61 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       createdAt: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at)) : new Date().toISOString()
     }));
 
+    const isAdmin = userRole === 'ADMIN';
+    const isFinance = userRole === 'FINANCE';
+    const isTimekeeper = userRole === 'TIMEKEEPER';
+    const isEngineer = userRole === 'ENGINEER';
+
     const projects = isFinanceOrAdmin 
       ? allProjects 
       : allProjects.filter(p => checkUserProjectAccess(user, p.id));
 
     const authorizedProjectIds = new Set(projects.map(p => p.id));
+
+    // Helper to identify explicitly authorized company-wide records
+    const isExplicitlyCompanyWide = (record: any): boolean => {
+      if (!record || typeof record !== 'object') return false;
+      if (record.isCompanyWide === true || record.is_company_wide === true) return true;
+      if (record.scope === 'COMPANY_WIDE' || record.scope === 'GLOBAL') return true;
+      if (record.projectId === 'GLOBAL' || record.projectId === 'ALL' || record.projectId === 'COMPANY_WIDE') return true;
+      if (record.project_id === 'GLOBAL' || record.project_id === 'ALL' || record.project_id === 'COMPANY_WIDE') return true;
+      if (record.category === 'COMPANY_POLICY' || record.category === 'GENERAL_POLICY' || record.category === 'COMPANY_WIDE') return true;
+      return false;
+    };
+
+    const parcels = isFinanceOrAdmin
+      ? allMappedParcels
+      : authorizedProjectIds.size === 0
+        ? []
+        : allMappedParcels.filter(p => 
+            authorizedProjectIds.has(p.id) ||
+            isExplicitlyCompanyWide(p) ||
+            projects.some(prj => prj.name === p.name || prj.id === p.id)
+          );
+
+    const authorizedParcelIds = new Set(parcels.map(p => p.id));
+
+    const slots = isFinanceOrAdmin
+      ? allMappedSlots
+      : authorizedProjectIds.size === 0
+        ? []
+        : isClient
+          ? allMappedSlots.filter(s => s.assignedClientId === user.id && authorizedParcelIds.has(s.parcelId))
+          : allMappedSlots.filter(s => authorizedParcelIds.has(s.parcelId));
+
+    const authorizedSlotIds = new Set(slots.map(s => s.id));
+
+    const clients = isFinanceOrAdmin
+      ? allMappedClients
+      : isClient
+        ? allMappedClients.filter(c => c.id === user.id || c.email === user.email)
+        : authorizedProjectIds.size === 0
+          ? []
+          : allMappedClients.filter((c: any) => {
+              const pids = Array.isArray(c.projectIds) ? c.projectIds : [];
+              return pids.some((pid: string) => authorizedProjectIds.has(pid)) ||
+                     (c.assignedProjectId && authorizedProjectIds.has(c.assignedProjectId));
+            });
 
     const allMappedTasks = dbTasks.map(t => ({
       id: t.id,
@@ -376,7 +426,9 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
 
     const tasks = isFinanceOrAdmin
       ? allMappedTasks
-      : allMappedTasks.filter(t => t.projectId ? authorizedProjectIds.has(t.projectId) : false);
+      : authorizedProjectIds.size === 0
+        ? []
+        : allMappedTasks.filter(t => t.projectId ? authorizedProjectIds.has(t.projectId) : false);
 
     const allMappedPermits = (dbPermitsRes.rows || []).map((p: any) => ({
       id: p.id,
@@ -392,12 +444,19 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       expiryDate: p.expiry_date ? (p.expiry_date instanceof Date ? p.expiry_date.toISOString().split('T')[0] : String(p.expiry_date).split('T')[0]) : null,
       notes: p.notes || '',
       documentUrl: p.document_url || '',
+      isCompanyWide: Boolean(p.is_company_wide || p.isCompanyWide),
       createdAt: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at)) : new Date().toISOString(),
     }));
 
     const permits = isFinanceOrAdmin
       ? allMappedPermits
-      : allMappedPermits.filter((p: any) => !p.projectId || authorizedProjectIds.has(p.projectId));
+      : (isClient || authorizedProjectIds.size === 0)
+        ? allMappedPermits.filter(p => isExplicitlyCompanyWide(p))
+        : allMappedPermits.filter((p: any) => {
+            if (isExplicitlyCompanyWide(p)) return true;
+            if (p.projectId && authorizedProjectIds.has(p.projectId)) return true;
+            return false;
+          });
 
     const allMappedEvents = (dbEventsRes.rows || []).map((e: any) => ({
       id: e.id,
@@ -412,12 +471,19 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       attendees: e.attendees || '',
       notes: e.notes || '',
       status: e.status || 'SCHEDULED',
+      isCompanyWide: Boolean(e.is_company_wide || e.isCompanyWide || e.event_type === 'COMPANY_ALL_HANDS'),
       createdAt: e.created_at ? (e.created_at instanceof Date ? e.created_at.toISOString() : String(e.created_at)) : new Date().toISOString(),
     }));
 
     const scheduleEvents = isFinanceOrAdmin
       ? allMappedEvents
-      : allMappedEvents.filter((e: any) => !e.projectId || authorizedProjectIds.has(e.projectId));
+      : (isClient || authorizedProjectIds.size === 0)
+        ? allMappedEvents.filter(e => isExplicitlyCompanyWide(e))
+        : allMappedEvents.filter((e: any) => {
+            if (isExplicitlyCompanyWide(e)) return true;
+            if (e.projectId && authorizedProjectIds.has(e.projectId)) return true;
+            return false;
+          });
 
     const allMappedRfis = (dbRfisRes.rows || []).map((r: any) => ({
       id: r.id,
@@ -443,7 +509,13 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
 
     const rfis = isFinanceOrAdmin
       ? allMappedRfis
-      : allMappedRfis.filter((r: any) => !r.projectId || authorizedProjectIds.has(r.projectId));
+      : (isClient || authorizedProjectIds.size === 0)
+        ? []
+        : allMappedRfis.filter((r: any) => {
+            if (isExplicitlyCompanyWide(r)) return true;
+            if (r.projectId && authorizedProjectIds.has(r.projectId)) return true;
+            return false;
+          });
 
     const allMappedRecs = (dbRecRes.rows || []).map((r: any) => ({
       id: r.id,
@@ -471,67 +543,379 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
 
     const aiRecommendations = isFinanceOrAdmin
       ? allMappedRecs
-      : allMappedRecs.filter((r: any) => {
-          const targetOk = !r.targetProjectId || authorizedProjectIds.has(r.targetProjectId);
-          const donorOk = !r.donorProjectId || authorizedProjectIds.has(r.donorProjectId);
-          return targetOk && donorOk;
-        });
+      : (isClient || authorizedProjectIds.size === 0)
+        ? []
+        : allMappedRecs.filter((r: any) => {
+            if (isExplicitlyCompanyWide(r)) return true;
+            const targetOk = r.targetProjectId && authorizedProjectIds.has(r.targetProjectId);
+            const donorOk = r.donorProjectId && authorizedProjectIds.has(r.donorProjectId);
+            return targetOk || donorOk;
+          });
+
+    const documents = isFinanceOrAdmin
+      ? dbDocs
+      : isClient
+        ? (authorizedProjectIds.size === 0 ? [] : dbDocs.filter((d: any) => {
+            if (isExplicitlyCompanyWide(d)) return true;
+            if (d.projectId && authorizedProjectIds.has(d.projectId)) return true;
+            return Array.from(authorizedProjectIds).some(pid => (d.title && d.title.includes(pid)) || (d.id && d.id.includes(pid)));
+          }))
+        : authorizedProjectIds.size === 0
+          ? dbDocs.filter(d => isExplicitlyCompanyWide(d))
+          : dbDocs.filter((d: any) => {
+              if (isExplicitlyCompanyWide(d)) return true;
+              if (d.projectId && authorizedProjectIds.has(d.projectId)) return true;
+              const matchesTag = Array.from(authorizedProjectIds).some(pid => 
+                (d.title && d.title.includes(pid)) || (d.id && d.id.includes(pid))
+              );
+              if (matchesTag) return true;
+              // Do not automatically expose records with missing project IDs
+              return false;
+            });
+
+    const siteLogs = isFinanceOrAdmin
+      ? dbSiteLogs
+      : (isClient || authorizedProjectIds.size === 0)
+        ? []
+        : dbSiteLogs.filter((l: any) => {
+            if (isExplicitlyCompanyWide(l)) return true;
+            if (l.projectId && authorizedProjectIds.has(l.projectId)) return true;
+            // Do not automatically expose records with missing project IDs
+            return false;
+          });
+
+    const risks = isFinanceOrAdmin
+      ? dbRisks
+      : (isClient || authorizedProjectIds.size === 0)
+        ? []
+        : dbRisks.filter((r: any) => {
+            if (isExplicitlyCompanyWide(r)) return true;
+            if (r.projectId && authorizedProjectIds.has(r.projectId)) return true;
+            // Do not automatically expose records with missing project IDs
+            return false;
+          });
+
+    const changeOrders = isFinanceOrAdmin
+      ? dbCOs.map(c => ({
+          id: c.id,
+          orderNumber: c.orderNumber,
+          title: c.title,
+          contractorName: c.contractorName,
+          requestedAmount: Number(c.requestedAmount || 0),
+          approvedAmount: c.approvedAmount ? Number(c.approvedAmount) : null,
+          status: c.status,
+          justification: c.justification,
+          approvedBy: c.approvedBy || '',
+          createdAt: c.createdAt.toISOString()
+        }))
+      : (isClient || isTimekeeper || authorizedProjectIds.size === 0)
+        ? []
+        : dbCOs
+            .filter((c: any) => {
+              if (isExplicitlyCompanyWide(c)) return true;
+              if (c.projectId && authorizedProjectIds.has(c.projectId)) return true;
+              return false;
+            })
+            .map(c => ({
+              id: c.id,
+              orderNumber: c.orderNumber,
+              title: c.title,
+              contractorName: c.contractorName,
+              requestedAmount: Number(c.requestedAmount || 0),
+              approvedAmount: c.approvedAmount ? Number(c.approvedAmount) : null,
+              status: c.status,
+              justification: c.justification,
+              approvedBy: c.approvedBy || '',
+              createdAt: c.createdAt.toISOString()
+            }));
+
+    const laborAllocations = isFinanceOrAdmin
+      ? (dbAllocRes.rows || []).map((r: any) => ({
+          id: r.id,
+          contractorId: r.contractor_id,
+          contractorName: r.contractor_name,
+          sectorName: r.sector_name,
+          targetLots: r.target_lots,
+          assignedHeadcount: Number(r.assigned_headcount || 0),
+          workScope: r.work_scope,
+          status: r.status,
+          notes: r.notes || '',
+          updatedAt: r.updated_at ? (r.updated_at instanceof Date ? r.updated_at.toISOString().split('T')[0] : String(r.updated_at).split('T')[0]) : new Date().toISOString().split('T')[0]
+        }))
+      : (isClient || authorizedProjectIds.size === 0)
+        ? []
+        : (dbAllocRes.rows || [])
+            .filter((r: any) => {
+              if (isExplicitlyCompanyWide(r)) return true;
+              if (r.project_id && authorizedProjectIds.has(r.project_id)) return true;
+              return false;
+            })
+            .map((r: any) => ({
+              id: r.id,
+              contractorId: r.contractor_id,
+              contractorName: r.contractor_name,
+              sectorName: r.sector_name,
+              targetLots: r.target_lots,
+              assignedHeadcount: Number(r.assigned_headcount || 0),
+              workScope: r.work_scope,
+              status: r.status,
+              notes: r.notes || '',
+              updatedAt: r.updated_at ? (r.updated_at instanceof Date ? r.updated_at.toISOString().split('T')[0] : String(r.updated_at).split('T')[0]) : new Date().toISOString().split('T')[0]
+            }));
+
+    const manpowerAudits = isFinanceOrAdmin
+      ? ((Array.isArray(dbManpowerAudits) ? dbManpowerAudits : (dbManpowerAudits as any)?.rows) || []).map((a: any) => ({
+          id: a.id,
+          date: a.date ? (a.date instanceof Date ? a.date.toISOString().split('T')[0] : String(a.date).split('T')[0]) : new Date().toISOString().split('T')[0],
+          contractorId: a.contractorId || a.contractor_id,
+          contractorName: a.contractorName || a.contractor_name,
+          specialty: a.specialty,
+          shift: a.shift || 'Morning',
+          claimedHeadcount: Number(a.claimedHeadcount ?? a.claimed_headcount ?? 0),
+          verifiedHeadcount: Number(a.verifiedHeadcount ?? a.verified_headcount ?? 0),
+          discrepancy: Number(a.discrepancy ?? (Number(a.claimedHeadcount ?? a.claimed_headcount ?? 0) - Number(a.verifiedHeadcount ?? a.verified_headcount ?? 0))),
+          assignedSectorOrLot: a.assignedSectorOrLot || a.assigned_sector_or_lot || 'Active Site',
+          supervisorName: a.supervisorName || a.supervisor_name || 'Site Supervisor',
+          gpsCoordinates: a.gpsCoordinates || a.gps_coordinates || '14.2789° N, 121.1245° E (Site Geofence)',
+          verificationStatus: a.verificationStatus || a.verification_status || 'VERIFIED_MATCH',
+          photoEvidenceVerified: Boolean(a.photoEvidenceVerified ?? a.photo_evidence_verified ?? true),
+          remarks: a.remarks || '',
+          productivityIndex: Number(a.productivityIndex ?? a.productivity_index ?? 90)
+        }))
+      : (isClient || authorizedProjectIds.size === 0)
+        ? []
+        : ((Array.isArray(dbManpowerAudits) ? dbManpowerAudits : (dbManpowerAudits as any)?.rows) || [])
+            .filter((a: any) => {
+              if (isExplicitlyCompanyWide(a)) return true;
+              const pid = a.projectId || a.project_id;
+              if (pid && authorizedProjectIds.has(pid)) return true;
+              return false;
+            })
+            .map((a: any) => ({
+              id: a.id,
+              date: a.date ? (a.date instanceof Date ? a.date.toISOString().split('T')[0] : String(a.date).split('T')[0]) : new Date().toISOString().split('T')[0],
+              contractorId: a.contractorId || a.contractor_id,
+              contractorName: a.contractorName || a.contractor_name,
+              specialty: a.specialty,
+              shift: a.shift || 'Morning',
+              claimedHeadcount: Number(a.claimedHeadcount ?? a.claimed_headcount ?? 0),
+              verifiedHeadcount: Number(a.verifiedHeadcount ?? a.verified_headcount ?? 0),
+              discrepancy: Number(a.discrepancy ?? (Number(a.claimedHeadcount ?? a.claimed_headcount ?? 0) - Number(a.verifiedHeadcount ?? a.verified_headcount ?? 0))),
+              assignedSectorOrLot: a.assignedSectorOrLot || a.assigned_sector_or_lot || 'Active Site',
+              supervisorName: a.supervisorName || a.supervisor_name || 'Site Supervisor',
+              gpsCoordinates: a.gpsCoordinates || a.gps_coordinates || '14.2789° N, 121.1245° E (Site Geofence)',
+              verificationStatus: a.verificationStatus || a.verification_status || 'VERIFIED_MATCH',
+              photoEvidenceVerified: Boolean(a.photoEvidenceVerified ?? a.photo_evidence_verified ?? true),
+              remarks: a.remarks || '',
+              productivityIndex: Number(a.productivityIndex ?? a.productivity_index ?? 90)
+            }));
+
+    const auditLogs = isAdmin
+      ? dbAuditLogs.map(a => ({
+          id: a.id,
+          entityType: a.entityType,
+          entityId: a.entityId,
+          action: a.action,
+          actorName: a.actorName,
+          actorRole: a.actorRole,
+          details: a.details,
+          createdAt: a.createdAt.toISOString(),
+        }))
+      : isFinance
+        ? dbAuditLogs
+            .filter(a => a.entityType === 'PAYROLL' || a.entityType === 'FINANCE' || a.action.includes('PAYMENT') || a.action.includes('PAYROLL'))
+            .map(a => ({
+              id: a.id,
+              entityType: a.entityType,
+              entityId: a.entityId,
+              action: a.action,
+              actorName: a.actorName,
+              actorRole: a.actorRole,
+              details: a.details,
+              createdAt: a.createdAt.toISOString(),
+            }))
+        : [];
+
+    const quotations = isFinanceOrAdmin
+      ? (dbQuotationsRes.rows || []).map((q: any) => ({
+          id: q.id,
+          clientName: q.client_name,
+          clientEmail: q.client_email,
+          clientPhone: q.client_phone,
+          projectScope: q.project_scope,
+          estimatedCost: Number(q.estimated_cost || 0),
+          estimatedWeeks: Number(q.estimated_weeks || 0),
+          estimatorArea: Number(q.estimator_area || 0),
+          spaceType: q.space_type,
+          finishTier: q.finish_tier,
+          projectNotes: q.project_notes,
+          status: q.status === 'PENDING' ? 'NEW_INQUIRY' : (q.status || 'NEW_INQUIRY'),
+          convertedProjectId: q.converted_project_id || undefined,
+          createdAt: q.created_at ? (q.created_at instanceof Date ? q.created_at.toISOString() : String(q.created_at)) : undefined,
+        }))
+      : isClient
+        ? (dbQuotationsRes.rows || [])
+            .filter((q: any) => q.client_email && q.client_email.toLowerCase() === user.email.toLowerCase())
+            .map((q: any) => ({
+              id: q.id,
+              clientName: q.client_name,
+              clientEmail: q.client_email,
+              clientPhone: q.client_phone,
+              projectScope: q.project_scope,
+              estimatedCost: Number(q.estimated_cost || 0),
+              estimatedWeeks: Number(q.estimated_weeks || 0),
+              estimatorArea: Number(q.estimator_area || 0),
+              spaceType: q.space_type,
+              finishTier: q.finish_tier,
+              projectNotes: q.project_notes,
+              status: q.status === 'PENDING' ? 'NEW_INQUIRY' : (q.status || 'NEW_INQUIRY'),
+              convertedProjectId: q.converted_project_id || undefined,
+              createdAt: q.created_at ? (q.created_at instanceof Date ? q.created_at.toISOString() : String(q.created_at)) : undefined,
+            }))
+        : (dbQuotationsRes.rows || [])
+            .filter((q: any) => q.converted_project_id && authorizedProjectIds.has(q.converted_project_id))
+            .map((q: any) => ({
+              id: q.id,
+              clientName: q.client_name,
+              clientEmail: q.client_email,
+              clientPhone: q.client_phone,
+              projectScope: q.project_scope,
+              estimatedCost: Number(q.estimated_cost || 0),
+              estimatedWeeks: Number(q.estimated_weeks || 0),
+              estimatorArea: Number(q.estimator_area || 0),
+              spaceType: q.space_type,
+              finishTier: q.finish_tier,
+              projectNotes: q.project_notes,
+              status: q.status === 'PENDING' ? 'NEW_INQUIRY' : (q.status || 'NEW_INQUIRY'),
+              convertedProjectId: q.converted_project_id || undefined,
+              createdAt: q.created_at ? (q.created_at instanceof Date ? q.created_at.toISOString() : String(q.created_at)) : undefined,
+            }));
+
+    const civilWorksMilestones = isFinanceOrAdmin
+      ? dbCivilMilestones.map(m => ({
+          id: m.id,
+          parcelId: m.parcelId,
+          phaseName: m.phaseName,
+          targetPercentage: m.targetPercentage,
+          currentPercentage: m.currentPercentage,
+          status: m.status,
+          inspectorSignOff: m.inspectorSignOff,
+          signOffDate: m.signOffDate ? m.signOffDate.toISOString().split('T')[0] : null,
+          remarks: m.remarks || '',
+        }))
+      : (isClient || authorizedProjectIds.size === 0)
+        ? []
+        : dbCivilMilestones
+            .filter((m: any) => {
+              if (isExplicitlyCompanyWide(m)) return true;
+              if (m.projectId && authorizedProjectIds.has(m.projectId)) return true;
+              if (m.parcelId && authorizedParcelIds.has(m.parcelId)) return true;
+              // Do not automatically expose records with missing project/parcel IDs
+              return false;
+            })
+            .map(m => ({
+              id: m.id,
+              parcelId: m.parcelId,
+              phaseName: m.phaseName,
+              targetPercentage: m.targetPercentage,
+              currentPercentage: m.currentPercentage,
+              status: m.status,
+              inspectorSignOff: m.inspectorSignOff,
+              signOffDate: m.signOffDate ? m.signOffDate.toISOString().split('T')[0] : null,
+              remarks: m.remarks || '',
+            }));
+
+    const qaLogs = isFinanceOrAdmin
+      ? dbQaLogs.map(q => ({
+          id: q.id,
+          date: q.date.toISOString().split('T')[0],
+          inspectorName: q.inspector.name,
+          slotId: q.slotId,
+          complianceStatus: q.complianceStatus || 'Compliant',
+          progressPercentage: q.percentageComplete,
+          structuralCheck: q.structuralCheck || 'Pass',
+          safetyCheck: q.safetyCheck || 'Pass',
+          remarks: q.notes,
+          siteActivity: q.siteActivity || 'Ready',
+        }))
+      : (isClient || authorizedProjectIds.size === 0)
+        ? []
+        : dbQaLogs
+            .filter((q: any) => {
+              if (isExplicitlyCompanyWide(q)) return true;
+              if (q.projectId && authorizedProjectIds.has(q.projectId)) return true;
+              if (q.slotId && authorizedSlotIds.has(q.slotId)) return true;
+              // Do not automatically expose records with missing project/slot IDs
+              return false;
+            })
+            .map(q => ({
+              id: q.id,
+              date: q.date.toISOString().split('T')[0],
+              inspectorName: q.inspector.name,
+              slotId: q.slotId,
+              complianceStatus: q.complianceStatus || 'Compliant',
+              progressPercentage: q.percentageComplete,
+              structuralCheck: q.structuralCheck || 'Pass',
+              safetyCheck: q.safetyCheck || 'Pass',
+              remarks: q.notes,
+              siteActivity: q.siteActivity || 'Ready',
+            }));
+
+    const punchListDefects = isFinanceOrAdmin
+      ? dbDefects.map(d => ({
+          id: d.id,
+          slotId: d.slotId,
+          inspectorId: d.inspectorId,
+          inspectorName: d.inspector?.name || 'Site Monitor',
+          contractorId: d.contractorId,
+          contractorName: d.contractor?.name || 'Unassigned Contractor',
+          title: d.title,
+          description: d.description,
+          severity: d.severity,
+          status: d.status,
+          category: d.category,
+          resolutionNotes: d.resolutionNotes || '',
+          targetDate: d.targetDate ? d.targetDate.toISOString().split('T')[0] : null,
+          createdAt: d.createdAt.toISOString(),
+          updatedAt: d.updatedAt.toISOString(),
+        }))
+      : (isClient || authorizedProjectIds.size === 0)
+        ? []
+        : dbDefects
+            .filter((d: any) => {
+              if (isExplicitlyCompanyWide(d)) return true;
+              if (d.projectId && authorizedProjectIds.has(d.projectId)) return true;
+              if (d.slotId && authorizedSlotIds.has(d.slotId)) return true;
+              // Do not automatically expose records with missing project/slot IDs
+              return false;
+            })
+            .map(d => ({
+              id: d.id,
+              slotId: d.slotId,
+              inspectorId: d.inspectorId,
+              inspectorName: d.inspector?.name || 'Site Monitor',
+              contractorId: d.contractorId,
+              contractorName: d.contractor?.name || 'Unassigned Contractor',
+              title: d.title,
+              description: d.description,
+              severity: d.severity,
+              status: d.status,
+              category: d.category,
+              resolutionNotes: d.resolutionNotes || '',
+              targetDate: d.targetDate ? d.targetDate.toISOString().split('T')[0] : null,
+              createdAt: d.createdAt.toISOString(),
+              updatedAt: d.updatedAt.toISOString(),
+            }));
 
     const responsePayload = {
       parcels,
       slots,
       clients,
       contractors,
-      qaLogs: dbQaLogs.map(q => ({
-        id: q.id,
-        date: q.date.toISOString().split('T')[0],
-        inspectorName: q.inspector.name,
-        slotId: q.slotId,
-        complianceStatus: q.complianceStatus || 'Compliant',
-        progressPercentage: q.percentageComplete,
-        structuralCheck: q.structuralCheck || 'Pass',
-        safetyCheck: q.safetyCheck || 'Pass',
-        remarks: q.notes,
-        siteActivity: q.siteActivity || 'Ready',
-      })),
-      punchListDefects: dbDefects.map(d => ({
-        id: d.id,
-        slotId: d.slotId,
-        inspectorId: d.inspectorId,
-        inspectorName: d.inspector?.name || 'Site Monitor',
-        contractorId: d.contractorId,
-        contractorName: d.contractor?.name || 'Unassigned Contractor',
-        title: d.title,
-        description: d.description,
-        severity: d.severity,
-        status: d.status,
-        category: d.category,
-        resolutionNotes: d.resolutionNotes || '',
-        targetDate: d.targetDate ? d.targetDate.toISOString().split('T')[0] : null,
-        createdAt: d.createdAt.toISOString(),
-        updatedAt: d.updatedAt.toISOString(),
-      })),
-      civilWorksMilestones: dbCivilMilestones.map(m => ({
-        id: m.id,
-        parcelId: m.parcelId,
-        phaseName: m.phaseName,
-        targetPercentage: m.targetPercentage,
-        currentPercentage: m.currentPercentage,
-        status: m.status,
-        inspectorSignOff: m.inspectorSignOff,
-        signOffDate: m.signOffDate ? m.signOffDate.toISOString().split('T')[0] : null,
-        remarks: m.remarks || '',
-      })),
-      auditLogs: dbAuditLogs.map(a => ({
-        id: a.id,
-        entityType: a.entityType,
-        entityId: a.entityId,
-        action: a.action,
-        actorName: a.actorName,
-        actorRole: a.actorRole,
-        details: a.details,
-        createdAt: a.createdAt.toISOString(),
-      })),
+      qaLogs,
+      punchListDefects,
+      civilWorksMilestones,
+      auditLogs,
       payroll: isFinanceOrAdmin ? dbPayroll.map(p => ({
         id: p.id,
         date: p.date.toISOString().split('T')[0],
@@ -543,21 +927,10 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         paymentMethod: p.paymentMethod,
       })) : [],
       tasks,
-      siteLogs: dbSiteLogs,
-      documents: dbDocs,
-      risks: dbRisks,
-      changeOrders: dbCOs.map(c => ({
-        id: c.id,
-        orderNumber: c.orderNumber,
-        title: c.title,
-        contractorName: c.contractorName,
-        requestedAmount: Number(c.requestedAmount || 0),
-        approvedAmount: c.approvedAmount ? Number(c.approvedAmount) : null,
-        status: c.status,
-        justification: c.justification,
-        approvedBy: c.approvedBy || '',
-        createdAt: c.createdAt.toISOString()
-      })),
+      siteLogs,
+      documents,
+      risks,
+      changeOrders,
       permits,
       scheduleEvents,
       projects,
@@ -578,54 +951,11 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         disbursementDate: p.disbursement_date ? (p.disbursement_date instanceof Date ? p.disbursement_date.toISOString().split('T')[0] : String(p.disbursement_date).split('T')[0]) : null,
         paymentMethod: p.payment_method || 'Bank Transfer'
       })) : [],
-      laborAllocations: (dbAllocRes.rows || []).map((r: any) => ({
-        id: r.id,
-        contractorId: r.contractor_id,
-        contractorName: r.contractor_name,
-        sectorName: r.sector_name,
-        targetLots: r.target_lots,
-        assignedHeadcount: Number(r.assigned_headcount || 0),
-        workScope: r.work_scope,
-        status: r.status,
-        notes: r.notes || '',
-        updatedAt: r.updated_at ? (r.updated_at instanceof Date ? r.updated_at.toISOString().split('T')[0] : String(r.updated_at).split('T')[0]) : new Date().toISOString().split('T')[0]
-      })),
+      laborAllocations,
       aiRecommendations,
-      manpowerAudits: ((Array.isArray(dbManpowerAudits) ? dbManpowerAudits : (dbManpowerAudits as any)?.rows) || []).map((a: any) => ({
-        id: a.id,
-        date: a.date ? (a.date instanceof Date ? a.date.toISOString().split('T')[0] : String(a.date).split('T')[0]) : new Date().toISOString().split('T')[0],
-        contractorId: a.contractorId || a.contractor_id,
-        contractorName: a.contractorName || a.contractor_name,
-        specialty: a.specialty,
-        shift: a.shift || 'Morning',
-        claimedHeadcount: Number(a.claimedHeadcount ?? a.claimed_headcount ?? 0),
-        verifiedHeadcount: Number(a.verifiedHeadcount ?? a.verified_headcount ?? 0),
-        discrepancy: Number(a.discrepancy ?? (Number(a.claimedHeadcount ?? a.claimed_headcount ?? 0) - Number(a.verifiedHeadcount ?? a.verified_headcount ?? 0))),
-        assignedSectorOrLot: a.assignedSectorOrLot || a.assigned_sector_or_lot || 'Active Site',
-        supervisorName: a.supervisorName || a.supervisor_name || 'Site Supervisor',
-        gpsCoordinates: a.gpsCoordinates || a.gps_coordinates || '14.2789° N, 121.1245° E (Site Geofence)',
-        verificationStatus: a.verificationStatus || a.verification_status || 'VERIFIED_MATCH',
-        photoEvidenceVerified: Boolean(a.photoEvidenceVerified ?? a.photo_evidence_verified ?? true),
-        remarks: a.remarks || '',
-        productivityIndex: Number(a.productivityIndex ?? a.productivity_index ?? 90)
-      })),
+      manpowerAudits,
       rfis,
-      quotations: (dbQuotationsRes.rows || []).map((q: any) => ({
-        id: q.id,
-        clientName: q.client_name,
-        clientEmail: q.client_email,
-        clientPhone: q.client_phone,
-        projectScope: q.project_scope,
-        estimatedCost: Number(q.estimated_cost || 0),
-        estimatedWeeks: Number(q.estimated_weeks || 0),
-        estimatorArea: Number(q.estimator_area || 0),
-        spaceType: q.space_type,
-        finishTier: q.finish_tier,
-        projectNotes: q.project_notes,
-        status: q.status === 'PENDING' ? 'NEW_INQUIRY' : (q.status || 'NEW_INQUIRY'),
-        convertedProjectId: q.converted_project_id || undefined,
-        createdAt: q.created_at ? (q.created_at instanceof Date ? q.created_at.toISOString() : String(q.created_at)) : undefined,
-      })),
+      quotations,
     };
 
     allDataCacheByUser[cacheKey] = {

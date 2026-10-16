@@ -66,6 +66,35 @@ export function extractSessionToken(req: Request): string | null {
   return null;
 }
 
+export type SessionVerifier = (rawToken: string | undefined) => Promise<{
+  user: {
+    id: string;
+    email: string;
+    name: string;
+    role: Role;
+    accountStatus: any;
+    projectIds: string[];
+  };
+  session: any;
+} | null>;
+
+let activeSessionVerifier: SessionVerifier = verifySession;
+
+/**
+ * Test-only dependency injection to provide isolated session verification during tests.
+ * Strictly prohibited and blocked when running in production mode.
+ */
+export function setSessionVerifierForTesting(verifier: SessionVerifier | null): void {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL SECURITY VIOLATION: Test session verifier injection is strictly prohibited in production.');
+  }
+  activeSessionVerifier = verifier || verifySession;
+}
+
+export function resetSessionVerifierForTesting(): void {
+  activeSessionVerifier = verifySession;
+}
+
 /**
  * Authenticate incoming request by resolving and verifying the server-side session.
  * Does NOT accept forged headers (x-user-id, x-user-role) or query/body user IDs.
@@ -79,7 +108,7 @@ export async function authenticateRequest(req: Request, _res: Response, next: Ne
       return next();
     }
 
-    const sessionResult = await verifySession(rawToken);
+    const sessionResult = await activeSessionVerifier(rawToken);
     if (!sessionResult) {
       req.user = undefined;
       return next();
