@@ -9,12 +9,19 @@ import * as crypto from 'crypto';
 import { prisma, pool } from '../db';
 import { broadcastChange, setCacheInvalidator } from '../events';
 import { getMailTransporter } from '../email';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireRole } from '../middleware/auth';
 
 export const legacyParcelsRouter = Router();
 
 // Apply authentication to legacy parcels endpoints
-legacyParcelsRouter.use(requireAuth);
+legacyParcelsRouter.use((req: Request, res: Response, next) => {
+  const parcelPaths = ['/all-data', '/clients', '/slots', '/audit-logs', '/parcels', '/admin'];
+  const matches = parcelPaths.some(p => req.path === p || req.path.startsWith(`${p}/`));
+  if (matches) {
+    return requireAuth(req, res, next);
+  }
+  return next();
+});
 
 // Helper function to map DB SlotStatus to Frontend SlotStatus string
 export function mapDbStatusToString(status: SlotStatus): string {
@@ -125,14 +132,14 @@ export async function mapUserToClient(user: any) {
   };
 }
 
-// In-Memory Performance Cache for /api/all-data
-let allDataCache: any = null;
-let allDataCacheTime = 0;
+// In-Memory Performance Cache for /api/all-data, partitioned by role to prevent cross-role data leaks
+const allDataCacheByRole: Record<string, { payload: any; time: number }> = {};
 const ALL_DATA_CACHE_TTL = 1500;
 
 export function invalidateAllDataCache() {
-  allDataCache = null;
-  allDataCacheTime = 0;
+  for (const k of Object.keys(allDataCacheByRole)) {
+    delete allDataCacheByRole[k];
+  }
 }
 
 setCacheInvalidator(invalidateAllDataCache);
@@ -140,9 +147,16 @@ setCacheInvalidator(invalidateAllDataCache);
 // GET /api/all-data: Fetches operational models concurrently
 legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
+    const userRole = user?.role || 'UNKNOWN';
+    const isFinanceOrAdmin = userRole === 'ADMIN' || userRole === 'FINANCE';
+    const isClient = userRole === 'CLIENT';
+    const cacheKey = isClient ? `CLIENT_${user?.id}` : userRole;
+
     const bypassCache = req.query.nocache === 'true' || req.headers['cache-control'] === 'no-cache';
-    if (!bypassCache && allDataCache && (Date.now() - allDataCacheTime < ALL_DATA_CACHE_TTL)) {
-      return res.json(allDataCache);
+    const cached = allDataCacheByRole[cacheKey];
+    if (!bypassCache && cached && (Date.now() - cached.time < ALL_DATA_CACHE_TTL)) {
+      return res.json(cached.payload);
     }
 
     const [
@@ -181,7 +195,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         orderBy: { slotNumber: 'asc' }
       }),
       prisma.user.findMany({
-        where: { role: Role.CLIENT },
+        where: isClient ? { role: Role.CLIENT, id: user?.id } : { role: Role.CLIENT },
         include: {
           buyerKyc: true,
           clientPackage: {
@@ -292,16 +306,16 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         activeProjectSite: c.activeProjectSite || null,
         assignedZone: c.assignedZone || null,
         avatar: (c as any).avatar || null,
-        contractAmount: Number(c.contractAmount || 0),
-        paidAmount: Number(c.paidAmount || 0),
+        contractAmount: isFinanceOrAdmin ? Number(c.contractAmount || 0) : undefined,
+        paidAmount: isFinanceOrAdmin ? Number(c.paidAmount || 0) : undefined,
         activeManpower: c.activeManpower,
         milestoneProgress: c.milestoneProgress,
         rating: c.rating || 0,
         employmentType: (c as any).employmentType || 'INTERNAL',
         department: (c as any).department || null,
         roleTitle: (c as any).roleTitle || null,
-        dailyRate: (c as any).dailyRate !== null && (c as any).dailyRate !== undefined ? Number((c as any).dailyRate) : null,
-        monthlySalary: (c as any).monthlySalary !== null && (c as any).monthlySalary !== undefined ? Number((c as any).monthlySalary) : null,
+        dailyRate: isFinanceOrAdmin && (c as any).dailyRate !== null && (c as any).dailyRate !== undefined ? Number((c as any).dailyRate) : undefined,
+        monthlySalary: isFinanceOrAdmin && (c as any).monthlySalary !== null && (c as any).monthlySalary !== undefined ? Number((c as any).monthlySalary) : undefined,
         status: (c as any).status || 'ACTIVE',
         activePresence,
       };
@@ -362,7 +376,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         details: a.details,
         createdAt: a.createdAt.toISOString(),
       })),
-      payroll: dbPayroll.map(p => ({
+      payroll: isFinanceOrAdmin ? dbPayroll.map(p => ({
         id: p.id,
         date: p.date.toISOString().split('T')[0],
         payeeName: p.payeeName,
@@ -371,7 +385,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         amount: Number(p.amount),
         status: p.status === PayrollStatus.DISBURSED ? 'Disbursed' : 'Pending',
         paymentMethod: p.paymentMethod,
-      })),
+      })) : [],
       tasks: dbTasks.map(t => ({
         id: t.id,
         title: t.title || t.text,
@@ -460,7 +474,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         weatherSuspended: Boolean(p.weather_suspended),
         createdAt: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at)) : new Date().toISOString()
       })),
-      extendedPayroll: (dbExtPayrollRes.rows || []).map((p: any) => ({
+      extendedPayroll: isFinanceOrAdmin ? (dbExtPayrollRes.rows || []).map((p: any) => ({
         id: p.id,
         workerName: p.worker_name,
         contractorCompany: p.contractor_company,
@@ -476,7 +490,7 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
         status: p.status || 'Pending',
         disbursementDate: p.disbursement_date ? (p.disbursement_date instanceof Date ? p.disbursement_date.toISOString().split('T')[0] : String(p.disbursement_date).split('T')[0]) : null,
         paymentMethod: p.payment_method || 'Bank Transfer'
-      })),
+      })) : [],
       laborAllocations: (dbAllocRes.rows || []).map((r: any) => ({
         id: r.id,
         contractorId: r.contractor_id,
@@ -569,8 +583,10 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       })),
     };
 
-    allDataCache = responsePayload;
-    allDataCacheTime = Date.now();
+    allDataCacheByRole[cacheKey] = {
+      payload: responsePayload,
+      time: Date.now()
+    };
 
     res.json(responsePayload);
   } catch (error) {
@@ -580,10 +596,12 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
 });
 
 // GET /api/clients
-legacyParcelsRouter.get('/clients', async (req: Request, res: Response) => {
+legacyParcelsRouter.get('/clients', requireRole(['ADMIN', 'FINANCE', 'ENGINEER', 'CLIENT']), async (req: Request, res: Response) => {
   try {
+    const user = (req as any).user;
+    const isClient = user?.role === 'CLIENT';
     const dbClients = await prisma.user.findMany({
-      where: { role: Role.CLIENT },
+      where: isClient ? { role: Role.CLIENT, id: user?.id } : { role: Role.CLIENT },
       include: {
         buyerKyc: true,
         clientPackage: {
@@ -654,7 +672,7 @@ legacyParcelsRouter.get('/audit-logs', async (req: Request, res: Response) => {
 });
 
 // POST /api/parcels
-legacyParcelsRouter.post('/parcels', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/parcels', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { id, name, location, acquisitionCost, totalAreaSqm, subdividedSlotsCount, acquisitionDate } = req.body;
   try {
     const parcel = await prisma.landParcel.create({
@@ -699,7 +717,7 @@ legacyParcelsRouter.post('/parcels', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/parcels/:id
-legacyParcelsRouter.delete('/parcels/:id', async (req: Request, res: Response) => {
+legacyParcelsRouter.delete('/parcels/:id', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     const parcelSlots = await prisma.slot.findMany({ where: { parcelId: id }, select: { id: true } });
@@ -726,7 +744,7 @@ legacyParcelsRouter.delete('/parcels/:id', async (req: Request, res: Response) =
 });
 
 // POST /api/slots/subdivide
-legacyParcelsRouter.post('/slots/subdivide', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/slots/subdivide', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { parcelId, areaSqm, price, startLotNumber } = req.body;
   try {
     const createdSlots = [];
@@ -757,7 +775,7 @@ legacyParcelsRouter.post('/slots/subdivide', async (req: Request, res: Response)
 });
 
 // POST /api/slots/import-cad
-legacyParcelsRouter.post('/slots/import-cad', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/slots/import-cad', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { parcelId = 'PARCEL-CST', lots = [] } = req.body;
   try {
     if (!Array.isArray(lots) || lots.length === 0) {
@@ -830,7 +848,7 @@ legacyParcelsRouter.post('/slots/import-cad', async (req: Request, res: Response
 });
 
 // DELETE /api/slots/clear-all
-legacyParcelsRouter.delete('/slots/clear-all', async (req: Request, res: Response) => {
+legacyParcelsRouter.delete('/slots/clear-all', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
     await prisma.clientPackage.updateMany({
       data: { slotId: null }
@@ -847,7 +865,7 @@ legacyParcelsRouter.delete('/slots/clear-all', async (req: Request, res: Respons
 });
 
 // POST /api/slots/transition-status
-legacyParcelsRouter.post('/slots/transition-status', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/slots/transition-status', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { slotId, newStatus, actorName, actorRole, notes, clientId } = req.body;
   try {
     const dbStatus = mapStringToDbStatus(newStatus);
@@ -885,7 +903,7 @@ legacyParcelsRouter.post('/slots/transition-status', async (req: Request, res: R
 });
 
 // POST /api/clients
-legacyParcelsRouter.post('/clients', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/clients', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   const { id, name, email, contact, packageName, paymentPlan, totalContractPrice, slotId, registrationDate } = req.body;
   try {
     const inviteToken = crypto.randomBytes(24).toString('hex');
@@ -998,7 +1016,7 @@ legacyParcelsRouter.post('/clients', async (req: Request, res: Response) => {
 });
 
 // POST /api/clients/assign-slot
-legacyParcelsRouter.post('/clients/assign-slot', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/clients/assign-slot', requireRole(['ADMIN', 'FINANCE', 'ENGINEER']), async (req: Request, res: Response) => {
   const { clientId, slotId } = req.body;
   try {
     const user = await prisma.user.findFirst({
@@ -1054,7 +1072,7 @@ legacyParcelsRouter.post('/clients/assign-slot', async (req: Request, res: Respo
 });
 
 // DELETE /api/clients/:id
-legacyParcelsRouter.delete('/clients/:id', async (req: Request, res: Response) => {
+legacyParcelsRouter.delete('/clients/:id', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   const clientId = req.params.id;
   try {
     const user = await prisma.user.findUnique({
@@ -1109,7 +1127,7 @@ legacyParcelsRouter.delete('/clients/:id', async (req: Request, res: Response) =
 });
 
 // POST /api/clients/delete
-legacyParcelsRouter.post('/clients/delete', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/clients/delete', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   const { clientId } = req.body;
   if (!clientId) {
     return res.status(400).json({ error: 'Client ID is required.' });
@@ -1167,7 +1185,7 @@ legacyParcelsRouter.post('/clients/delete', async (req: Request, res: Response) 
 });
 
 // POST /api/clients/update-title-pipeline
-legacyParcelsRouter.post('/clients/update-title-pipeline', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/clients/update-title-pipeline', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { clientId, stepKey, value, tctNumber, taxDecNumber } = req.body;
   try {
     const clientPackage = await prisma.clientPackage.findUnique({
@@ -1234,7 +1252,7 @@ legacyParcelsRouter.post('/clients/update-title-pipeline', async (req: Request, 
 });
 
 // POST /api/clients/verify-kyc
-legacyParcelsRouter.post('/clients/verify-kyc', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/clients/verify-kyc', requireRole(['ADMIN', 'FINANCE']), async (req: Request, res: Response) => {
   const { clientId, docKey, verified, notes } = req.body;
   try {
     let kyc = await prisma.buyerKyc.findUnique({ where: { userId: clientId } });
@@ -1267,7 +1285,7 @@ legacyParcelsRouter.post('/clients/verify-kyc', async (req: Request, res: Respon
 });
 
 // POST /api/clients/sign-acceptance
-legacyParcelsRouter.post('/clients/sign-acceptance', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/clients/sign-acceptance', requireRole(['ADMIN', 'CLIENT', 'ENGINEER']), async (req: Request, res: Response) => {
   const { clientId } = req.body;
   try {
     const clientPackage = await prisma.clientPackage.findUnique({
@@ -1305,7 +1323,7 @@ legacyParcelsRouter.post('/clients/sign-acceptance', async (req: Request, res: R
 });
 
 // POST /api/clients/generate-invite
-legacyParcelsRouter.post('/clients/generate-invite', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/clients/generate-invite', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   const { clientId } = req.body;
   if (!clientId) {
     return res.status(400).json({ error: 'Client ID is required.' });
@@ -1351,7 +1369,7 @@ legacyParcelsRouter.post('/clients/generate-invite', async (req: Request, res: R
 });
 
 // POST /api/clients/send-handover-email
-legacyParcelsRouter.post('/clients/send-handover-email', async (req: Request, res: Response) => {
+legacyParcelsRouter.post('/clients/send-handover-email', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { clientId, email, originUrl } = req.body;
   if (!clientId) {
     return res.status(400).json({ error: 'Client ID is required.' });
@@ -1400,7 +1418,7 @@ legacyParcelsRouter.post('/clients/send-handover-email', async (req: Request, re
 });
 
 // DELETE /api/admin/clear-all-data: Safely clears operational models while preserving user accounts
-legacyParcelsRouter.delete('/admin/clear-all-data', async (req: Request, res: Response) => {
+legacyParcelsRouter.delete('/admin/clear-all-data', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
     await pool.query('DELETE FROM ai_manpower_recommendations');
     await pool.query('DELETE FROM labor_allocations');

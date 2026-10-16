@@ -6,12 +6,19 @@
 import { Router, Request, Response } from 'express';
 import { prisma, pool } from '../db';
 import { broadcastChange, invalidateAllDataCache } from '../events';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireRole, checkUserProjectAccess } from '../middleware/auth';
 
 export const engineeringRouter = Router();
 
 // Apply base authentication on all engineering endpoints
-engineeringRouter.use(requireAuth);
+engineeringRouter.use((req: Request, res: Response, next) => {
+  const engineeringPaths = ['/permits', '/documents', '/change-orders', '/rfis'];
+  const matches = engineeringPaths.some(p => req.path === p || req.path.startsWith(`${p}/`));
+  if (matches) {
+    return requireAuth(req, res, next);
+  }
+  return next();
+});
 
 // ============================================================================
 // GOVERNMENT PERMITS (PEZA, MACEA, CITY HALL, FDAS, ELECTRICAL)
@@ -45,7 +52,7 @@ engineeringRouter.get('/permits', async (req: Request, res: Response) => {
 });
 
 // POST /api/permits
-engineeringRouter.post('/permits', async (req: Request, res: Response) => {
+engineeringRouter.post('/permits', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const {
       projectName,
@@ -107,7 +114,7 @@ engineeringRouter.post('/permits', async (req: Request, res: Response) => {
 });
 
 // PATCH /api/permits/:id
-engineeringRouter.patch('/permits/:id', async (req: Request, res: Response) => {
+engineeringRouter.patch('/permits/:id', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { 
@@ -154,7 +161,7 @@ engineeringRouter.patch('/permits/:id', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/permits/:id
-engineeringRouter.delete('/permits/:id', async (req: Request, res: Response) => {
+engineeringRouter.delete('/permits/:id', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM government_permits WHERE id = $1', [id]);
@@ -184,7 +191,7 @@ engineeringRouter.get('/documents', async (req: Request, res: Response) => {
 });
 
 // POST /api/documents
-engineeringRouter.post('/documents', async (req: Request, res: Response) => {
+engineeringRouter.post('/documents', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { title, category, fileUrl, fileSize, version, status, uploadedBy, notes } = req.body;
   try {
     const doc = await prisma.projectDocument.create({
@@ -221,7 +228,7 @@ engineeringRouter.post('/documents', async (req: Request, res: Response) => {
 });
 
 // PUT /api/documents/:id
-engineeringRouter.put('/documents/:id', async (req: Request, res: Response) => {
+engineeringRouter.put('/documents/:id', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { title, category, fileUrl, fileSize, version, status, uploadedBy, notes } = req.body;
   try {
@@ -259,7 +266,7 @@ engineeringRouter.put('/documents/:id', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/documents/:id
-engineeringRouter.delete('/documents/:id', async (req: Request, res: Response) => {
+engineeringRouter.delete('/documents/:id', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
     await prisma.projectDocument.delete({ where: { id } });
@@ -312,7 +319,7 @@ engineeringRouter.get('/change-orders', async (req: Request, res: Response) => {
 });
 
 // POST /api/change-orders
-engineeringRouter.post('/change-orders', async (req: Request, res: Response) => {
+engineeringRouter.post('/change-orders', requireRole(['ADMIN', 'ENGINEER', 'FINANCE']), async (req: Request, res: Response) => {
   try {
     const { title, contractorName, requestedAmount, justification, orderNumber } = req.body;
     if (!title || !requestedAmount) {
@@ -341,7 +348,7 @@ engineeringRouter.post('/change-orders', async (req: Request, res: Response) => 
 });
 
 // PATCH /api/change-orders/:id
-engineeringRouter.patch('/change-orders/:id', async (req: Request, res: Response) => {
+engineeringRouter.patch('/change-orders/:id', requireRole(['ADMIN', 'FINANCE', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { status, approvedAmount, approvedBy } = req.body;
@@ -399,7 +406,7 @@ engineeringRouter.get('/rfis', async (req: Request, res: Response) => {
 });
 
 // POST /api/rfis
-engineeringRouter.post('/rfis', async (req: Request, res: Response) => {
+engineeringRouter.post('/rfis', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { rfiNumber, projectId, projectName, subject, question, suggestedSolution, priority, assignedTo, submittedBy, drawingRef, dueDate } = req.body;
     if (!subject || !question) {
@@ -440,7 +447,7 @@ engineeringRouter.post('/rfis', async (req: Request, res: Response) => {
 });
 
 // PATCH /api/rfis/:id
-engineeringRouter.patch('/rfis/:id', async (req: Request, res: Response) => {
+engineeringRouter.patch('/rfis/:id', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { answer, status, priority, assignedTo, suggestedSolution } = req.body;

@@ -34,6 +34,9 @@ export function isPasswordStrong(password: string): { valid: boolean; reason?: s
   return { valid: true };
 }
 
+// Stable dummy scrypt hash for timing equalization when account does not exist
+export const DUMMY_SCRYPT_HASH = '1234567890abcdef1234567890abcdef:e1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef';
+
 /**
  * Helper to build frontend-compatible session object from user record and settings
  */
@@ -118,34 +121,33 @@ authRouter.post('/auth/login', loginRateLimiter, async (req: Request, res: Respo
       }
     });
 
-    // Constant-time generic error to prevent account enumeration
-    if (!user) {
+
+
+    // 1. If user doesn't exist or has no passwordHash, run dummy verify to equalize response timing
+    if (!user || !user.passwordHash) {
+      verifyPassword(String(password), DUMMY_SCRYPT_HASH);
       return res.status(401).json({ error: 'Invalid email or password.' });
     }
 
-    // Do not permit suspended accounts
+    // 2. Verify credentials FIRST before providing any account-specific status information
+    const isPasswordValid = verifyPassword(String(password), user.passwordHash);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    // 3. Now that credentials are confirmed authentic, enforce account status policy
     if (user.accountStatus === AccountStatus.SUSPENDED) {
       return res.status(403).json({ error: 'This account has been suspended. Please contact system administration.' });
     }
 
-    // Do not leak invitation tokens or account state through login failures
     if (user.accountStatus === AccountStatus.INVITED) {
       return res.status(403).json({ 
         error: 'This account has not been activated yet. Please use the activation link sent to your email.'
       });
     }
 
-    // Reject accounts without valid password hash
-    if (!user.passwordHash) {
-      return res.status(401).json({ 
-        error: 'Account requires activation. Please contact system administration for an activation link.' 
-      });
-    }
-
-    // Strict scrypt password verification — NO hardcoded demo passkey bypasses
-    const isPasswordValid = verifyPassword(String(password), user.passwordHash);
-    if (!isPasswordValid) {
-      return res.status(401).json({ error: 'Invalid email or password.' });
+    if (user.accountStatus !== AccountStatus.ACTIVE) {
+      return res.status(403).json({ error: 'Account is not active. Please contact system administration.' });
     }
 
     // Create cryptographically random server session backed by PostgreSQL
@@ -161,8 +163,8 @@ authRouter.post('/auth/login', loginRateLimiter, async (req: Request, res: Respo
     // Set HttpOnly session cookie
     setSessionCookie(res, rawToken, expiresAt);
 
-    // Issue CSRF token
-    const csrfToken = generateCsrfToken();
+    // Issue session-bound CSRF token
+    const csrfToken = generateCsrfToken(rawToken);
     setCsrfCookie(res, csrfToken);
 
     const sessionPayload = await buildSessionPayload(user);
@@ -210,7 +212,7 @@ authRouter.post('/auth/logout', async (req: Request, res: Response) => {
     console.error('Error logging out:', error);
     clearSessionCookie(res);
     clearCsrfCookie(res);
-    res.json({ success: true });
+    res.status(500).json({ error: 'Failed to securely invalidate session on the server. Please try again.' });
   }
 });
 
@@ -637,6 +639,71 @@ authRouter.delete('/staff/:id', requireAuth, requireRole(['ADMIN']), async (req:
   } catch (error) {
     console.error('Error deleting staff account:', error);
     res.status(500).json({ error: 'Failed to delete staff account' });
+  }
+});
+
+// PATCH /api/staff/:id — Update staff role, account status, or project assignments (ADMIN only)
+authRouter.patch('/staff/:id', requireAuth, requireRole(['ADMIN']), async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { role, accountStatus, projectIds, name, contact } = req.body;
+
+    const target = await prisma.user.findUnique({ where: { id } });
+    if (!target) return res.status(404).json({ error: 'Staff account not found.' });
+
+    const isSecuritySensitiveChange = 
+      (role && role !== target.role) || 
+      (accountStatus && accountStatus !== target.accountStatus);
+
+    let mappedRole: Role | undefined;
+    if (role) {
+      if (role === 'ADMIN' || role === Role.ADMIN) mappedRole = Role.ADMIN;
+      else if (role === 'ENGINEER' || role === Role.ENGINEER) mappedRole = Role.ENGINEER;
+      else if (role === 'TIMEKEEPER' || role === Role.TIMEKEEPER) mappedRole = Role.TIMEKEEPER;
+      else if (role === 'FINANCE' || role === Role.FINANCE) mappedRole = Role.FINANCE;
+      else return res.status(400).json({ error: 'Invalid role specified.' });
+    }
+
+    let mappedStatus: AccountStatus | undefined;
+    if (accountStatus) {
+      if (accountStatus === 'ACTIVE' || accountStatus === AccountStatus.ACTIVE) mappedStatus = AccountStatus.ACTIVE;
+      else if (accountStatus === 'SUSPENDED' || accountStatus === AccountStatus.SUSPENDED) mappedStatus = AccountStatus.SUSPENDED;
+      else if (accountStatus === 'INVITED' || accountStatus === AccountStatus.INVITED) mappedStatus = AccountStatus.INVITED;
+      else return res.status(400).json({ error: 'Invalid accountStatus specified.' });
+    }
+
+    const updated = await prisma.user.update({
+      where: { id },
+      data: {
+        ...(mappedRole ? { role: mappedRole } : {}),
+        ...(mappedStatus ? { accountStatus: mappedStatus } : {}),
+        ...(Array.isArray(projectIds) ? { projectIds } : {}),
+        ...(name ? { name: String(name).trim() } : {}),
+        ...(contact !== undefined ? { contact: String(contact).trim() } : {}),
+      }
+    });
+
+    // Invalidate active sessions if role or accountStatus was changed
+    if (isSecuritySensitiveChange) {
+      await revokeAllUserSessions(id);
+    }
+
+    await prisma.processAuditLog.create({
+      data: {
+        entityType: 'USER',
+        entityId: id,
+        action: 'STAFF_ACCOUNT_MODIFIED',
+        actorName: req.user!.name,
+        actorRole: 'ADMIN',
+        details: `Updated staff profile for ${target.name} (${target.email}). Role: ${updated.role}, Status: ${updated.accountStatus}.${isSecuritySensitiveChange ? ' Active sessions revoked.' : ''}`,
+      }
+    }).catch(() => {});
+    broadcastChange('auditLogs');
+
+    res.json({ success: true, user: updated });
+  } catch (error) {
+    console.error('Error updating staff account:', error);
+    res.status(500).json({ error: 'Failed to update staff account' });
   }
 });
 

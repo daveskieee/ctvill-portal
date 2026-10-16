@@ -33,11 +33,10 @@ declare global {
 export function normalizeAppRole(rawRole: string | undefined | null): AllowedAppRole | null {
   if (!rawRole || typeof rawRole !== 'string') return null;
   const upper = rawRole.toUpperCase().trim();
-  if (upper === 'TIMEKEEPER' || upper.includes('TIME')) return 'TIMEKEEPER';
-  if (upper === 'FINANCE' || upper.includes('TREASURY') || upper === 'ACCOUNTANT') return 'FINANCE';
-  if (upper === 'PROJECT_MANAGER' || upper === 'PM') return 'ENGINEER';
-  if (upper === 'ENGINEER' || upper.includes('ENG') || upper.includes('SITE_ENG')) return 'ENGINEER';
-  if (upper === 'ADMIN' || upper === 'SUPERADMIN' || upper.includes('OPERAT') || upper.includes('DIRECTOR')) return 'ADMIN';
+  if (upper === 'ADMIN') return 'ADMIN';
+  if (upper === 'FINANCE') return 'FINANCE';
+  if (upper === 'ENGINEER' || upper === 'PROJECT_MANAGER' || upper === 'PM') return 'ENGINEER';
+  if (upper === 'TIMEKEEPER') return 'TIMEKEEPER';
   if (upper === 'CLIENT') return 'CLIENT';
   return null;
 }
@@ -184,18 +183,42 @@ export function requireExactRole(allowedRoles: (AllowedAppRole | Role | string)[
 
 /**
  * Checks whether the authenticated user has access to a specific project ID.
- * - ADMIN and FINANCE have global access for oversight, auditing, and corporate payroll.
- * - If user has restricted projectIds list (length > 0), they may only access projects in that list.
+ * - DENY BY DEFAULT policy: Non-administrative users with empty projectIds are denied.
+ * - ADMIN has global access for system administration.
+ * - FINANCE has access for financial auditing and payroll. If assigned specific projectIds, restricted to them.
+ * - ENGINEER, PROJECT_MANAGER, TIMEKEEPER, and CLIENT must have the projectId explicitly in their projectIds array.
  */
-export function checkUserProjectAccess(user: AuthenticatedUser | undefined, projectId: string | undefined): boolean {
-  if (!user || !projectId) return false;
-  if (user.role === 'ADMIN' || user.role === 'FINANCE') return true;
-  if (!user.projectIds || user.projectIds.length === 0) return true;
-  return user.projectIds.includes(projectId);
+export function checkUserProjectAccess(
+  user: AuthenticatedUser | undefined, 
+  projectId: string | undefined
+): boolean {
+  if (!user || !projectId || typeof projectId !== 'string') return false;
+  const cleanProjectId = projectId.trim();
+  if (!cleanProjectId) return false;
+
+  // ADMIN has global access for system administration
+  if (user.role === 'ADMIN') return true;
+
+  // FINANCE has global access for financial records unless explicitly scoped to specific projectIds
+  if (user.role === 'FINANCE') {
+    if (user.projectIds && user.projectIds.length > 0) {
+      return user.projectIds.includes(cleanProjectId);
+    }
+    return true;
+  }
+
+  // All other roles (ENGINEER, PROJECT_MANAGER, TIMEKEEPER, CLIENT):
+  // DENY BY DEFAULT if projectIds list is missing, empty, or doesn't include the target project
+  if (!user.projectIds || !Array.isArray(user.projectIds) || user.projectIds.length === 0) {
+    return false;
+  }
+
+  return user.projectIds.includes(cleanProjectId);
 }
 
 /**
  * Middleware ensuring the authenticated user has access to the requested project.
+ * Rejects missing or unauthorized project identifiers with appropriate status codes.
  */
 export function requireProjectAccess(projectIdExtractor?: (req: Request) => string | undefined) {
   return (req: Request, res: Response, next: NextFunction) => {
@@ -207,8 +230,11 @@ export function requireProjectAccess(projectIdExtractor?: (req: Request) => stri
       ? projectIdExtractor(req)
       : (req.params.projectId || req.params.id || (req.query.projectId as string) || (req.query.project_id as string) || req.body?.projectId || req.body?.project_id);
 
-    if (!projectId) {
-      return next();
+    if (!projectId || typeof projectId !== 'string' || !projectId.trim()) {
+      return res.status(400).json({
+        error: 'Bad Request: Valid project identifier is required for this operation.',
+        code: 'MISSING_PROJECT_ID'
+      });
     }
 
     if (!checkUserProjectAccess(req.user, projectId)) {

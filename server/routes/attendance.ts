@@ -5,7 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { prisma, pool } from '../db';
-import { authenticateRequest, requireRole } from '../middleware/auth';
+import { authenticateRequest, requireRole, checkUserProjectAccess } from '../middleware/auth';
 import { broadcastChange } from '../events';
 import { AttendanceStatus } from '@prisma/client';
 
@@ -35,6 +35,16 @@ attendanceRouter.get('/', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE', 'ADM
     const targetDate = date as string | undefined;
     const fromDate = (startDate || start_date) as string | undefined;
     const toDate = (endDate || end_date) as string | undefined;
+
+    if (targetProject && !checkUserProjectAccess(req.user, targetProject)) {
+      return res.status(403).json({ error: 'You do not have access to attendance records for this project.' });
+    }
+
+    if ((req.user?.role === 'TIMEKEEPER' || req.user?.role === 'ENGINEER') && !targetProject) {
+      if (!req.user.projectIds || req.user.projectIds.length === 0) {
+        return res.json([]);
+      }
+    }
 
     let query = `
       SELECT 
@@ -67,6 +77,9 @@ attendanceRouter.get('/', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE', 'ADM
     if (targetProject) {
       query += ` AND a.project_id = $${paramIndex++}`;
       params.push(targetProject);
+    } else if (req.user?.role === 'TIMEKEEPER' || req.user?.role === 'ENGINEER') {
+      query += ` AND a.project_id = ANY($${paramIndex++})`;
+      params.push(req.user.projectIds);
     }
 
     if (targetDate) {
@@ -86,7 +99,7 @@ attendanceRouter.get('/', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE', 'ADM
     query += ` ORDER BY a.date DESC, w.last_name ASC, w.first_name ASC`;
 
     const result = await pool.query(query, params);
-    const isTimekeeper = req.user?.role === 'TIMEKEEPER';
+    const canViewRates = req.user?.role === 'ADMIN' || req.user?.role === 'FINANCE';
 
     let isPeriodLocked = false;
     if (targetProject && targetDate) {
@@ -110,8 +123,8 @@ attendanceRouter.get('/', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE', 'ADM
       workerId: r.worker_id,
       workerName: `${r.first_name} ${r.last_name}`.trim(),
       position: r.position,
-      dailyRate: isTimekeeper ? undefined : Number(r.daily_rate),
-      hourlyOtRate: isTimekeeper ? undefined : Number(r.hourly_ot_rate),
+      dailyRate: canViewRates ? Number(r.daily_rate) : undefined,
+      hourlyOtRate: canViewRates ? Number(r.hourly_ot_rate) : undefined,
       loggedByUserId: r.logged_by_user_id,
       loggedByName: r.logged_by_name || 'Timekeeper',
       date: r.date,
@@ -143,6 +156,10 @@ attendanceRouter.get('/roster', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE'
 
     if (!targetProject) {
       return res.status(400).json({ error: 'Project ID is required to fetch muster roll.' });
+    }
+
+    if (!checkUserProjectAccess(req.user, targetProject)) {
+      return res.status(403).json({ error: 'You do not have access to view the muster roll for this project.' });
     }
 
     // Query active workers assigned to project_id (via direct assignment, pwa, or contractor active_project_site)
@@ -233,7 +250,7 @@ attendanceRouter.get('/roster', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE'
     `;
 
     const result = await pool.query(query, [targetProject]);
-    const isTimekeeper = req.user?.role === 'TIMEKEEPER';
+    const canViewRates = req.user?.role === 'ADMIN' || req.user?.role === 'FINANCE';
 
     // In JavaScript, guarantee exactly 1 row per unique worker ID (and guard against any duplicate names)
     const seenIds = new Set<string>();
@@ -272,8 +289,8 @@ attendanceRouter.get('/roster', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE'
         name: rawName,
         firstName: r.first_name,
         lastName: r.last_name,
-        dailyRate: isTimekeeper ? undefined : Number(r.daily_rate),
-        hourlyOtRate: isTimekeeper ? undefined : Number(r.hourly_ot_rate),
+        dailyRate: canViewRates ? Number(r.daily_rate) : undefined,
+        hourlyOtRate: canViewRates ? Number(r.hourly_ot_rate) : undefined,
         position: r.position || r.trade || 'Artisan',
         trade: r.trade || r.position || 'Artisan',
         workforceClass: 'Artisan',
@@ -310,6 +327,10 @@ attendanceRouter.post('/', requireRole(['TIMEKEEPER', 'ADMIN']), async (req: Req
 
     if (!targetProject) {
       return res.status(400).json({ error: 'Project ID is required for logging attendance.' });
+    }
+
+    if (!checkUserProjectAccess(req.user, targetProject)) {
+      return res.status(403).json({ error: 'You do not have access to log attendance for this project.' });
     }
 
     if (!Array.isArray(attendanceItems) || attendanceItems.length === 0) {
@@ -452,6 +473,11 @@ attendanceRouter.patch('/:id', requireRole(['TIMEKEEPER', 'ADMIN']), async (req:
     }
 
     const entry = existingRes.rows[0];
+
+    // Check project access for the existing entry
+    if (!checkUserProjectAccess(req.user, entry.project_id)) {
+      return res.status(403).json({ error: 'You do not have access to adjust attendance for this project.' });
+    }
 
     // Check if entry is locked
     if (entry.is_locked) {

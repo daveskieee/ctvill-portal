@@ -5,7 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { prisma, pool } from '../db';
-import { authenticateRequest, requireRole, requireExactRole } from '../middleware/auth';
+import { authenticateRequest, requireRole, requireExactRole, checkUserProjectAccess } from '../middleware/auth';
 import { broadcastChange } from '../events';
 import { computeDefaultHourlyOtRate } from '../services/payrollCalculation';
 
@@ -22,6 +22,10 @@ workersRouter.get('/', requireRole(['ADMIN', 'ENGINEER', 'TIMEKEEPER', 'FINANCE'
   try {
     const { projectId, project_id, status } = req.query;
     const targetProject = (projectId || project_id) as string | undefined;
+
+    if (targetProject && !checkUserProjectAccess(req.user, targetProject)) {
+      return res.status(403).json({ error: 'You do not have access to workers for this project.' });
+    }
 
     let query = `
       SELECT 
@@ -140,7 +144,7 @@ workersRouter.get('/', requireRole(['ADMIN', 'ENGINEER', 'TIMEKEEPER', 'FINANCE'
     query += ` GROUP BY w.id, c."employmentType", c."activeManpower", c.department, c."roleTitle", c.active_project_site ORDER BY w.position ASC, w.last_name ASC, w.first_name ASC`;
 
     const result = await pool.query(query, params);
-    const isTimekeeper = req.user?.role === 'TIMEKEEPER';
+    const canViewRates = req.user?.role === 'ADMIN' || req.user?.role === 'FINANCE';
     const seenIds = new Set<string>();
     const seenNames = new Set<string>();
     const workers: any[] = [];
@@ -164,8 +168,8 @@ workersRouter.get('/', requireRole(['ADMIN', 'ENGINEER', 'TIMEKEEPER', 'FINANCE'
         name: rawName,
         firstName: r.first_name,
         lastName: r.last_name,
-        dailyRate: isTimekeeper ? undefined : Number(r.daily_rate),
-        hourlyOtRate: isTimekeeper ? undefined : Number(r.hourly_ot_rate),
+        dailyRate: canViewRates ? Number(r.daily_rate) : undefined,
+        hourlyOtRate: canViewRates ? Number(r.hourly_ot_rate) : undefined,
         position: r.position || r.trade,
         trade: r.trade || r.position,
         workforceClass: r.workforce_class || 'Artisan',
@@ -403,6 +407,10 @@ workersRouter.post('/:id/assign', requireRole(['ADMIN', 'ENGINEER']), async (req
       return res.status(400).json({ error: 'Project ID is required.' });
     }
 
+    if (!checkUserProjectAccess(req.user, targetProject)) {
+      return res.status(403).json({ error: 'You do not have access to assign workers to this project.' });
+    }
+
     const assignId = `PWA-${targetProject.slice(-4)}-${workerId.slice(-4)}`;
 
     await pool.query(`
@@ -427,6 +435,11 @@ workersRouter.post('/:id/assign', requireRole(['ADMIN', 'ENGINEER']), async (req
 workersRouter.delete('/:id/assign/:projectId', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id: workerId, projectId } = req.params;
+
+    if (!checkUserProjectAccess(req.user, projectId)) {
+      return res.status(403).json({ error: 'You do not have access to unassign workers from this project.' });
+    }
+
     await pool.query(
       `DELETE FROM project_worker_assignments WHERE worker_id = $1 AND project_id = $2`,
       [workerId, projectId]
@@ -525,6 +538,10 @@ workersRouter.post('/cash-advances', requireExactRole(['FINANCE']), async (req: 
       return res.status(400).json({
         error: 'project_id, worker_id, and positive amount (> 0) are required.'
       });
+    }
+
+    if (!checkUserProjectAccess(req.user, targetProject)) {
+      return res.status(403).json({ error: 'You do not have access to issue cash advances for this project.' });
     }
 
     const dateVal = dateIssued || date_issued || new Date().toISOString().split('T')[0];

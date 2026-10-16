@@ -79,7 +79,15 @@ export function preventSensitiveFileExposure(req: Request, res: Response, next: 
 }
 
 /**
- * Lightweight, zero-dependency in-memory rate limiter
+ * Lightweight, zero-dependency in-memory rate limiter.
+ *
+ * NOTE FOR MULTI-INSTANCE CLUSTER DEPLOYMENTS:
+ * This limiter maintains an in-memory sliding window bucket per Node.js process.
+ * In a multi-instance or horizontal autoscaling environment (e.g. multiple Kubernetes pods
+ * or serverless instances), each instance maintains its own memory bucket. For high-availability
+ * clustering, an external distributed store like Redis (or a PostgreSQL rate-limit table)
+ * is recommended. For single-instance or vertical deployments, this provides low-latency,
+ * zero-dependency DDoS and brute-force mitigation without external infrastructure.
  */
 interface RateLimitBucket {
   count: number;
@@ -90,8 +98,9 @@ export function createRateLimiter(options: {
   windowMs: number;
   max: number;
   message?: string;
+  skip?: (req: Request) => boolean;
 }) {
-  const { windowMs, max, message } = options;
+  const { windowMs, max, message, skip } = options;
   const store = new Map<string, RateLimitBucket>();
 
   // Cleanup every 5 minutes
@@ -105,13 +114,13 @@ export function createRateLimiter(options: {
   }, 5 * 60 * 1000);
 
   return (req: Request, res: Response, next: NextFunction) => {
-    // Skip rate limiting during test executions to prevent false 429 failures across assertion suites
-    if (process.env.NODE_ENV === 'test') {
+    if (skip && skip(req)) {
       return next();
     }
 
-    // Key by IP address
-    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+    // Use Express's properly resolved client IP (computed based on app.set('trust proxy'))
+    // rather than blindly trusting the raw X-Forwarded-For header which can be spoofed by public clients.
+    const ip = req.ip || req.socket.remoteAddress || 'unknown';
     const now = Date.now();
     let bucket = store.get(ip);
 

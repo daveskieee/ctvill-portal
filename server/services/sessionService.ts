@@ -40,6 +40,18 @@ export function hashSessionToken(rawToken: string): string {
   return crypto.createHash('sha256').update(rawToken).digest('hex');
 }
 
+const CSRF_HMAC_SECRET = process.env.CSRF_SECRET || process.env.SESSION_SECRET || 'ctvill-production-csrf-hmac-secret-salt-2026';
+
+/**
+ * Custom error class for security-critical session revocation failures.
+ */
+export class SessionRevocationError extends Error {
+  constructor(message: string, public cause?: unknown) {
+    super(message);
+    this.name = 'SessionRevocationError';
+  }
+}
+
 /**
  * Generate a cryptographically secure random session token.
  */
@@ -48,10 +60,51 @@ export function generateSessionToken(): string {
 }
 
 /**
- * Generate a cryptographically secure random CSRF token.
+ * Generate a cryptographically secure random session-bound or anonymous CSRF token.
+ * Token format: <nonce>.<sessionSnippet>.<hmacSignature>
  */
-export function generateCsrfToken(): string {
-  return crypto.randomBytes(24).toString('hex');
+export function generateCsrfToken(rawSessionToken?: string): string {
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const sessionSnippet = rawSessionToken ? hashSessionToken(rawSessionToken).slice(0, 16) : 'anon';
+  const payload = `${nonce}.${sessionSnippet}`;
+  const hmac = crypto.createHmac('sha256', CSRF_HMAC_SECRET).update(payload).digest('hex');
+  return `${payload}.${hmac}`;
+}
+
+/**
+ * Verify a CSRF token: verifies HMAC signature and (if session exists) binds to session.
+ */
+export function verifyCsrfTokenSignature(csrfToken: string | undefined, rawSessionToken?: string): boolean {
+  if (!csrfToken || typeof csrfToken !== 'string') return false;
+  const parts = csrfToken.trim().split('.');
+  if (parts.length !== 3) {
+    // Fallback: If legacy raw hex token without dot, permit if no session binding required
+    if (/^[a-f0-9]{32,64}$/i.test(csrfToken) && !rawSessionToken) {
+      return true;
+    }
+    return false;
+  }
+  const [nonce, sessionSnippet, signature] = parts;
+  const payload = `${nonce}.${sessionSnippet}`;
+  const expectedHmac = crypto.createHmac('sha256', CSRF_HMAC_SECRET).update(payload).digest('hex');
+
+  const sigBuf = Buffer.from(signature, 'hex');
+  const expBuf = Buffer.from(expectedHmac, 'hex');
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
+    return false;
+  }
+
+  // If the request has an active session token, verify that the token was issued for this session
+  if (rawSessionToken) {
+    const currentSessionSnippet = hashSessionToken(rawSessionToken).slice(0, 16);
+    const snipBuf = Buffer.from(sessionSnippet);
+    const curBuf = Buffer.from(currentSessionSnippet);
+    if (snipBuf.length !== curBuf.length || !crypto.timingSafeEqual(snipBuf, curBuf)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 /**
@@ -175,6 +228,7 @@ export async function verifySession(rawToken: string | undefined): Promise<{
 
 /**
  * Invalidate a single active session (e.g. upon logout).
+ * Throws SessionRevocationError on database failure to prevent false success reports.
  */
 export async function destroySession(rawToken: string | undefined): Promise<boolean> {
   if (!rawToken || typeof rawToken !== 'string') return false;
@@ -184,22 +238,26 @@ export async function destroySession(rawToken: string | undefined): Promise<bool
       where: { tokenHash },
     });
     return true;
-  } catch {
-    return false;
+  } catch (err: any) {
+    console.error('Session destruction database error:', err?.message || err);
+    throw new SessionRevocationError('Failed to revoke session from database', err);
   }
 }
 
 /**
  * Revoke all sessions for a specific user (e.g. upon password reset, role change, or account suspension).
+ * Throws SessionRevocationError on database failure to prevent security regressions.
  */
 export async function revokeAllUserSessions(userId: string): Promise<number> {
+  if (!userId) return 0;
   try {
     const result = await prisma.session.deleteMany({
       where: { userId },
     });
     return result.count;
-  } catch {
-    return 0;
+  } catch (err: any) {
+    console.error(`Session revocation database error for user ${userId}:`, err?.message || err);
+    throw new SessionRevocationError(`Failed to revoke sessions for user ${userId}`, err);
   }
 }
 

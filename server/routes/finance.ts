@@ -17,15 +17,20 @@ financeRouter.use((req: Request, res: Response, next) => {
   if (req.path === '/quotations/submit') {
     return next();
   }
-  return requireAuth(req, res, next);
+  const financePaths = ['/quotations', '/finance', '/payments', '/subcontractor-payables', '/extended-payroll', '/payroll-records'];
+  const matches = financePaths.some(p => req.path === p || req.path.startsWith(`${p}/`));
+  if (matches) {
+    return requireAuth(req, res, next);
+  }
+  return next();
 });
 
 // ============================================================================
 // COMMERCIAL FIT-OUT QUOTATIONS & CRM LEADS
 // ============================================================================
 
-// GET /api/quotations
-financeRouter.get('/quotations', async (req: Request, res: Response) => {
+// GET /api/quotations — Allowed: FINANCE, ADMIN, ENGINEER
+financeRouter.get('/quotations', requireRole(['FINANCE', 'ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const dbQuotationsRes = await pool.query('SELECT * FROM fitout_quotations ORDER BY created_at DESC');
     const quotations = (dbQuotationsRes.rows || []).map((q: any) => ({
@@ -51,8 +56,8 @@ financeRouter.get('/quotations', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/quotations
-financeRouter.post('/quotations', async (req: Request, res: Response) => {
+// POST /api/quotations — Allowed: FINANCE, ADMIN, ENGINEER
+financeRouter.post('/quotations', requireRole(['FINANCE', 'ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const {
     id, clientName, clientEmail, clientPhone, projectScope,
     estimatedCost, estimatedWeeks, estimatorArea,
@@ -170,7 +175,7 @@ financeRouter.post('/quotations/submit', async (req: Request, res: Response) => 
 });
 
 // PATCH /api/quotations/:id
-financeRouter.patch('/quotations/:id', async (req: Request, res: Response) => {
+financeRouter.patch('/quotations/:id', requireRole(['FINANCE', 'ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { status, projectNotes } = req.body;
@@ -197,7 +202,7 @@ financeRouter.patch('/quotations/:id', async (req: Request, res: Response) => {
 });
 
 // POST /api/quotations/:id/convert-to-project
-financeRouter.post('/quotations/:id/convert-to-project', async (req: Request, res: Response) => {
+financeRouter.post('/quotations/:id/convert-to-project', requireRole(['ADMIN', 'FINANCE']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const qRes = await pool.query('SELECT * FROM fitout_quotations WHERE id = $1', [id]);
@@ -225,6 +230,22 @@ financeRouter.post('/quotations/:id/convert-to-project', async (req: Request, re
       handoverDate
     ]);
 
+    // Explicitly grant the creator access to the newly created project
+    if (req.user && req.user.id) {
+      try {
+        const creator = await prisma.user.findUnique({ where: { id: req.user.id } });
+        if (creator) {
+          const updatedProjects = Array.from(new Set([...(creator.projectIds || []), newProjId]));
+          await prisma.user.update({
+            where: { id: req.user.id },
+            data: { projectIds: updatedProjects }
+          });
+        }
+      } catch (assignErr) {
+        console.warn('Could not auto-assign converted project to creator:', assignErr);
+      }
+    }
+
     await pool.query('UPDATE fitout_quotations SET status = $1, converted_project_id = $2 WHERE id = $3', ['CONVERTED', newProjId, id]);
     broadcastChange('quotations');
     broadcastChange('projects');
@@ -246,7 +267,7 @@ financeRouter.post('/quotations/:id/convert-to-project', async (req: Request, re
 // ============================================================================
 
 // GET /api/extended-payroll
-financeRouter.get('/extended-payroll', async (req: Request, res: Response) => {
+financeRouter.get('/extended-payroll', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const dbRows = await pool.query('SELECT * FROM extended_payroll ORDER BY created_at DESC');
     const records = (dbRows.rows || []).map(p => ({
@@ -274,7 +295,7 @@ financeRouter.get('/extended-payroll', async (req: Request, res: Response) => {
 });
 
 // POST /api/extended-payroll
-financeRouter.post('/extended-payroll', async (req: Request, res: Response) => {
+financeRouter.post('/extended-payroll', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const {
       workerName,
@@ -328,7 +349,7 @@ financeRouter.post('/extended-payroll', async (req: Request, res: Response) => {
 });
 
 // PATCH /api/extended-payroll/:id
-financeRouter.patch('/extended-payroll/:id', async (req: Request, res: Response) => {
+financeRouter.patch('/extended-payroll/:id', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const {
@@ -373,7 +394,7 @@ financeRouter.patch('/extended-payroll/:id', async (req: Request, res: Response)
 });
 
 // DELETE /api/extended-payroll/:id
-financeRouter.delete('/extended-payroll/:id', async (req: Request, res: Response) => {
+financeRouter.delete('/extended-payroll/:id', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await pool.query('DELETE FROM extended_payroll WHERE id = $1', [id]);
@@ -390,7 +411,7 @@ financeRouter.delete('/extended-payroll/:id', async (req: Request, res: Response
 // ============================================================================
 
 // GET /api/payroll-records
-financeRouter.get('/payroll-records', async (req: Request, res: Response) => {
+financeRouter.get('/payroll-records', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const dbPayroll = await prisma.payrollRecord.findMany({
       orderBy: { date: 'desc' }
@@ -609,7 +630,7 @@ financeRouter.post('/payments/record', requireRole(['FINANCE', 'ADMIN']), async 
 });
 
 // POST /api/payments/installment
-financeRouter.post('/payments/installment', async (req: Request, res: Response) => {
+financeRouter.post('/payments/installment', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const { clientId, clientName, amount, dueDate, projectName } = req.body;
     if (!amount) {
@@ -680,8 +701,8 @@ financeRouter.post('/payments/installment', async (req: Request, res: Response) 
         entityType: 'PAYMENT',
         entityId: ledger.id,
         action: 'INVOICE_GENERATED',
-        actorName: 'Finance Department',
-        actorRole: 'ADMIN',
+        actorName: (req as any).user?.name || 'Finance Department',
+        actorRole: (req as any).user?.role || 'FINANCE',
         details: `Created invoice / progress installment of ₱${Number(amount).toLocaleString()} for ${user!.name} (Due: ${due.toISOString().split('T')[0]}).`,
       }
     }).catch(() => {});
@@ -696,7 +717,7 @@ financeRouter.post('/payments/installment', async (req: Request, res: Response) 
 });
 
 // PATCH /api/payments/installment/:id
-financeRouter.patch('/payments/installment/:id', async (req: Request, res: Response) => {
+financeRouter.patch('/payments/installment/:id', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { status, amountPaid, paymentDate } = req.body;
@@ -725,7 +746,7 @@ financeRouter.patch('/payments/installment/:id', async (req: Request, res: Respo
 });
 
 // DELETE /api/payments/installment/:id
-financeRouter.delete('/payments/installment/:id', async (req: Request, res: Response) => {
+financeRouter.delete('/payments/installment/:id', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await prisma.installmentLedger.delete({ where: { id } });
@@ -801,7 +822,7 @@ const formatToISODateString = (val: any): string | null => {
 };
 
 // GET /api/subcontractor-payables
-financeRouter.get('/subcontractor-payables', async (req: Request, res: Response) => {
+financeRouter.get('/subcontractor-payables', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     await ensureSubcontractorPayablesTable();
     const result = await pool.query(
@@ -837,7 +858,7 @@ financeRouter.get('/subcontractor-payables', async (req: Request, res: Response)
 });
 
 // POST /api/subcontractor-payables  - Create new disbursement record
-financeRouter.post('/subcontractor-payables', async (req: Request, res: Response) => {
+financeRouter.post('/subcontractor-payables', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const {
       payeeContractorId, payeeContractorName, tradeSpecialty, projectSite,
@@ -919,7 +940,7 @@ financeRouter.post('/subcontractor-payables', async (req: Request, res: Response
 });
 
 // PATCH /api/subcontractor-payables/:id  - Update status / disburse
-financeRouter.patch('/subcontractor-payables/:id', async (req: Request, res: Response) => {
+financeRouter.patch('/subcontractor-payables/:id', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const {

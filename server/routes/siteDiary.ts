@@ -7,12 +7,19 @@ import { Router, Request, Response } from 'express';
 import { Role } from '@prisma/client';
 import { prisma, pool } from '../db';
 import { broadcastChange, invalidateAllDataCache } from '../events';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireRole } from '../middleware/auth';
 
 export const siteDiaryRouter = Router();
 
 // Apply authentication to site diary endpoints
-siteDiaryRouter.use(requireAuth);
+siteDiaryRouter.use((req: Request, res: Response, next) => {
+  const diaryPaths = ['/site-logs', '/weather', '/punch-lists', '/civil-milestones', '/civil-works', '/qa-logs'];
+  const matches = diaryPaths.some(p => req.path === p || req.path.startsWith(`${p}/`));
+  if (matches) {
+    return requireAuth(req, res, next);
+  }
+  return next();
+});
 
 // ============================================================================
 // DAILY SITE LOGS (WEATHER, EQUIPMENT, CREW, SAFETY & TOOLBOX)
@@ -30,7 +37,7 @@ siteDiaryRouter.get('/site-logs', async (req: Request, res: Response) => {
 });
 
 // POST /api/site-logs
-siteDiaryRouter.post('/site-logs', async (req: Request, res: Response) => {
+siteDiaryRouter.post('/site-logs', requireRole(['ADMIN', 'ENGINEER', 'TIMEKEEPER']), async (req: Request, res: Response) => {
   const { weather, temperature, activeHeadcount, equipmentOnSite, toolboxTopic, workCompleted, delaysOrIssues, supervisorName } = req.body;
   try {
     const siteLog = await prisma.dailySiteLog.create({
@@ -235,7 +242,7 @@ siteDiaryRouter.get('/punch-lists', async (req: Request, res: Response) => {
 });
 
 // POST /api/punch-lists
-siteDiaryRouter.post('/punch-lists', async (req: Request, res: Response) => {
+siteDiaryRouter.post('/punch-lists', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { slotId, inspectorId, contractorId, title, description, severity, category, targetDate } = req.body;
   try {
     const projectManager = await prisma.user.findFirst({
@@ -295,7 +302,7 @@ siteDiaryRouter.post('/punch-lists', async (req: Request, res: Response) => {
 });
 
 // PATCH /api/punch-lists/:id
-siteDiaryRouter.patch('/punch-lists/:id', async (req: Request, res: Response) => {
+siteDiaryRouter.patch('/punch-lists/:id', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status, resolutionNotes, contractorId, actorName, actorRole } = req.body;
   try {
@@ -376,7 +383,7 @@ siteDiaryRouter.get('/civil-milestones', async (req: Request, res: Response) => 
 });
 
 // POST /api/civil-works/update-milestone
-siteDiaryRouter.post('/civil-works/update-milestone', async (req: Request, res: Response) => {
+siteDiaryRouter.post('/civil-works/update-milestone', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { milestoneId, currentPercentage, status, inspectorSignOff, remarks, actorName } = req.body;
   try {
     const updateData: any = {};
@@ -425,7 +432,7 @@ siteDiaryRouter.post('/civil-works/update-milestone', async (req: Request, res: 
 });
 
 // POST /api/civil-works/sync-schedule
-siteDiaryRouter.post('/civil-works/sync-schedule', async (req: Request, res: Response) => {
+siteDiaryRouter.post('/civil-works/sync-schedule', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { tasks } = req.body;
   try {
     if (!Array.isArray(tasks) || tasks.length === 0) {
@@ -523,7 +530,7 @@ siteDiaryRouter.post('/civil-works/sync-schedule', async (req: Request, res: Res
 });
 
 // POST /api/qa-logs
-siteDiaryRouter.post('/qa-logs', async (req: Request, res: Response) => {
+siteDiaryRouter.post('/qa-logs', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { slotId, complianceStatus, progressPercentage, structuralCheck, safetyCheck, remarks, siteActivity } = req.body;
   try {
     const projectManager = await prisma.user.findFirst({

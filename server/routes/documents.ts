@@ -6,12 +6,19 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db';
 import { broadcastChange } from '../events';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireRole } from '../middleware/auth';
 
 export const documentsRouter = Router();
 
 // Apply authentication on documents router
-documentsRouter.use(requireAuth);
+documentsRouter.use((req: Request, res: Response, next) => {
+  const docPaths = ['/documents'];
+  const matches = docPaths.some(p => req.path === p || req.path.startsWith(`${p}/`));
+  if (matches) {
+    return requireAuth(req, res, next);
+  }
+  return next();
+});
 
 export const SEED_DOCUMENTS = [
   {
@@ -118,7 +125,7 @@ documentsRouter.get('/', async (req: Request, res: Response) => {
 });
 
 // POST /api/documents
-documentsRouter.post('/documents', async (req: Request, res: Response) => {
+documentsRouter.post('/documents', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { title, category, fileUrl, fileSize, version, status, uploadedBy, notes } = req.body;
   try {
     const doc = await prisma.projectDocument.create({
@@ -142,7 +149,7 @@ documentsRouter.post('/documents', async (req: Request, res: Response) => {
   }
 });
 
-documentsRouter.post('/', async (req: Request, res: Response) => {
+documentsRouter.post('/', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { title, category, fileUrl, fileSize, version, status, notes } = req.body;
   try {
     const doc = await prisma.projectDocument.create({

@@ -40,6 +40,12 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Configure explicit trusted proxy resolution to prevent X-Forwarded-For spoofing
+const trustProxySetting = process.env.TRUST_PROXY 
+  ? (process.env.TRUST_PROXY === 'true' ? true : process.env.TRUST_PROXY === 'false' ? false : process.env.TRUST_PROXY)
+  : (process.env.NODE_ENV === 'production' ? 'loopback' : false);
+app.set('trust proxy', trustProxySetting);
+
 // 1. Security Headers (OWASP recommendations)
 app.use(securityHeadersMiddleware);
 
@@ -83,9 +89,10 @@ initializeDatabaseTables().catch(err => {
 });
 
 // Periodic session cleanup (every 1 hour)
-setInterval(() => {
+const sessionCleanupTimer = setInterval(() => {
   cleanupExpiredSessions().catch(() => {});
 }, 60 * 60 * 1000);
+sessionCleanupTimer.unref();
 
 // ============================================================================
 // MOUNT MODULAR DOMAIN ROUTERS
@@ -131,9 +138,21 @@ app.get('*', (req, res, next) => {
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Unhandled server error:', err?.message || err);
   if (res.headersSent) return;
-  res.status(500).json({ error: 'An unexpected internal server error occurred.' });
+  res.status(500).json({ error: 'Internal Server Error' });
 });
 
-app.listen(Number(PORT), '0.0.0.0', () => {
-  console.log(`[CTVill ERP Server] Running on http://0.0.0.0:${PORT}`);
-});
+const isDirectExecution = process.argv[1] && (
+  process.argv[1].endsWith('server.ts') || 
+  process.argv[1].endsWith('server.js')
+);
+
+if (process.env.NODE_ENV !== 'test' && isDirectExecution) {
+  app.listen(Number(PORT), '0.0.0.0', () => {
+    console.log(`[CTVill ERP Server] Running on http://0.0.0.0:${PORT}`);
+  });
+}
+
+export { app };
+export function createApp() {
+  return app;
+}

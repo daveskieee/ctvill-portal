@@ -7,7 +7,7 @@ import { Router, Request, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { prisma, pool } from '../db';
 import { broadcastChange, invalidateAllDataCache } from '../events';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireRole, checkUserProjectAccess } from '../middleware/auth';
 
 export const workforceRouter = Router();
 
@@ -117,6 +117,8 @@ workforceRouter.get('/contractors-list', async (req: Request, res: Response) => 
     const presencesRes = await pool.query('SELECT id, active_presence, status FROM contractors').catch(() => ({ rows: [] }));
     const presenceMap = new Map((presencesRes.rows || []).map((r: any) => [r.id, r.active_presence || r.status]));
 
+    const canViewFinancials = req.user?.role === 'ADMIN' || req.user?.role === 'FINANCE';
+
     const contractors = dbContractors.map(c => {
       const rawP = presenceMap.get(c.id) || (c as any).status || 'ACTIVE';
       const activePresence = (rawP === 'BREAK' || rawP === 'ON_BREAK') ? 'BREAK'
@@ -164,16 +166,16 @@ workforceRouter.get('/contractors-list', async (req: Request, res: Response) => 
         activeProjectSite: c.activeProjectSite || null,
         assignedZone: c.assignedZone || null,
         avatar: (c as any).avatar || null,
-        contractAmount: Number(c.contractAmount || 0),
-        paidAmount: Number(c.paidAmount || 0),
+        contractAmount: canViewFinancials ? Number(c.contractAmount || 0) : undefined,
+        paidAmount: canViewFinancials ? Number(c.paidAmount || 0) : undefined,
         activeManpower: c.activeManpower,
         milestoneProgress: c.milestoneProgress,
         rating: c.rating || 0,
         employmentType: (c as any).employmentType || 'INTERNAL',
         department: (c as any).department || null,
         roleTitle: (c as any).roleTitle || null,
-        dailyRate: (c as any).dailyRate !== null && (c as any).dailyRate !== undefined ? Number((c as any).dailyRate) : null,
-        monthlySalary: (c as any).monthlySalary !== null && (c as any).monthlySalary !== undefined ? Number((c as any).monthlySalary) : null,
+        dailyRate: canViewFinancials && (c as any).dailyRate !== null && (c as any).dailyRate !== undefined ? Number((c as any).dailyRate) : undefined,
+        monthlySalary: canViewFinancials && (c as any).monthlySalary !== null && (c as any).monthlySalary !== undefined ? Number((c as any).monthlySalary) : undefined,
         status: (c as any).status || 'ACTIVE',
         activePresence,
         workforce_class: workforceClass,
@@ -188,7 +190,7 @@ workforceRouter.get('/contractors-list', async (req: Request, res: Response) => 
 });
 
 // POST /api/contractors
-workforceRouter.post('/contractors', async (req: Request, res: Response) => {
+workforceRouter.post('/contractors', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const {
       id,
@@ -313,7 +315,7 @@ workforceRouter.post('/contractors', async (req: Request, res: Response) => {
 });
 
 // POST /api/contractors/update-progress
-workforceRouter.post('/contractors/update-progress', async (req: Request, res: Response) => {
+workforceRouter.post('/contractors/update-progress', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { contractors } = req.body;
     if (Array.isArray(contractors)) {
@@ -347,7 +349,7 @@ workforceRouter.post('/contractors/update-progress', async (req: Request, res: R
 });
 
 // PUT /api/contractors/:id
-workforceRouter.put('/contractors/:id', async (req: Request, res: Response) => {
+workforceRouter.put('/contractors/:id', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const data = req.body;
@@ -474,7 +476,7 @@ workforceRouter.put('/contractors/:id', async (req: Request, res: Response) => {
 });
 
 // DELETE /api/contractors/:id
-workforceRouter.delete('/contractors/:id', async (req: Request, res: Response) => {
+workforceRouter.delete('/contractors/:id', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     await prisma.punchListDefect.updateMany({
@@ -527,7 +529,7 @@ workforceRouter.get('/labor-allocations', async (req: Request, res: Response) =>
 });
 
 // POST /api/labor-allocations
-workforceRouter.post('/labor-allocations', async (req: Request, res: Response) => {
+workforceRouter.post('/labor-allocations', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id, contractorId, contractorName, sectorName, targetLots, assignedHeadcount, workScope, status, notes } = req.body;
     const allocId = id || `ALLOC-${Date.now()}`;
@@ -632,7 +634,7 @@ workforceRouter.get('/ai-recommendations', async (req: Request, res: Response) =
 });
 
 // POST /api/labor-allocations/apply-ai-rec
-workforceRouter.post('/labor-allocations/apply-ai-rec', async (req: Request, res: Response) => {
+workforceRouter.post('/labor-allocations/apply-ai-rec', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { recId } = req.body;
     const recRes = await pool.query('SELECT * FROM ai_manpower_recommendations WHERE id = $1', [recId]);
@@ -704,7 +706,7 @@ workforceRouter.post('/labor-allocations/apply-ai-rec', async (req: Request, res
 });
 
 // POST /api/ai-recommendations/dismiss
-workforceRouter.post('/ai-recommendations/dismiss', async (req: Request, res: Response) => {
+workforceRouter.post('/ai-recommendations/dismiss', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { recId, reason } = req.body;
     const recRes = await pool.query('SELECT * FROM ai_manpower_recommendations WHERE id = $1', [recId]);
@@ -739,7 +741,7 @@ workforceRouter.post('/ai-recommendations/dismiss', async (req: Request, res: Re
 });
 
 // POST /api/ai-recommendations/scan
-workforceRouter.post('/ai-recommendations/scan', async (req: Request, res: Response) => {
+workforceRouter.post('/ai-recommendations/scan', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     // Ensure category_tag column exists
     await pool.query('ALTER TABLE ai_manpower_recommendations ADD COLUMN IF NOT EXISTS category_tag TEXT;').catch(() => {});
@@ -1027,7 +1029,7 @@ workforceRouter.get('/manpower-audits', handleGetManpowerAudits);
 workforceRouter.get('/subcontractor-audits', handleGetManpowerAudits);
 
 // POST /api/manpower-audits
-workforceRouter.post('/manpower-audits', async (req: Request, res: Response) => {
+workforceRouter.post('/manpower-audits', requireRole(['ENGINEER', 'ADMIN', 'TIMEKEEPER']), async (req: Request, res: Response) => {
   try {
     const {
       contractorId,
@@ -1163,11 +1165,15 @@ workforceRouter.get('/workforce/reallocation-suggestions', async (req: Request, 
 });
 
 // POST /api/workforce/reallocate
-workforceRouter.post('/workforce/reallocate', async (req: Request, res: Response) => {
+workforceRouter.post('/workforce/reallocate', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { workerId, targetProjectId, targetProjectName } = req.body;
     if (!workerId || !targetProjectName) {
       return res.status(400).json({ error: 'workerId and targetProjectName are required' });
+    }
+
+    if (targetProjectId && !checkUserProjectAccess(req.user, targetProjectId)) {
+      return res.status(403).json({ error: 'You do not have access to reallocate workforce to this target project.' });
     }
 
     const worker = await prisma.contractor.findUnique({ where: { id: workerId } });
@@ -1197,8 +1203,8 @@ workforceRouter.post('/workforce/reallocate', async (req: Request, res: Response
         entityType: 'CONTRACTOR',
         entityId: workerId,
         action: 'WORKFORCE_REALLOCATED',
-        actorName: 'Operations Director',
-        actorRole: 'ADMIN',
+        actorName: (req as any).user?.name || 'Operations Director',
+        actorRole: (req as any).user?.role || 'ADMIN',
         details: `Reallocated ${worker.name} (${worker.roleTitle || worker.specialty}) from "${originSite}" to "${targetProjectName}".`,
       }
     }).catch(() => {});

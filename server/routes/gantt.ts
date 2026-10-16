@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { broadcastChange, invalidateAllDataCache } from '../events';
-import { requireAuth, checkUserProjectAccess } from '../middleware/auth';
+import { requireAuth, requireRole, checkUserProjectAccess } from '../middleware/auth';
 
 export function createGanttRouter(prisma: PrismaClient) {
   const router = Router();
@@ -117,7 +117,7 @@ export function createGanttRouter(prisma: PrismaClient) {
    * 1. Granular events: { action: 'create' | 'update' | 'delete', entityType: 'task' | 'link', data: any }
    * 2. Batch payload: { tasks: [...], links: [...], deletedTaskIds: [...], deletedLinkIds: [...] }
    */
-  router.post('/:projectId/gantt/sync', async (req: Request, res: Response) => {
+  router.post('/:projectId/gantt/sync', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
     try {
       const { projectId } = req.params;
       const { action, entityType, data, tasks = [], links = [], deletedTaskIds = [], deletedLinkIds = [] } = req.body;

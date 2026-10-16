@@ -5,7 +5,7 @@
 
 import { Router, Request, Response } from 'express';
 import { prisma, pool } from '../db';
-import { authenticateRequest, requireRole, requireExactRole } from '../middleware/auth';
+import { authenticateRequest, requireRole, requireExactRole, checkUserProjectAccess } from '../middleware/auth';
 import { broadcastChange } from '../events';
 import { 
   calculateProjectPayrollRun, 
@@ -68,6 +68,16 @@ payrollRouter.get('/runs', requireRole(['FINANCE', 'ADMIN', 'ENGINEER']), async 
     const { projectId, project_id } = req.query;
     const targetProject = (projectId || project_id) as string | undefined;
 
+    if (targetProject && !checkUserProjectAccess(req.user, targetProject)) {
+      return res.status(403).json({ error: 'You do not have access to this project payroll records.' });
+    }
+
+    if (req.user?.role === 'ENGINEER') {
+      if (!req.user.projectIds || req.user.projectIds.length === 0) {
+        return res.json([]);
+      }
+    }
+
     let query = `
       SELECT 
         pr.id,
@@ -93,6 +103,9 @@ payrollRouter.get('/runs', requireRole(['FINANCE', 'ADMIN', 'ENGINEER']), async 
     if (targetProject) {
       query += ` WHERE pr.project_id = $1`;
       params.push(targetProject);
+    } else if (req.user?.role === 'ENGINEER') {
+      query += ` WHERE pr.project_id = ANY($1)`;
+      params.push(req.user.projectIds);
     }
     query += ` GROUP BY pr.id, p.name, p.client_name, u.name ORDER BY pr.created_at DESC`;
 
@@ -148,6 +161,10 @@ payrollRouter.get('/runs/:id', requireRole(['FINANCE', 'ADMIN', 'ENGINEER']), as
     }
 
     const run = runRes.rows[0];
+
+    if (!checkUserProjectAccess(req.user, run.project_id)) {
+      return res.status(403).json({ error: 'You do not have access to this project payroll run.' });
+    }
 
     const itemsRes = await pool.query(`
       SELECT 
@@ -229,6 +246,10 @@ const handleCalculateDraft = async (req: Request, res: Response) => {
       return res.status(400).json({
         error: 'project_id, period_start, and period_end are required to calculate payroll.'
       });
+    }
+
+    if (!checkUserProjectAccess(req.user, targetProject)) {
+      return res.status(403).json({ error: 'You do not have access to calculate payroll for this project.' });
     }
 
     // Strict Cycle Date Bounds Query Definition
@@ -406,6 +427,10 @@ payrollRouter.post('/finalize', requireExactRole(['FINANCE']), async (req: Reque
       return res.status(400).json({
         error: 'project_id, period_start, and period_end are required to finalize payroll.'
       });
+    }
+
+    if (!checkUserProjectAccess(req.user, targetProject)) {
+      return res.status(403).json({ error: 'You do not have access to finalize payroll for this project.' });
     }
 
     // Strict Cycle Date Bounds Query Definition
@@ -629,6 +654,10 @@ payrollRouter.get('/:id/export', requireRole(['FINANCE', 'ADMIN', 'ENGINEER']), 
     }
 
     const run = runRes.rows[0];
+
+    if (!checkUserProjectAccess(req.user, run.project_id)) {
+      return res.status(403).json({ error: 'You do not have access to export payroll for this project.' });
+    }
 
     const itemsRes = await pool.query(`
       SELECT 

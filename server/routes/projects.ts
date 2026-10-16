@@ -12,7 +12,14 @@ import { requireAuth, requireRole, checkUserProjectAccess } from '../middleware/
 export const projectsRouter = Router();
 
 // Apply base authentication on all project management endpoints
-projectsRouter.use(requireAuth);
+projectsRouter.use((req: Request, res: Response, next) => {
+  const projectPaths = ['/projects', '/tasks', '/geocoding', '/risks', '/tasks-list'];
+  const matches = projectPaths.some(p => req.path === p || req.path.startsWith(`${p}/`));
+  if (matches) {
+    return requireAuth(req, res, next);
+  }
+  return next();
+});
 
 // ============================================================================
 // COMMERCIAL PROJECTS REST API
@@ -34,7 +41,10 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
   try {
     let dbProjectsQuery = 'SELECT * FROM commercial_projects ORDER BY created_at ASC';
     const params: any[] = [];
-    if (req.user?.role !== 'ADMIN' && req.user?.role !== 'FINANCE' && req.user?.projectIds && req.user.projectIds.length > 0) {
+    if (req.user?.role !== 'ADMIN' && req.user?.role !== 'FINANCE') {
+      if (!req.user?.projectIds || req.user.projectIds.length === 0) {
+        return res.json([]);
+      }
       dbProjectsQuery = 'SELECT * FROM commercial_projects WHERE id = ANY($1) ORDER BY created_at ASC';
       params.push(req.user.projectIds);
     }
@@ -175,6 +185,18 @@ projectsRouter.post('/projects', requireRole(['ADMIN', 'ENGINEER']), async (req:
     broadcastChange('auditLogs');
     invalidateAllDataCache();
 
+    // If created by an Engineer / Project Manager, automatically assign creator to the project
+    if (req.user && req.user.role !== 'ADMIN') {
+      await prisma.user.update({
+        where: { id: req.user.id },
+        data: {
+          projectIds: { push: id }
+        }
+      }).catch(err => console.warn('Could not auto-assign project to creator:', err));
+      if (!req.user.projectIds) req.user.projectIds = [];
+      if (!req.user.projectIds.includes(id)) req.user.projectIds.push(id);
+    }
+
     const pRes = await pool.query('SELECT * FROM commercial_projects WHERE id = $1', [id]);
     const p = pRes.rows[0] || {};
     const createdProject = {
@@ -208,8 +230,8 @@ projectsRouter.post('/projects', requireRole(['ADMIN', 'ENGINEER']), async (req:
   }
 });
 
-// PATCH /api/projects/:id
-projectsRouter.patch('/projects/:id', async (req: Request, res: Response) => {
+// PATCH /api/projects/:id — Restricted to ADMIN and ENGINEER
+projectsRouter.patch('/projects/:id', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     if (!checkUserProjectAccess(req.user, id)) {
@@ -321,8 +343,8 @@ projectsRouter.patch('/projects/:id', async (req: Request, res: Response) => {
   }
 });
 
-// PUT /api/projects/:id/workers — Add or remove a worker from a project
-projectsRouter.put('/projects/:id/workers', async (req: Request, res: Response) => {
+// PUT /api/projects/:id/workers — Add or remove a worker from a project (ADMIN and ENGINEER)
+projectsRouter.put('/projects/:id/workers', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id: projectId } = req.params;
     if (!checkUserProjectAccess(req.user, projectId)) {
@@ -407,8 +429,8 @@ projectsRouter.put('/projects/:id/workers', async (req: Request, res: Response) 
   }
 });
 
-// PATCH /api/projects/:id/weather-suspension
-projectsRouter.patch('/projects/:id/weather-suspension', async (req: Request, res: Response) => {
+// PATCH /api/projects/:id/weather-suspension (ADMIN and ENGINEER)
+projectsRouter.patch('/projects/:id/weather-suspension', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     if (!checkUserProjectAccess(req.user, id)) {
@@ -478,10 +500,19 @@ projectsRouter.delete('/projects/:id', requireRole(['ADMIN']), async (req: Reque
 // TASKS REST API
 // ============================================================================
 
-// GET /api/tasks-list
+// GET /api/tasks-list — Scoped to authorized projects for non-admin/finance
 projectsRouter.get('/tasks-list', async (req: Request, res: Response) => {
   try {
+    let whereClause: any = {};
+    if (req.user?.role !== 'ADMIN' && req.user?.role !== 'FINANCE') {
+      if (!req.user?.projectIds || req.user.projectIds.length === 0) {
+        return res.json([]);
+      }
+      whereClause.projectId = { in: req.user.projectIds };
+    }
+
     const dbTasks = await prisma.projectTask.findMany({ 
+      where: whereClause,
       include: { assignedContractor: true },
       orderBy: { createdAt: 'desc' } 
     });
@@ -522,8 +553,8 @@ projectsRouter.get('/tasks-list', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/tasks
-projectsRouter.post('/tasks', async (req: Request, res: Response) => {
+// POST /api/tasks — Restricted to ADMIN and ENGINEER
+projectsRouter.post('/tasks', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { title, text, projectId, assigneeName, duration, progress, startDate, endDate, category, wbsCode, priority, status, description, subtasks, tags, dueDate } = req.body;
   try {
     let targetProjectId = projectId;
@@ -535,6 +566,10 @@ projectsRouter.post('/tasks', async (req: Request, res: Response) => {
     }
     if (!targetProjectId) {
       return res.status(400).json({ error: 'Cannot create task: No active commercial project exists.' });
+    }
+
+    if (!checkUserProjectAccess(req.user, targetProjectId)) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
     }
 
     const proj = await prisma.commercialProject.findUnique({ where: { id: targetProjectId } });
@@ -593,11 +628,19 @@ projectsRouter.post('/tasks', async (req: Request, res: Response) => {
   }
 });
 
-// PATCH /api/tasks/:id
-projectsRouter.patch('/tasks/:id', async (req: Request, res: Response) => {
+// PATCH /api/tasks/:id — Restricted to ADMIN and ENGINEER
+projectsRouter.patch('/tasks/:id', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { id } = req.params;
   const { title, text, duration, progress, startDate, endDate, wbsCode, status, priority, description, assigneeName } = req.body;
   try {
+    const existingTask = await prisma.projectTask.findUnique({ where: { id } });
+    if (!existingTask) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    if (!checkUserProjectAccess(req.user, existingTask.projectId)) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this project task.' });
+    }
+
     const data: any = {};
     if (text !== undefined || title !== undefined) {
       data.text = text || title;
@@ -680,10 +723,18 @@ projectsRouter.delete('/tasks-clear-all', requireRole(['ADMIN']), async (req: Re
   }
 });
 
-// DELETE /api/tasks/:id
-projectsRouter.delete('/tasks/:id', async (req: Request, res: Response) => {
+// DELETE /api/tasks/:id — Restricted to ADMIN and ENGINEER
+projectsRouter.delete('/tasks/:id', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
+    const existingTask = await prisma.projectTask.findUnique({ where: { id } });
+    if (!existingTask) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+    if (!checkUserProjectAccess(req.user, existingTask.projectId)) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this project task.' });
+    }
+
     await prisma.taskLink.deleteMany({
       where: { OR: [{ sourceId: id }, { targetId: id }] }
     }).catch(() => {});
