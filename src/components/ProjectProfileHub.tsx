@@ -810,7 +810,7 @@ export default function ProjectProfileHub({
                     </div>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-2 gap-3 mt-4 bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4 bg-slate-950/60 p-3 rounded-xl border border-slate-800/80">
                     <div>
                       <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Contract Budget</span>
                       <span className="text-sm font-bold text-white font-mono">₱{project.budget.toLocaleString()}</span>
@@ -818,6 +818,10 @@ export default function ProjectProfileHub({
                     <div>
                       <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Funds Collected</span>
                       <span className="text-sm font-bold text-emerald-400 font-mono">₱{project.fundsCollected.toLocaleString()} ({collectionRate}%)</span>
+                    </div>
+                    <div className="col-span-2 sm:col-span-1">
+                      <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Expenses</span>
+                      <span className="text-sm font-bold text-sky-400 font-mono">₱{(project.totalExpenses || 0).toLocaleString()}</span>
                     </div>
                   </div>
                 )}
@@ -934,7 +938,7 @@ export default function ProjectProfileHub({
                   <DollarSign className="w-4 h-4 text-emerald-400" />
                   Financial Transparency & Installment Billing
                 </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                     <span className="text-xs text-slate-400 font-mono uppercase">Total Contract Value</span>
                     <div className="text-xl font-bold text-white font-mono mt-1">₱{selectedProject.budget.toLocaleString()}</div>
@@ -953,6 +957,15 @@ export default function ProjectProfileHub({
                       ₱{Math.max(0, selectedProject.budget - selectedProject.fundsCollected).toLocaleString()}
                     </div>
                     <span className="text-[10px] text-amber-500/80">Progress billing installment schedule</span>
+                  </div>
+                  <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
+                    <span className="text-xs text-slate-400 font-mono uppercase">Disbursed Expenses</span>
+                    <div className="text-xl font-bold text-sky-400 font-mono mt-1">
+                      ₱{(selectedProject.totalExpenses || (selectedProject.laborExpenses || 0) + (selectedProject.subcontractorExpenses || 0)).toLocaleString()}
+                    </div>
+                    <span className="text-[10px] text-sky-500/80">
+                      Labor: ₱{(selectedProject.laborExpenses || 0).toLocaleString()} | AP: ₱{(selectedProject.subcontractorExpenses || 0).toLocaleString()}
+                    </span>
                   </div>
                 </div>
               </div>

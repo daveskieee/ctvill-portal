@@ -964,6 +964,25 @@ workforceRouter.post('/labor-allocations/apply-ai-rec', requireRole(['ADMIN', 'E
       [targetProj.name, targetWorkerId]
     );
 
+    // Synchronize workers table: update assigned_project_id
+    await client.query(
+      'UPDATE workers SET assigned_project_id = $1, status = \'Active\', updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [targetProj.id, targetWorkerId]
+    );
+
+    // Remove any conflicting assignments for this worker in other projects
+    await client.query(
+      'DELETE FROM project_worker_assignments WHERE worker_id = $1 AND project_id != $2',
+      [targetWorkerId, targetProj.id]
+    );
+
+    // Upsert active project worker assignment for the target project
+    await client.query(`
+      INSERT INTO project_worker_assignments (id, project_id, worker_id, assigned_at, status)
+      VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 'ACTIVE')
+      ON CONFLICT (project_id, worker_id) DO UPDATE SET status = 'ACTIVE'
+    `, [`PWA-${targetProj.id.slice(-4)}-${targetWorkerId.slice(-4)}`, targetProj.id, targetWorkerId]);
+
     // 8. If worker had an active donor project, remove them from donor project's assigned list
     if (effectiveDonorProjId && effectiveDonorProjId !== targetProjId) {
       const donorProjRes = await client.query('SELECT * FROM commercial_projects WHERE id = $1 FOR UPDATE', [effectiveDonorProjId]);
@@ -1023,9 +1042,13 @@ workforceRouter.post('/labor-allocations/apply-ai-rec', requireRole(['ADMIN', 'E
 
     broadcastChange('projects');
     broadcastChange('contractors');
+    broadcastChange('workers');
+    broadcastChange('projectWorkerAssignments');
+    broadcastChange('attendance');
     broadcastChange('laborAllocations');
     broadcastChange('aiRecommendations');
     broadcastChange('auditLogs');
+    invalidateAllDataCache();
 
     res.json({ 
       success: true, 

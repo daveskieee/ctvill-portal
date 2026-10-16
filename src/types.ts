@@ -650,6 +650,9 @@ export interface ProjectProfile {
   isPrivateAccounting?: boolean;
   tasksCount: number;
   milestonesCount: number;
+  laborExpenses?: number;
+  subcontractorExpenses?: number;
+  totalExpenses?: number;
 }
 
 export interface ExtendedPayrollItem {

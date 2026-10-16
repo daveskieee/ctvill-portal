@@ -401,27 +401,75 @@ workersRouter.post('/:id/assign', requireRole(['ADMIN', 'ENGINEER']), async (req
   try {
     const { id: workerId } = req.params;
     const { projectId, project_id } = req.body;
-    const targetProject = projectId || project_id;
+    let targetProject = projectId || project_id;
 
     if (!targetProject) {
       return res.status(400).json({ error: 'Project ID is required.' });
     }
 
-    if (!checkUserProjectAccess(req.user, targetProject)) {
+    // Resolve target project by ID or Name
+    const pMatch = await pool.query(
+      'SELECT id, name, assigned_contractor_ids FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) LIMIT 1',
+      [targetProject]
+    );
+    if (pMatch.rows.length === 0) {
+      return res.status(404).json({ error: 'Target commercial project not found.' });
+    }
+    const targetProj = pMatch.rows[0];
+    const resolvedProjectId = targetProj.id;
+
+    if (!checkUserProjectAccess(req.user, resolvedProjectId)) {
       return res.status(403).json({ error: 'You do not have access to assign workers to this project.' });
     }
 
-    const assignId = `PWA-${targetProject.slice(-4)}-${workerId.slice(-4)}`;
+    // 1. Remove conflicting active assignments for this worker in other projects (prevent duplicate assignments)
+    await pool.query('DELETE FROM project_worker_assignments WHERE worker_id = $1 AND project_id != $2', [workerId, resolvedProjectId]);
 
+    const assignId = `PWA-${resolvedProjectId.slice(-4)}-${workerId.slice(-4)}`;
+
+    // 2. Upsert assignment in project_worker_assignments
     await pool.query(`
       INSERT INTO project_worker_assignments (id, project_id, worker_id, assigned_at, status)
       VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 'ACTIVE')
       ON CONFLICT (project_id, worker_id) DO UPDATE SET status = 'ACTIVE'
-    `, [assignId, targetProject, workerId]);
+    `, [assignId, resolvedProjectId, workerId]);
+
+    // 3. Update workers table assigned_project_id
+    await pool.query(
+      'UPDATE workers SET assigned_project_id = $1, status = \'Active\', updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+      [resolvedProjectId, workerId]
+    );
+
+    // 4. Update contractors table activeProjectSite
+    await pool.query(
+      'UPDATE contractors SET "activeProjectSite" = $1, "status" = \'ACTIVE\' WHERE id = $2',
+      [targetProj.name, workerId]
+    ).catch(() => {});
+
+    // 5. Update commercial_projects assigned_contractor_ids on target project
+    const curIds: string[] = targetProj.assigned_contractor_ids || [];
+    if (!curIds.includes(workerId)) {
+      const nextIds = [...curIds, workerId];
+      await pool.query(
+        'UPDATE commercial_projects SET assigned_contractor_ids = $1, assigned_workers_count = $2 WHERE id = $3',
+        [nextIds, nextIds.length, resolvedProjectId]
+      );
+    }
+
+    // 6. Remove worker from other commercial projects' assigned_contractor_ids
+    await pool.query(`
+      UPDATE commercial_projects 
+      SET assigned_contractor_ids = array_remove(assigned_contractor_ids, $1),
+          assigned_workers_count = GREATEST(0, assigned_workers_count - 1)
+      WHERE id != $2 AND $1 = ANY(assigned_contractor_ids)
+    `, [workerId, resolvedProjectId]);
 
     broadcastChange('workers');
+    broadcastChange('contractors');
+    broadcastChange('projects');
+    broadcastChange('attendance');
 
-    res.json({ success: true, message: 'Worker assigned to project.' });
+    res.json({ success: true, message: 'Worker assigned to project.', projectId: resolvedProjectId });
   } catch (error) {
     console.error('Error assigning worker:', error);
     res.status(500).json({ error: 'Failed to assign worker' });
@@ -436,16 +484,51 @@ workersRouter.delete('/:id/assign/:projectId', requireRole(['ADMIN', 'ENGINEER']
   try {
     const { id: workerId, projectId } = req.params;
 
-    if (!checkUserProjectAccess(req.user, projectId)) {
+    // Resolve target project by ID or Name
+    const pMatch = await pool.query(
+      'SELECT id, name FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) LIMIT 1',
+      [projectId]
+    );
+    const targetProjectId = pMatch.rows[0]?.id || projectId;
+    const targetProjName = pMatch.rows[0]?.name;
+
+    if (!checkUserProjectAccess(req.user, targetProjectId)) {
       return res.status(403).json({ error: 'You do not have access to unassign workers from this project.' });
     }
 
+    // 1. Delete assignment
     await pool.query(
       `DELETE FROM project_worker_assignments WHERE worker_id = $1 AND project_id = $2`,
-      [workerId, projectId]
+      [workerId, targetProjectId]
     );
 
+    // 2. Clear worker's assigned_project_id if it matched this project
+    await pool.query(
+      `UPDATE workers SET assigned_project_id = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = $1 AND assigned_project_id = $2`,
+      [workerId, targetProjectId]
+    );
+
+    // 3. Clear contractor's activeProjectSite if pointing to this project
+    if (targetProjName) {
+      await pool.query(
+        `UPDATE contractors SET "activeProjectSite" = NULL WHERE id = $1 AND ("activeProjectSite" = $2 OR "activeProjectSite" = $3)`,
+        [workerId, targetProjName, targetProjectId]
+      ).catch(() => {});
+    }
+
+    // 4. Remove from commercial_projects assigned_contractor_ids
+    await pool.query(`
+      UPDATE commercial_projects 
+      SET assigned_contractor_ids = array_remove(assigned_contractor_ids, $1),
+          assigned_workers_count = GREATEST(0, assigned_workers_count - 1)
+      WHERE id = $2
+    `, [workerId, targetProjectId]);
+
     broadcastChange('workers');
+    broadcastChange('contractors');
+    broadcastChange('projects');
+    broadcastChange('attendance');
+
     res.json({ success: true, message: 'Worker unassigned from project.' });
   } catch (error) {
     console.error('Error unassigning worker:', error);

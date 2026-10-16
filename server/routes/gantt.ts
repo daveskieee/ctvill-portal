@@ -82,6 +82,7 @@ export function createGanttRouter(prisma: PrismaClient) {
           end_date: formatGanttDate(t.endDate),
           duration: t.duration,
           progress: typeof t.progress === 'number' ? t.progress : 0,
+          status: t.status || ((typeof t.progress === 'number' && t.progress >= 1.0) ? 'COMPLETED' : (typeof t.progress === 'number' && t.progress > 0) ? 'IN_PROGRESS' : 'TODO'),
           parent: t.parentTaskId || 0,
           type: isMilestone ? 'milestone' : t.type || 'task',
           wbsCode: t.wbsCode || '',
@@ -212,7 +213,9 @@ export function createGanttRouter(prisma: PrismaClient) {
                 const endDate = endRaw ? new Date(endRaw) : addWorkingDays(startDate, duration);
                 const hasExplicitProgress = effectiveData?.progress !== undefined;
                 const progress = hasExplicitProgress ? Math.max(0, Math.min(1, parseFloat(String(effectiveData.progress)))) : undefined;
-                const derivedStatus = effectiveData?.status || (hasExplicitProgress && progress !== undefined ? (progress >= 1.0 ? 'COMPLETED' : progress > 0 ? 'IN_PROGRESS' : 'TODO') : undefined);
+                const derivedStatus = progress !== undefined 
+                  ? (progress >= 1.0 ? 'COMPLETED' : (effectiveData?.status === 'COMPLETED' && progress < 1.0) ? (progress > 0 ? 'IN_PROGRESS' : 'TODO') : (effectiveData?.status || (progress > 0 ? 'IN_PROGRESS' : 'TODO'))) 
+                  : (effectiveData?.status !== undefined ? effectiveData.status : undefined);
                 const parentId = effectiveData?.parent !== undefined 
                   ? (effectiveData.parent && effectiveData.parent !== 0 && effectiveData.parent !== '0' ? String(effectiveData.parent) : null) 
                   : (effectiveData?.parentTaskId !== undefined ? effectiveData.parentTaskId : undefined);
@@ -393,7 +396,11 @@ export function createGanttRouter(prisma: PrismaClient) {
           const endDate = t.end_date ? new Date(t.end_date) : addWorkingDays(startDate, duration || 1);
           const parentId = t.parent && t.parent !== 0 && t.parent !== '0' ? String(t.parent) : null;
           const progress = Math.max(0, Math.min(1, parseFloat(String(t.progress || 0))));
-          const status = t.status || (progress >= 1.0 ? 'COMPLETED' : progress > 0 ? 'IN_PROGRESS' : 'TODO');
+          const status = progress >= 1.0 
+            ? 'COMPLETED' 
+            : (t.status === 'COMPLETED' && progress < 1.0) 
+            ? (progress > 0 ? 'IN_PROGRESS' : 'TODO') 
+            : (t.status || (progress > 0 ? 'IN_PROGRESS' : 'TODO'));
           const type = (duration === 0 || t.type === 'milestone') ? 'milestone' : (t.type || 'task');
 
           await tx.projectTask.upsert({

@@ -238,15 +238,18 @@ payrollRouter.get('/runs/:id', requireRole(['FINANCE', 'ADMIN', 'ENGINEER']), as
 const handleCalculateDraft = async (req: Request, res: Response) => {
   try {
     const { projectId, project_id, periodStart, period_start, periodEnd, period_end } = req.body;
-    const targetProject = projectId || project_id;
+    const rawTargetProject = projectId || project_id;
     const cycleStartDate = periodStart || period_start;
     const cycleEndDate = periodEnd || period_end;
 
-    if (!targetProject || !cycleStartDate || !cycleEndDate) {
+    if (!rawTargetProject || !cycleStartDate || !cycleEndDate) {
       return res.status(400).json({
         error: 'project_id, period_start, and period_end are required to calculate payroll.'
       });
     }
+
+    const pMatch = await pool.query('SELECT id, name, client_name FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) LIMIT 1', [rawTargetProject]);
+    const targetProject = pMatch.rows[0]?.id || rawTargetProject;
 
     if (!checkUserProjectAccess(req.user, targetProject)) {
       return res.status(403).json({ error: 'You do not have access to calculate payroll for this project.' });
@@ -417,17 +420,21 @@ payrollRouter.post('/finalize', requireExactRole(['FINANCE']), async (req: Reque
       adjustments 
     } = req.body;
 
-    const targetProject = projectId || project_id;
+    const rawTargetProject = projectId || project_id;
     const cycleStartDate = periodStart || period_start;
     const cycleEndDate = periodEnd || period_end;
     const startDate = cycleStartDate;
     const endDate = cycleEndDate;
 
-    if (!targetProject || !cycleStartDate || !cycleEndDate) {
+    if (!rawTargetProject || !cycleStartDate || !cycleEndDate) {
       return res.status(400).json({
         error: 'project_id, period_start, and period_end are required to finalize payroll.'
       });
     }
+
+    const pMatch = await pool.query('SELECT id, name FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) LIMIT 1', [rawTargetProject]);
+    const targetProject = pMatch.rows[0]?.id || rawTargetProject;
+    const projectName = pMatch.rows[0]?.name || 'Site Project';
 
     if (!checkUserProjectAccess(req.user, targetProject)) {
       return res.status(403).json({ error: 'You do not have access to finalize payroll for this project.' });
@@ -585,6 +592,39 @@ payrollRouter.post('/finalize', requireExactRole(['FINANCE']), async (req: Reque
         `, [runId, appliedAdvanceIds]);
       }
 
+      // 4b. Synchronize with extended_payroll ledger for executive payroll dashboard
+      for (const item of calc.items) {
+        const epId = `EP-${runId.slice(-6)}-${item.workerId.slice(-4)}`;
+        const workerMatch = workers.find(w => w.id === item.workerId);
+        const workerName = workerMatch ? `${workerMatch.firstName || ''} ${workerMatch.lastName || ''}`.trim() : 'Artisan';
+        const role = workerMatch?.position || 'Artisan';
+        const daysWorked = Number(item.daysWorked || 0);
+        const otHours = Number(item.otHours || 0);
+        const hoursWorked = daysWorked * 8 + otHours;
+        const dailyRate = Number(workerMatch?.dailyRate || 0);
+        const grossPay = Number(item.grossPay || 0);
+        const deductions = Number(item.totalDeductions || 0);
+        const netPay = Number(item.netPay || 0);
+
+        await client.query(`
+          INSERT INTO extended_payroll 
+            (id, worker_name, contractor_company, project_name, role, hours_worked, days_worked, daily_rate, overtime_hours, gross_pay, deductions, net_pay, status, disbursement_date, payment_method, created_at)
+          VALUES ($1, $2, 'CTVill In-House Artisan Crew', $3, $4, $5, $6, $7, $8, $9, $10, $11, 'Approved', NULL, 'Bank Transfer', CURRENT_TIMESTAMP)
+          ON CONFLICT (id) DO UPDATE SET
+            worker_name = EXCLUDED.worker_name,
+            project_name = EXCLUDED.project_name,
+            role = EXCLUDED.role,
+            hours_worked = EXCLUDED.hours_worked,
+            days_worked = EXCLUDED.days_worked,
+            daily_rate = EXCLUDED.daily_rate,
+            overtime_hours = EXCLUDED.overtime_hours,
+            gross_pay = EXCLUDED.gross_pay,
+            deductions = EXCLUDED.deductions,
+            net_pay = EXCLUDED.net_pay,
+            status = EXCLUDED.status
+        `, [epId, workerName, projectName, role, hoursWorked, daysWorked, dailyRate, otHours, grossPay, deductions, netPay]);
+      }
+
       // 5. Create Process Audit Log
       await client.query(`
         INSERT INTO process_audit_logs (id, "entityType", "entityId", action, "actorName", "actorRole", details, "createdAt")
@@ -606,6 +646,8 @@ payrollRouter.post('/finalize', requireExactRole(['FINANCE']), async (req: Reque
 
     broadcastChange('payroll');
     broadcastChange('payrollRuns');
+    broadcastChange('extendedPayroll');
+    broadcastChange('projects');
     broadcastChange('attendance');
     broadcastChange('cashAdvances');
     broadcastChange('auditLogs');

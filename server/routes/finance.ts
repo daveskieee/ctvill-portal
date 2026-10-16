@@ -444,6 +444,18 @@ financeRouter.post('/payroll/disburse', requireRole(['FINANCE', 'ADMIN']), async
         data: { status: PayrollStatus.DISBURSED }
       });
 
+      await pool.query(`
+        UPDATE extended_payroll 
+        SET status = 'Disbursed', disbursement_date = CURRENT_DATE 
+        WHERE status IN ('Pending', 'Approved')
+      `);
+
+      await pool.query(`
+        UPDATE payroll_runs 
+        SET status = 'PAID', updated_at = CURRENT_TIMESTAMP 
+        WHERE status = 'FINALIZED'
+      `);
+
       await prisma.processAuditLog.create({
         data: {
           entityType: 'PAYROLL',
@@ -455,24 +467,35 @@ financeRouter.post('/payroll/disburse', requireRole(['FINANCE', 'ADMIN']), async
         }
       }).catch(() => {});
     } else if (id) {
-      await prisma.payrollRecord.update({
-        where: { id },
-        data: { status: PayrollStatus.DISBURSED }
-      });
+      const targetId = String(id);
+      if (targetId.startsWith('PAY-')) {
+        await pool.query(`UPDATE payroll_runs SET status = 'PAID', updated_at = CURRENT_TIMESTAMP WHERE id = $1`, [targetId]);
+        await pool.query(`UPDATE extended_payroll SET status = 'Disbursed', disbursement_date = CURRENT_DATE WHERE id LIKE $1`, [`EP-${targetId.slice(-6)}%`]);
+      } else if (targetId.startsWith('EP-')) {
+        await pool.query(`UPDATE extended_payroll SET status = 'Disbursed', disbursement_date = CURRENT_DATE WHERE id = $1`, [targetId]);
+      } else {
+        await prisma.payrollRecord.update({
+          where: { id: targetId },
+          data: { status: PayrollStatus.DISBURSED }
+        }).catch(() => {});
+      }
 
       await prisma.processAuditLog.create({
         data: {
           entityType: 'PAYROLL',
-          entityId: id,
+          entityId: targetId,
           action: 'PAYROLL_RECORD_DISBURSED',
           actorName: req.user?.name || 'Finance Controller',
           actorRole: req.user?.role || 'FINANCE',
-          details: `Disbursed payroll wage record ${id}.`,
+          details: `Disbursed payroll wage record ${targetId}.`,
         }
       }).catch(() => {});
     }
 
     broadcastChange('payroll');
+    broadcastChange('payrollRuns');
+    broadcastChange('extendedPayroll');
+    broadcastChange('projects');
     broadcastChange('auditLogs');
     res.json({ success: true });
   } catch (error) {

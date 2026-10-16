@@ -31,7 +31,14 @@ attendanceRouter.use((req: Request, res: Response, next) => {
 attendanceRouter.get('/', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const { projectId, project_id, startDate, start_date, endDate, end_date, date } = req.query;
-    const targetProject = (projectId || project_id) as string | undefined;
+    const rawTargetProject = (projectId || project_id) as string | undefined;
+    let targetProject = rawTargetProject;
+    if (rawTargetProject) {
+      const pMatch = await pool.query('SELECT id FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) LIMIT 1', [rawTargetProject]);
+      if (pMatch.rows.length > 0) {
+        targetProject = pMatch.rows[0].id;
+      }
+    }
     const targetDate = date as string | undefined;
     const fromDate = (startDate || start_date) as string | undefined;
     const toDate = (endDate || end_date) as string | undefined;
@@ -152,11 +159,14 @@ attendanceRouter.get('/', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE', 'ADM
 attendanceRouter.get('/roster', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const { projectId, project_id, status } = req.query;
-    const targetProject = (projectId || project_id) as string | undefined;
+    const rawTargetProject = (projectId || project_id) as string | undefined;
 
-    if (!targetProject) {
+    if (!rawTargetProject) {
       return res.status(400).json({ error: 'Project ID is required to fetch muster roll.' });
     }
+
+    const pMatch = await pool.query('SELECT id FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) LIMIT 1', [rawTargetProject]);
+    const targetProject = pMatch.rows[0]?.id || rawTargetProject;
 
     if (!checkUserProjectAccess(req.user, targetProject)) {
       return res.status(403).json({ error: 'You do not have access to view the muster roll for this project.' });
@@ -319,15 +329,18 @@ attendanceRouter.post('/', requireRole(['TIMEKEEPER', 'ADMIN']), async (req: Req
       override_reason, overrideReason,
       overridden_by, overriddenBy
     } = req.body;
-    const targetProject = projectId || project_id;
+    const rawTargetProject = projectId || project_id;
     const effectiveDate = date ? String(date).split('T')[0] : new Date().toISOString().split('T')[0];
     const attendanceItems = records || entries;
     const overrideReasonText = (override_reason || overrideReason || '').trim();
     const overriddenUserId = overridden_by || overriddenBy || req.user?.id || 'sys-admin';
 
-    if (!targetProject) {
+    if (!rawTargetProject) {
       return res.status(400).json({ error: 'Project ID is required for logging attendance.' });
     }
+
+    const pMatch = await pool.query('SELECT id FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) LIMIT 1', [rawTargetProject]);
+    const targetProject = pMatch.rows[0]?.id || rawTargetProject;
 
     if (!checkUserProjectAccess(req.user, targetProject)) {
       return res.status(403).json({ error: 'You do not have access to log attendance for this project.' });

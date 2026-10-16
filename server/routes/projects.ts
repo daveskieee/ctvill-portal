@@ -48,6 +48,30 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
       dbProjectsQuery = 'SELECT * FROM commercial_projects WHERE id = ANY($1) ORDER BY created_at ASC';
       params.push(req.user.projectIds);
     }
+    // Pre-aggregate labor expenses from finalized or paid payroll runs
+    const laborRes = await pool.query(
+      `SELECT project_id, COALESCE(SUM(total_gross), 0) as total_labor
+       FROM payroll_runs 
+       WHERE status IN ('FINALIZED', 'PAID') 
+       GROUP BY project_id`
+    ).catch(() => ({ rows: [] }));
+    const laborMap = new Map<string, number>();
+    for (const r of laborRes.rows) {
+      laborMap.set(r.project_id, Number(r.total_labor || 0));
+    }
+
+    // Pre-aggregate subcontractor payables from approved or paid contractor billings
+    const subRes = await pool.query(
+      `SELECT project_site, COALESCE(SUM(COALESCE(disbursed_amount, approved_amount, billed_amount)), 0) as total_sub
+       FROM subcontractor_payables 
+       WHERE status IN ('APPROVED', 'PAID') 
+       GROUP BY project_site`
+    ).catch(() => ({ rows: [] }));
+    const subMap = new Map<string, number>();
+    for (const r of subRes.rows) {
+      subMap.set(String(r.project_site).trim().toLowerCase(), Number(r.total_sub || 0));
+    }
+
     const dbProjects = await pool.query(dbProjectsQuery, params);
     const projects = await Promise.all((dbProjects.rows || []).map(async (p) => {
       let lat = p.latitude !== null && p.latitude !== undefined ? Number(p.latitude) : undefined;
@@ -63,6 +87,10 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
           .catch(err => console.warn(`Failed to backfill coords for project ${p.id}:`, err));
       }
 
+      const laborExp = laborMap.get(p.id) || 0;
+      const subExp = subMap.get((p.name || '').trim().toLowerCase()) || subMap.get(p.id.toLowerCase()) || 0;
+      const totalExp = Number((laborExp + subExp).toFixed(2));
+
       return {
         id: p.id,
         name: p.name,
@@ -71,6 +99,9 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
         location: p.location || '',
         budget: Number(p.budget || 0),
         fundsCollected: Number(p.funds_collected || 0),
+        laborExpenses: laborExp,
+        subcontractorExpenses: subExp,
+        totalExpenses: totalExp,
         progressPercentage: Number(p.progress_percentage || 0),
         status: (Number(p.progress_percentage || 0) > 0 && p.status === 'PLANNING') ? 'IN_PROGRESS' : (p.status || 'IN_PROGRESS'),
         targetHandoverDate: p.target_handover_date ? (p.target_handover_date instanceof Date ? p.target_handover_date.toISOString().split('T')[0] : String(p.target_handover_date).split('T')[0]) : '2026-12-31',
@@ -619,6 +650,33 @@ projectsRouter.post('/tasks', requireRole(['ADMIN', 'ENGINEER']), async (req: Re
       }
     }).catch(() => {});
 
+    // Recalculate summary metrics for parent commercial project
+    if (task.projectId) {
+      const allTasks = await prisma.projectTask.findMany({ where: { projectId: task.projectId } });
+      let avgProgress = 0;
+      if (allTasks.length > 0) {
+        const milestones = allTasks.filter(t => t.type === 'milestone' || t.duration === 0);
+        const items = milestones.length > 0 ? milestones : allTasks;
+        const sumProgress = items.reduce((acc, curr) => {
+          let p = curr.progress || 0;
+          if (p > 0 && p <= 1) p = p * 100;
+          return acc + p;
+        }, 0);
+        avgProgress = Math.round(sumProgress / items.length);
+      }
+      const existingProj = await prisma.commercialProject.findUnique({ where: { id: task.projectId } });
+      const shouldAdvanceStatus = avgProgress > 0 && (!existingProj?.status || existingProj.status === 'PLANNING');
+      await prisma.commercialProject.update({
+        where: { id: task.projectId },
+        data: {
+          progressPercentage: avgProgress,
+          tasksCount: allTasks.length,
+          ...(shouldAdvanceStatus ? { status: 'IN_PROGRESS' } : {})
+        }
+      }).catch(() => {});
+      broadcastChange('projects');
+    }
+
     broadcastChange('tasks');
     broadcastChange('auditLogs');
     res.json(task);
@@ -735,10 +793,36 @@ projectsRouter.delete('/tasks/:id', requireRole(['ADMIN', 'ENGINEER']), async (r
       return res.status(403).json({ error: 'Forbidden: You do not have access to this project task.' });
     }
 
+    const targetProjId = existingTask.projectId;
     await prisma.taskLink.deleteMany({
       where: { OR: [{ sourceId: id }, { targetId: id }] }
     }).catch(() => {});
     await prisma.projectTask.delete({ where: { id } });
+
+    // Recalculate summary metrics for parent commercial project on task deletion
+    if (targetProjId) {
+      const allTasks = await prisma.projectTask.findMany({ where: { projectId: targetProjId } });
+      let avgProgress = 0;
+      if (allTasks.length > 0) {
+        const milestones = allTasks.filter(t => t.type === 'milestone' || t.duration === 0);
+        const items = milestones.length > 0 ? milestones : allTasks;
+        const sumProgress = items.reduce((acc, curr) => {
+          let p = curr.progress || 0;
+          if (p > 0 && p <= 1) p = p * 100;
+          return acc + p;
+        }, 0);
+        avgProgress = Math.round(sumProgress / items.length);
+      }
+      await prisma.commercialProject.update({
+        where: { id: targetProjId },
+        data: {
+          progressPercentage: avgProgress,
+          tasksCount: allTasks.length
+        }
+      }).catch(() => {});
+      broadcastChange('projects');
+    }
+
     broadcastChange('tasks');
     res.json({ success: true });
   } catch (error) {
