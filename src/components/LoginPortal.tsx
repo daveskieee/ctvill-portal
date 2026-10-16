@@ -61,9 +61,8 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 sm:p-6 lg:p-8 relative overflow-hidden select-none font-sans selection:bg-amber-500 selection:text-slate-950">
       
-      {/* Dynamic Background Ambient Glow */}
-      <div className="absolute inset-0 z-0 opacity-25 pointer-events-none">
-        <div className="absolute top-1/4 left-1/3 w-[550px] h-[550px] bg-gradient-to-tr from-amber-500 to-orange-600 rounded-full blur-[140px] animate-pulseGlow"></div>
+      {/* Clean ERP Subtle Grid Background */}
+      <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:36px_36px]"></div>
       </div>
 
@@ -259,7 +258,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
               <button
                 type="submit"
                 disabled={isSubmitting}
-                className="w-full py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-xl font-bold shadow-lg shadow-amber-500/20 transition-all cursor-pointer flex items-center justify-center gap-2 mt-4"
+                className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg shadow-xs transition-colors cursor-pointer flex items-center justify-center gap-2 mt-4 text-xs"
               >
                 {isSubmitting ? (
                   <>

@@ -1364,7 +1364,7 @@ export default function GanttTimeline({
           /* Sleek Fullscreen Status Banner */
           <div className="flex items-center justify-between gap-4 text-xs font-mono pb-2 border-b border-slate-800/80">
             <div className="flex items-center gap-3">
-              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse" />
+              <span className="w-2 h-2 rounded-full bg-emerald-400" />
               <span className="font-bold text-white text-sm tracking-tight flex items-center gap-2">
                 <Layers className="w-4 h-4 text-amber-400" />
                 {activeProject?.name || 'Project Schedule'}
@@ -1388,7 +1388,7 @@ export default function GanttTimeline({
                 value={selectedProjectId}
                 onChange={(e) => setSelectedProjectId(e.target.value)}
                 aria-label="Select Commercial Project"
-                className="bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-1.5 text-xs font-semibold focus:border-amber-500 focus:outline-none cursor-pointer"
+                className="bg-slate-950 border border-slate-800 text-white rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:border-amber-500/50 focus:outline-none cursor-pointer"
               >
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>
@@ -1397,14 +1397,14 @@ export default function GanttTimeline({
                 ))}
               </select>
             ) : (
-              <span className="text-xs font-mono text-slate-400 bg-slate-950 px-3 py-1.5 rounded-xl border border-slate-800">
+              <span className="text-xs font-mono text-slate-400 bg-slate-950 px-2.5 py-1.5 rounded-lg border border-slate-800">
                 No Commercial Sites Registered
               </span>
             )}
 
             {/* Active Project Physical Progress Bar Indicator */}
             {activeProject && (
-              <div className="flex items-center gap-3 bg-slate-950/90 border border-slate-800 rounded-xl px-3 py-1.5 shadow-inner">
+              <div className="flex items-center gap-3 bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5">
                 <div className="flex flex-col">
                   <div className="flex items-center justify-between gap-3 text-[10px] font-mono">
                     <span className="text-slate-400 font-semibold">Overall Project Progress:</span>
@@ -1412,7 +1412,7 @@ export default function GanttTimeline({
                   </div>
                   <div className="w-28 h-1.5 bg-slate-800 rounded-full overflow-hidden mt-0.5 border border-slate-700/50">
                     <div 
-                      className="h-full bg-gradient-to-r from-amber-500 to-emerald-500 rounded-full transition-all duration-300"
+                      className="h-full bg-amber-500 rounded-full transition-all duration-300"
                       style={{ width: `${Math.min(100, Math.max(0, currentProjectProgress))}%` }}
                     />
                   </div>
@@ -1424,11 +1424,7 @@ export default function GanttTimeline({
             <button
               type="button"
               onClick={toggleFullscreen}
-              className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold transition shadow-lg cursor-pointer ${
-                isFullscreen
-                  ? 'bg-amber-400 text-slate-950 hover:bg-amber-300 shadow-amber-400/20 ring-2 ring-amber-400/40'
-                  : 'bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 shadow-amber-500/20'
-              }`}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer bg-amber-500 hover:bg-amber-400 text-slate-950"
               title={isFullscreen ? 'Exit Full Screen Mode (Esc)' : 'Open Full Screen Mode (Auto-fits entire schedule across monitor)'}
             >
               {isFullscreen ? (

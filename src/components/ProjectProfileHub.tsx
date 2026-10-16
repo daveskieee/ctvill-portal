@@ -495,30 +495,30 @@ export default function ProjectProfileHub({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 border border-slate-800 p-6 rounded-2xl backdrop-blur-xl shadow-2xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-xs">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase">
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase">
               Operational Command Hub
             </span>
             <span className="text-xs text-slate-400">Enterprise Fit-Out Portfolio</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight flex items-center gap-3">
-            <Building2 className="w-7 h-7 text-amber-400" />
+          <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-amber-400" />
             Projects Profile Hub
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-slate-400 text-xs mt-0.5">
             Central hub for project-specific tracking: budget vs. collected funds, live progress %, assigned workers, tasks, and milestones.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="w-full sm:w-auto bg-slate-950 border border-slate-700 text-slate-200 text-sm rounded-xl px-3 py-2.5 focus:outline-none focus:border-amber-500"
+            className="w-full sm:w-auto bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-amber-500"
           >
             <option value="ALL">All Project Statuses</option>
             <option value="IN_PROGRESS">In Progress</option>
@@ -530,17 +530,17 @@ export default function ProjectProfileHub({
           <div className="flex items-center gap-2 w-full sm:w-auto">
             <button
               onClick={handleExportCsv}
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-750 text-slate-200 border border-slate-700 font-semibold px-3.5 py-2.5 rounded-xl transition cursor-pointer text-xs"
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer text-xs"
               title="Export Commercial Sites to CSV"
             >
-              <Download className="w-4 h-4 text-amber-400" />
+              <Download className="w-3.5 h-3.5 text-amber-400" />
               <span>Export CSV</span>
             </button>
 
             {isAdmin && (
             <button
               onClick={openNewModal}
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-amber-500/20 cursor-pointer text-xs"
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer text-xs"
             >
               <Plus className="w-4 h-4" />
               <span>New Project</span>
@@ -1556,7 +1556,7 @@ export default function ProjectProfileHub({
                 <button
                   type="submit"
                   disabled={isTimelineInvalid || !formName.trim()}
-                  className="w-full sm:w-auto px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-sm shadow-lg shadow-amber-500/20 cursor-pointer text-center"
+                  className="w-full sm:w-auto px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 disabled:cursor-not-allowed text-slate-950 font-bold text-xs transition-colors cursor-pointer text-center"
                 >
                   Save Project Profile
                 </button>

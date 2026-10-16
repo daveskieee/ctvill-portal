@@ -336,53 +336,53 @@ export default function PayrollManager({
   return (
     <div className="space-y-6">
       {/* Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 border border-slate-800 p-6 rounded-2xl backdrop-blur-xl shadow-2xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-xs">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold tracking-wider uppercase">
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold uppercase">
               Field Compensation
             </span>
             <span className="text-xs text-slate-400">Worker Salaries & Contractor Wage Disbursement</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight flex items-center gap-3">
-            <DollarSign className="w-7 h-7 text-emerald-400" />
+          <h1 className="text-lg font-bold text-white tracking-tight flex items-center gap-2.5">
+            <DollarSign className="w-5 h-5 text-amber-400" />
             Payroll & Wage Processing
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-slate-400 text-xs mt-1">
             Manage worker salaries, hours worked, overtime, statutory deductions, and net disbursements linked to active project allocations.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={handleExportCSV}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-3.5 py-2.5 rounded-xl border border-slate-700 text-xs transition cursor-pointer"
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-3 py-1.5 rounded-lg border border-slate-700 text-xs transition-colors cursor-pointer"
           >
-            <Download className="w-4 h-4 text-emerald-400" />
-            Export Payroll (CSV)
+            <Download className="w-3.5 h-3.5 text-slate-400" />
+            Export (CSV)
           </button>
 
           {isFinance ? (
             <>
               <button
                 onClick={() => setShowAddModal(true)}
-                className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-3.5 py-2.5 rounded-xl border border-slate-700 text-xs transition cursor-pointer"
+                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-3 py-1.5 rounded-lg border border-slate-700 text-xs transition-colors cursor-pointer"
               >
-                <Plus className="w-4 h-4 text-emerald-400" />
+                <Plus className="w-3.5 h-3.5 text-amber-400" />
                 Log Wage Entry
               </button>
 
               <button
                 onClick={handleDisburseAll}
                 disabled={pendingCount === 0 || isDisbursing}
-                className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/20 disabled:opacity-50 text-xs cursor-pointer"
+                className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-lg text-xs transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
               >
-                <CheckCircle2 className="w-4 h-4" />
+                <CheckCircle2 className="w-3.5 h-3.5" />
                 {isDisbursing ? 'Processing...' : `Disburse Pending (₱${pendingAmount.toLocaleString()})`}
               </button>
             </>
           ) : (
-            <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-400">
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] font-mono text-slate-400">
               <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
               <span>Disbursements Restricted to Finance</span>
             </div>
@@ -818,7 +818,7 @@ export default function PayrollManager({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-xs transition-colors cursor-pointer"
                 >
                   Log Wage Entry
                 </button>
@@ -998,7 +998,7 @@ export default function PayrollManager({
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-xs transition-colors cursor-pointer"
                 >
                   Save Changes
                 </button>

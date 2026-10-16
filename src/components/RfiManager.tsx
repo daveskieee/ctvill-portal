@@ -168,28 +168,28 @@ export default function RfiManager({
   };
 
   return (
-    <div className="space-y-6 max-w-full min-w-0">
+    <div className="space-y-5 max-w-full min-w-0">
       {/* Header Banner */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-pulse"></span>
+            <span className="w-2 h-2 rounded-full bg-blue-400"></span>
             <span className="text-[10px] font-mono text-blue-400 font-bold uppercase tracking-wider">
               ENGINEERING COORDINATION & CLARIFICATION
             </span>
           </div>
-          <h3 className="text-xl font-bold text-white flex items-center gap-2">
-            <HelpCircle className="w-6 h-6 text-blue-400" />
+          <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <HelpCircle className="w-5 h-5 text-blue-400" />
             Request for Information (RFI) Register
           </h3>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-400 mt-0.5">
             Formal technical inquiries between site foremen, project engineers, and lead architects to resolve drawing ambiguities before construction.
           </p>
         </div>
 
         <button
           onClick={() => setShowSubmitModal(true)}
-          className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-blue-600/20 cursor-pointer transition-all self-start sm:self-auto shrink-0"
+          className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-2 cursor-pointer transition-colors self-start sm:self-auto shrink-0"
         >
           <Plus className="w-4 h-4" />
           <span>Raise New RFI</span>
@@ -197,46 +197,46 @@ export default function RfiManager({
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>TOTAL RFIS LOGGED</span>
             <MessageSquare className="w-4 h-4 text-blue-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-white">{totalRfis}</div>
+          <div className="text-xl font-bold font-mono text-white">{totalRfis}</div>
           <span className="text-[10px] text-slate-400 block font-mono">Engineering Queries</span>
         </div>
 
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>OPEN / UNDER REVIEW</span>
             <Clock className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-amber-300">{openCount}</div>
+          <div className="text-xl font-bold font-mono text-amber-300">{openCount}</div>
           <span className="text-[10px] text-amber-400 block font-mono">Awaiting Architect Response</span>
         </div>
 
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>ANSWERED & RESOLVED</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-emerald-300">{answeredCount}</div>
+          <div className="text-xl font-bold font-mono text-emerald-300">{answeredCount}</div>
           <span className="text-[10px] text-emerald-400 block font-mono">Drawing Clarifications Closed</span>
         </div>
 
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>CRITICAL BLOCKERS</span>
             <AlertTriangle className="w-4 h-4 text-rose-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-rose-400">{criticalCount}</div>
+          <div className="text-xl font-bold font-mono text-rose-400">{criticalCount}</div>
           <span className="text-[10px] text-rose-400 block font-mono">High-Priority Site Hold</span>
         </div>
       </div>
 
       {/* Filter Controls */}
-      <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 max-w-full">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3 max-w-full shadow-xs">
         <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap max-w-full">
           <div className="flex items-center gap-1.5 flex-wrap max-w-full">
             <Filter className="w-4 h-4 text-slate-500 shrink-0" />
@@ -245,10 +245,10 @@ export default function RfiManager({
               <button
                 key={st}
                 onClick={() => setStatusFilter(st)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer shrink-0 ${
+                className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer shrink-0 ${
                   statusFilter === st
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
+                    ? 'bg-amber-500 text-slate-950 font-black'
+                    : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
                 }`}
               >
                 {st === 'UNDER_REVIEW' ? 'UNDER REVIEW' : st}
@@ -282,22 +282,22 @@ export default function RfiManager({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search RFI #, subject, sheet..."
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-blue-500"
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
             />
           </div>
 
           <button
             onClick={handleExportCsv}
-            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
             title="Export filtered RFIs to CSV"
           >
-            <Download className="w-3.5 h-3.5 text-blue-400" />
+            <Download className="w-3.5 h-3.5 text-amber-400" />
             <span className="hidden md:inline">Export CSV</span>
           </button>
 
           <button
             onClick={handlePrint}
-            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
             title="Print or Save PDF report"
           >
             <Printer className="w-3.5 h-3.5 text-slate-300" />
@@ -307,7 +307,7 @@ export default function RfiManager({
       </div>
 
       {/* RFI Table */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-sm max-w-full">
+      <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-xs max-w-full">
         <div className="overflow-x-auto overscroll-x-contain">
           <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-900/90 text-slate-400 font-mono text-[11px] uppercase border-b border-slate-800">

@@ -2183,7 +2183,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-colors cursor-pointer"
                 >
                   Archive Observation
                 </button>
@@ -2453,9 +2453,9 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                 type="button"
                 onClick={handleDispatchWorkerBroadcast}
                 disabled={isBroadcasting}
-                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-bold text-xs shadow-lg shadow-rose-600/30 flex items-center gap-2 cursor-pointer disabled:opacity-50 transition-all"
+                className="px-4 py-2 rounded-lg bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs flex items-center gap-2 cursor-pointer disabled:opacity-50 transition-colors"
               >
-                <Radio className={`w-4 h-4 ${isBroadcasting ? 'animate-spin' : 'animate-pulse'}`} />
+                <Radio className={`w-4 h-4 ${isBroadcasting ? 'animate-spin' : ''}`} />
                 <span>{isBroadcasting ? 'Transmitting Alert Dispatch...' : broadcastConfirmed ? 'Re-transmit Alert' : 'Transmit Emergency Dispatch Now'}</span>
               </button>
             </div>

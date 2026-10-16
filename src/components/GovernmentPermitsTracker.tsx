@@ -348,48 +348,48 @@ export default function GovernmentPermitsTracker({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 border border-slate-800 p-6 rounded-2xl backdrop-blur-xl shadow-2xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-xs">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase">
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase">
               Regulatory Compliance
             </span>
             <span className="text-xs text-slate-400">Statutory Fit-Out & Safety Permits</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight flex items-center gap-3">
-            <FileCheck className="w-7 h-7 text-amber-400" />
+          <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+            <FileCheck className="w-5 h-5 text-amber-400" />
             Government Permits & Legal Compliance
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-slate-400 text-xs mt-0.5">
             Track legal compliance, regulatory filings, PEZA clearances, and renewal expirations for each commercial fit-out project.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={handleExportCSV}
-            className="flex items-center gap-2 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold px-3.5 py-2.5 rounded-xl border border-slate-700 text-xs transition cursor-pointer"
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold px-3 py-1.5 rounded-lg border border-slate-700 text-xs transition-colors cursor-pointer"
           >
-            <Download className="w-4 h-4 text-amber-400" />
-            Export Matrix (CSV)
+            <Download className="w-3.5 h-3.5 text-amber-400" />
+            <span>Export (CSV)</span>
           </button>
 
           {!readOnly && (
           <button
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-amber-500/20 text-xs cursor-pointer"
+            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-lg transition-colors text-xs cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            File Permit Application
+            <span>File Permit Application</span>
           </button>
           )}
         </div>
       </div>
 
       {/* Compliance Overview KPIs */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         <div className="bg-slate-900/60 border border-slate-800 p-5 rounded-xl">
           <div className="flex items-center justify-between">
             <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Total Active Permits</span>
@@ -744,7 +744,7 @@ export default function GovernmentPermitsTracker({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 disabled:opacity-50 cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
                 >
                   {isSubmitting ? 'Filing...' : 'Submit Permit Filing'}
                 </button>
@@ -887,7 +887,7 @@ export default function GovernmentPermitsTracker({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs shadow-lg shadow-amber-500/20 disabled:opacity-50 cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
                 >
                   {isSubmitting ? 'Saving...' : 'Save Changes'}
                 </button>

@@ -164,28 +164,28 @@ export default function ChangeOrderManager({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header Banner */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+            <span className="w-2 h-2 rounded-full bg-amber-400"></span>
             <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider">
               COMMERCIAL VARIATION CONTROL
             </span>
           </div>
-          <h3 className="text-xl font-bold text-white flex items-center gap-2">
-            <FileSpreadsheet className="w-6 h-6 text-amber-400" />
+          <h3 className="text-base font-bold text-white flex items-center gap-2">
+            <FileSpreadsheet className="w-5 h-5 text-amber-400" />
             Change Orders & Scope Variation Management
           </h3>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-400 mt-0.5">
             Formal contract variations, material specification alterations, and schedule timeline impact approvals.
           </p>
         </div>
 
         <button
           onClick={() => setShowSubmitModal(true)}
-          className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer transition-all self-start sm:self-auto shrink-0"
+          className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-2 cursor-pointer transition-colors self-start sm:self-auto shrink-0"
         >
           <Plus className="w-4 h-4" />
           <span>Raise Change Order</span>
@@ -193,13 +193,13 @@ export default function ChangeOrderManager({
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>TOTAL VARIATIONS</span>
             <FileText className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-white">
+          <div className="text-xl font-bold font-mono text-white">
             ₱{totalRequested.toLocaleString()}
           </div>
           <span className="text-[10px] text-slate-400 block font-mono">
@@ -207,12 +207,12 @@ export default function ChangeOrderManager({
           </span>
         </div>
 
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>APPROVED SCOPE VALUE</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-emerald-300">
+          <div className="text-xl font-bold font-mono text-emerald-300">
             ₱{totalApproved.toLocaleString()}
           </div>
           <span className="text-[10px] text-emerald-400 block font-mono">
@@ -220,12 +220,12 @@ export default function ChangeOrderManager({
           </span>
         </div>
 
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>PENDING EXECUTIVE APPROVAL</span>
             <Clock className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-amber-300">
+          <div className="text-xl font-bold font-mono text-amber-300">
             ₱{pendingAmount.toLocaleString()}
           </div>
           <span className="text-[10px] text-amber-400 block font-mono">
@@ -233,12 +233,12 @@ export default function ChangeOrderManager({
           </span>
         </div>
 
-        <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>GOVERNANCE STATUS</span>
             <ShieldCheck className="w-4 h-4 text-teal-400" />
           </div>
-          <div className="text-2xl font-bold font-mono text-teal-300">
+          <div className="text-xl font-bold font-mono text-teal-300">
             100%
           </div>
           <span className="text-[10px] text-teal-400 block font-mono">
@@ -248,7 +248,7 @@ export default function ChangeOrderManager({
       </div>
 
       {/* Filter & Search Controls */}
-      <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs">
         <div className="flex items-center gap-2 w-full sm:w-auto">
           <Filter className="w-4 h-4 text-slate-500 shrink-0" />
           <div className="flex gap-1.5 overflow-x-auto py-1">
@@ -276,13 +276,13 @@ export default function ChangeOrderManager({
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search order #, title, trade..."
-              className="w-full bg-slate-900 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500"
+              className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
             />
           </div>
 
           <button
             onClick={handleExportCsv}
-            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
             title="Export filtered change orders to CSV"
           >
             <Download className="w-3.5 h-3.5 text-amber-400" />
@@ -291,7 +291,7 @@ export default function ChangeOrderManager({
 
           <button
             onClick={handlePrint}
-            className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
             title="Print or Save PDF report"
           >
             <Printer className="w-3.5 h-3.5 text-slate-300" />
@@ -301,7 +301,7 @@ export default function ChangeOrderManager({
       </div>
 
       {/* Change Orders Table */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl overflow-hidden shadow-sm">
+      <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-900/90 text-slate-400 font-mono text-[11px] uppercase border-b border-slate-800">

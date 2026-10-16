@@ -103,7 +103,7 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
   return (
     <div className="space-y-6 animate-fadeIn">
       {/* View Header with Project Selector */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
             <ShieldCheck className="w-4 h-4 text-blue-400" />
@@ -111,18 +111,18 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
               {isFinance ? 'FINANCE AUDIT VIEW • READ-ONLY PROTECTION' : 'SUBCONTRACTOR GATE MUSTER & ROLL-CALL VERIFICATION'}
             </span>
           </div>
-          <h3 className="text-xl font-bold text-white flex items-center gap-2">
+          <h3 className="text-lg font-bold text-white flex items-center gap-2">
             Subcontractor Roll-Call Audits
           </h3>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-400 mt-0.5">
             Certified field supervisor roll-calls, GPS geotagged attendance, biometric headcount, and anti-ghost discrepancy auditing.
           </p>
         </div>
 
         {/* Project Filter Selector */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center gap-2 bg-slate-900 border border-slate-700/80 px-3 py-2 rounded-xl">
-            <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-lg">
+            <Building2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <div className="flex flex-col">
               <span className="text-[9px] font-mono text-slate-400 uppercase tracking-wider font-bold">Project Site Filter</span>
               <select
@@ -144,7 +144,7 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
           {!isReadOnlyMode && onLogAuditClick && (
             <button
               onClick={onLogAuditClick}
-              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5 shadow-sm"
+              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>New Roll-Call Audit</span>

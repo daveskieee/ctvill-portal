@@ -782,9 +782,8 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
       {/* 3. HERO SHOWCASE SECTION */}
       <section className="relative overflow-hidden pt-14 pb-20 sm:pt-20 sm:pb-28 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 border-b border-slate-800">
         
-        {/* Architectural Glow Accents */}
-        <div className="absolute inset-0 z-0 opacity-25 pointer-events-none">
-          <div className="absolute top-1/4 left-1/3 w-[500px] h-[500px] bg-gradient-to-tr from-amber-500 to-orange-600 rounded-full blur-[140px] animate-pulseGlow"></div>
+        {/* Architectural Grid Background */}
+        <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
           <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:36px_36px]"></div>
         </div>
 

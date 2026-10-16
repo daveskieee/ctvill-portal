@@ -383,14 +383,14 @@ export default function InteractiveMap({
   return (
     <div className="space-y-4">
       {/* Studio Toolbar & Controls */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
             <h2 className="text-lg font-bold text-white flex items-center gap-2">
-              <Compass className="w-5 h-5 text-emerald-400" />
+              <Compass className="w-5 h-5 text-amber-400" />
               Project Map & Space Planning Studio
             </h2>
-            <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 text-xs px-2.5 py-0.5 rounded-full font-mono font-bold">
+            <span className="bg-slate-800 text-slate-300 border border-slate-700 text-xs px-2 py-0.5 rounded font-mono font-bold">
               {slots.length} Active Lots
             </span>
           </div>
@@ -412,19 +412,19 @@ export default function InteractiveMap({
           {/* AI Lot Pricing Optimizer Button */}
           <button
             onClick={() => setIsAIPricingModalOpen(true)}
-            className="flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-lg shadow-purple-950/60 cursor-pointer"
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
             title="Run AI Real Estate Cost & Pricing Optimizer"
           >
-            <Bot className="w-4 h-4 text-purple-200" />
+            <Bot className="w-3.5 h-3.5 text-purple-400" />
             <span>AI Pricing Optimizer</span>
           </button>
 
           <button
             onClick={() => fileInputRef.current?.click()}
             disabled={isParsing}
-            className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-lg shadow-emerald-950 cursor-pointer"
+            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-bold px-3.5 py-1.5 rounded-lg transition-colors shadow-xs cursor-pointer"
           >
-            {isParsing ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            {isParsing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
             <span>Upload AutoCAD / DXF</span>
           </button>
 
@@ -794,9 +794,9 @@ export default function InteractiveMap({
 
               {/* AI LOT COST & VALUATION CARD */}
               {selectedSlotValuation && (
-                <div className="bg-gradient-to-br from-purple-950/70 via-slate-900 to-indigo-950/70 border border-purple-800/70 rounded-2xl p-3.5 space-y-2.5">
+                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs font-bold text-purple-300">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200">
                       <Bot className="w-4 h-4 text-purple-400" />
                       <span>AI Lot Cost & Price Suggestion</span>
                     </div>
@@ -1211,8 +1211,8 @@ export default function InteractiveMap({
               </div>
 
               {/* Natural Language AI Executive Summary */}
-              <div className="bg-gradient-to-r from-purple-950/60 via-slate-900 to-indigo-950/60 border border-purple-800/80 rounded-2xl p-4 flex items-start gap-3">
-                <Sparkles className="w-5 h-5 text-purple-400 shrink-0 mt-0.5" />
+              <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex items-start gap-3">
+                <Sparkles className="w-4 h-4 text-purple-400 shrink-0 mt-0.5" />
                 <div className="space-y-1">
                   <h4 className="font-bold text-white text-xs">AI Actuarial Recommendation Summary</h4>
                   <p className="text-slate-300 text-xs leading-relaxed">
@@ -1333,7 +1333,7 @@ export default function InteractiveMap({
                   type="button"
                   disabled={isApplyingPricing || aiFeasibility.lotValuations.length === 0}
                   onClick={handleApplyAllAIPrices}
-                  className="px-5 py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold flex items-center gap-2 shadow-lg shadow-purple-950/80 cursor-pointer transition-all"
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 rounded-lg text-xs font-bold flex items-center gap-2 shadow-xs cursor-pointer transition-colors"
                 >
                   {isApplyingPricing ? (
                     <>

@@ -380,7 +380,7 @@ export default function FinancePayrollDashboard({
       </div>
 
       {/* Control Panel: Project & Cycle Selection */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-end">
           
           {/* Project Selector */}
@@ -448,7 +448,7 @@ export default function FinancePayrollDashboard({
               <button
                 onClick={handleGenerateDraft}
                 disabled={isGenerating || !selectedProjectId}
-                className="w-full py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center justify-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+                className="w-full py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg shadow-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isGenerating ? 'animate-spin' : ''}`} />
                 <span>Calculate Draft</span>
@@ -623,7 +623,7 @@ export default function FinancePayrollDashboard({
         </div>
       ) : (
         /* CALCULATOR & LIVE SHEET VIEW */
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col flex-1">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1">
           
           {/* Table Header Bar */}
           <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -651,7 +651,7 @@ export default function FinancePayrollDashboard({
                 <>
                   <button
                     onClick={() => handlePrint('summary')}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
                     title="Print Clean Master Payroll Sheet"
                   >
                     <Printer className="w-3.5 h-3.5 text-amber-400" />
@@ -660,7 +660,7 @@ export default function FinancePayrollDashboard({
 
                   <button
                     onClick={() => handlePrint('payslips')}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
+                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 flex items-center gap-1.5 transition-colors cursor-pointer"
                     title="Print Worker Payout Slips with Signatures"
                   >
                     <FileText className="w-3.5 h-3.5 text-emerald-400" />
@@ -674,9 +674,9 @@ export default function FinancePayrollDashboard({
                 <button
                   onClick={handleFinalizePayroll}
                   disabled={isFinalizing || draftCalculation.workerCount === 0}
-                  className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-emerald-600/20 flex items-center gap-2 transition-all cursor-pointer disabled:opacity-50"
+                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg shadow-xs flex items-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
                 >
-                  <Lock className="w-4 h-4" />
+                  <Lock className="w-3.5 h-3.5" />
                   <span>{isFinalizing ? 'Locking & Finalizing...' : 'Finalize Weekly Payroll'}</span>
                 </button>
               )}

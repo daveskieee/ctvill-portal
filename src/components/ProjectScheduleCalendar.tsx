@@ -260,29 +260,29 @@ export default function ProjectScheduleCalendar({
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 border border-slate-800 p-6 rounded-2xl backdrop-blur-xl shadow-2xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-xs">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold tracking-wider uppercase">
-              Time-Critical Coordination
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20 font-semibold tracking-wider uppercase">
+              Schedule & Visits
             </span>
             <span className="text-xs text-slate-400">Master Operations Calendar</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight flex items-center gap-3">
-            <CalendarDays className="w-7 h-7 text-blue-400" />
+          <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+            <CalendarDays className="w-5 h-5 text-blue-400" />
             Project Schedule & Calendar
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-slate-400 text-xs mt-0.5">
             Interactive calendar view of project start/end dates, client coordination meetings, inspections, and deliverable deadlines.
           </p>
         </div>
 
-        <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             onClick={handleExportCSV}
-            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors cursor-pointer"
           >
             <Download className="w-3.5 h-3.5 text-blue-400" />
             <span>Export (CSV)</span>
@@ -291,7 +291,7 @@ export default function ProjectScheduleCalendar({
           <select
             value={projectFilter}
             onChange={(e) => setProjectFilter(e.target.value)}
-            className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500 font-mono"
+            className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-500 font-mono"
           >
             <option value="ALL">All Commercial Projects</option>
             {projects && projects.length > 0 ? (
@@ -307,7 +307,7 @@ export default function ProjectScheduleCalendar({
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
-            className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2.5 focus:outline-none focus:border-blue-500"
+            className="bg-slate-950 border border-slate-700 text-slate-200 text-xs rounded-lg px-2.5 py-1.5 focus:outline-none focus:border-blue-500"
           >
             <option value="ALL">All Event Types</option>
             <option value="MEETING">Meetings</option>
@@ -318,18 +318,18 @@ export default function ProjectScheduleCalendar({
 
           <button
             onClick={() => openAddModal(selectedDateStr)}
-            className="flex items-center gap-2 bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-blue-500/20 text-xs cursor-pointer"
+            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-lg transition-colors text-xs cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            Schedule Event
+            <span>Schedule Event</span>
           </button>
         </div>
       </div>
 
       {/* Main Grid: Calendar on Left, Selected Date Agenda on Right */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Monthly Calendar View (Span 2) */}
-        <div className="lg:col-span-2 bg-slate-900/60 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xs flex flex-col justify-between">
           <div>
             {/* Month Header Navigation */}
             <div className="flex items-center justify-between mb-6">
@@ -453,7 +453,7 @@ export default function ProjectScheduleCalendar({
         </div>
 
         {/* Selected Date Agenda View (Span 1) */}
-        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xs flex flex-col justify-between">
           <div>
             <div className="flex items-center justify-between pb-4 border-b border-slate-800">
               <div>
@@ -714,7 +714,7 @@ export default function ProjectScheduleCalendar({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-lg shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
                 >
                   {isSubmitting ? 'Scheduling...' : 'Save Activity'}
                 </button>
@@ -877,7 +877,7 @@ export default function ProjectScheduleCalendar({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-400 hover:to-blue-500 text-slate-950 font-bold text-xs shadow-lg shadow-blue-500/20 disabled:opacity-50 cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-xs transition-colors disabled:opacity-50 cursor-pointer"
                 >
                   {isSubmitting ? 'Saving...' : 'Save Changes'}
                 </button>

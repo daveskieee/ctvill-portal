@@ -11,6 +11,8 @@ export enum UserRole {
   FINANCE = 'FINANCE',            // Specialized Tier: Finance & Payroll (Weight: 70)
   PM = 'PROJECT_MANAGER',          // Mid-Tier: Project Manager / Site Engineer (Weight: 50)
   TIMEKEEPER = 'TIMEKEEPER',      // Leaf Tier: Site Timekeeper (Weight: 10)
+  CLIENT = 'CLIENT',              // External Client / Property Owner Tier (Weight: 5)
+  UNAUTHORIZED = 'UNAUTHORIZED',  // Tier for unknown / unmapped roles (Weight: 0)
 }
 
 /**
@@ -23,19 +25,23 @@ export const ROLE_HIERARCHY: Record<UserRole, number> = {
   [UserRole.FINANCE]: 70,
   [UserRole.PM]: 50,
   [UserRole.TIMEKEEPER]: 10,
+  [UserRole.CLIENT]: 5,
+  [UserRole.UNAUTHORIZED]: 0,
 };
 
 /**
  * Normalizes any string representation of a role into the canonical UserRole enum.
+ * NEVER defaults to OM/Admin when given an unknown or empty role.
  */
 export function normalizeRole(rawRole: string | undefined | null): UserRole {
-  if (!rawRole) return UserRole.OM;
+  if (!rawRole) return UserRole.UNAUTHORIZED;
   const upper = String(rawRole).toUpperCase().trim();
-  if (upper.includes('TIME')) return UserRole.TIMEKEEPER;
-  if (upper.includes('FINANCE') || upper.includes('TREASURY') || upper.includes('ACCOUNT')) return UserRole.FINANCE;
-  if (upper.includes('ENG') || upper.includes('PROJECT') || upper.includes('PM') || upper.includes('SITE_ENG')) return UserRole.PM;
+  if (upper === 'TIMEKEEPER' || upper.includes('TIME')) return UserRole.TIMEKEEPER;
+  if (upper === 'FINANCE' || upper.includes('TREASURY') || upper.includes('ACCOUNT')) return UserRole.FINANCE;
+  if (upper === 'CLIENT' || upper.includes('CLIENT') || upper.includes('BUYER')) return UserRole.CLIENT;
+  if (upper === 'PROJECT_MANAGER' || upper === 'PM' || upper === 'ENGINEER' || upper.includes('ENG') || upper.includes('SITE_ENG')) return UserRole.PM;
   if (upper === 'ADMIN' || upper.includes('OPERAT') || upper.includes('DIRECTOR') || upper === 'SUPERADMIN' || upper.includes('OM')) return UserRole.OM;
-  return UserRole.OM;
+  return UserRole.UNAUTHORIZED;
 }
 
 /**
@@ -71,6 +77,7 @@ export type AppModuleId =
   | 'contractors'            // Artisan Trades & Workforce Allocation
   | 'subcontractor-audits'   // Finance-only: Subcontractor Roll-Call Audit View
   | 'subcontractor-payables' // Finance AP: Subcontractor Billings & Disbursements
+  | 'payments'               // Progress Billings & Receipts
   | 'audit-trail'            // Operational Audit Trail & QA Logs
   | 'account-settings'       // My Account & Security
   | 'operations-settings';   // Operations & System Settings
@@ -82,58 +89,69 @@ export function canAccessModule(roleInput: UserRole | string, moduleId: string):
   const role = normalizeRole(roleInput);
 
   switch (moduleId) {
-    // 1. OM & FINANCE (Executive Analytics & Global Financial Controls)
+    // 1. Executive Analytics & Dashboards
     case 'dashboard':
-      return role === UserRole.OM || role === UserRole.FINANCE;
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE;
 
     case 'operations-settings':
       return role === UserRole.OM;
 
-    // 2. OM & FINANCE ONLY (Financial Controls, Wage Rates & Billings)
+    // 2. Financial Controls, Wage Rates, Payroll & Billings
     case 'worker-masterlist':
     case 'finance-payroll':
     case 'payroll':
     case 'payments':
-      return role === UserRole.OM || role === UserRole.FINANCE;
-
-    // 3. OM, PM, & FINANCE (Workforce, Projects, Change Orders, CRM, Permits, Audit Trail)
-    case 'contractors':
-    case 'projects':
-    case 'change-orders':
-    case 'audit-trail':
-    case 'quotation-leads':
-    case 'permits':
-      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE;
-
-    // 3b. FINANCE-ONLY dedicated Subcontractor Audit view (read-only isolation)
-    case 'subcontractor-audits':
-      return role === UserRole.OM || role === UserRole.FINANCE;
-
-    // 3c. FINANCE & ADMIN: Subcontractor AP / Billings & Disbursements
     case 'subcontractor-payables':
       return role === UserRole.OM || role === UserRole.FINANCE;
 
-    // 4. PM & OM ONLY (Operational Site Execution Modules)
+    // 2b. Finance Subcontractor Roll-Call Audits
+    case 'subcontractor-audits':
+      return role === UserRole.OM || role === UserRole.FINANCE;
+
+    // 3. Commercial Sites / Projects
+    case 'projects':
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE || role === UserRole.CLIENT;
+
+    // 3b. Quotation Leads / Estimates (Client sees their own quotes)
+    case 'quotation-leads':
+      return role === UserRole.OM || role === UserRole.FINANCE || role === UserRole.CLIENT;
+
+    // 4. Operational Site Execution Modules (PM & OM Only)
     case 'gantt':
     case 'site-diary':
-    case 'documents':
     case 'kanban':
     case 'rfis':
     case 'risks':
     case 'schedule':
+    case 'contractors':
       return role === UserRole.OM || role === UserRole.PM;
 
-    // 4. ATTENDANCE (Universal access with role-specific capabilities)
-    case 'timekeeper-attendance':
-      return true;
+    // 4b. Technical Drawings, CAD & Blueprints (OM, PM, and Client for handover specs)
+    case 'documents':
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.CLIENT;
 
-    // 5. PROFILE & SECURITY (Universal access)
+    // 4c. Statutory Permits & Clearances (OM, PM, Finance)
+    case 'permits':
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE;
+
+    // 4d. Audit Trail (OM, PM, Finance)
+    case 'audit-trail':
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE;
+
+    // 5. Change Orders (OM, PM for field variations; Finance for fund releases)
+    case 'change-orders':
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE;
+
+    // 6. Attendance Roll-Call (All internal roles; Blocked for Client)
+    case 'timekeeper-attendance':
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE || role === UserRole.TIMEKEEPER;
+
+    // 7. Profile & Security (Universal access for all authenticated roles)
     case 'account-settings':
-      return true;
+      return role !== UserRole.UNAUTHORIZED;
 
     default:
-      // Unknown routes default to OM-only
-      return role === UserRole.OM;
+      return false;
   }
 }
 

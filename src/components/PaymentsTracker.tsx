@@ -457,38 +457,38 @@ export default function PaymentsTracker({
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {/* Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900/80 border border-slate-800 p-6 rounded-2xl backdrop-blur-xl shadow-2xl">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-xs">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold tracking-wider uppercase">
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold tracking-wider uppercase">
               Financial Transparency
             </span>
             {isConfidential && (
-              <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase flex items-center gap-1">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase flex items-center gap-1">
                 <ShieldAlert className="w-3 h-3 text-amber-400" />
                 Confidential Accounting (Admin View)
               </span>
             )}
             <span className="text-xs text-slate-400">Installment Ledger & Corporate Receivables</span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-white tracking-tight flex items-center gap-3">
-            <DollarSign className="w-7 h-7 text-emerald-400" />
+          <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+            <DollarSign className="w-5 h-5 text-emerald-400" />
             Payments & Milestone Billing
           </h1>
-          <p className="text-slate-400 text-sm mt-1">
+          <p className="text-slate-400 text-xs mt-0.5">
             Focused on installment tracking per project: client payments, due dates, collected vs. pending amounts, and overdue accounts.
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           <button
             onClick={() => setShowCreateInvoiceModal(true)}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-bold transition cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
           >
             <Plus className="w-4 h-4" />
-            New Installment Schedule
+            <span>New Installment Schedule</span>
           </button>
 
           <button
@@ -496,10 +496,10 @@ export default function PaymentsTracker({
               if (clients.length > 0) setRecordClientId(clients[0].id);
               setShowRecordModal(true);
             }}
-            className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-bold px-4 py-2.5 rounded-xl transition shadow-lg shadow-emerald-500/20 cursor-pointer text-xs"
+            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer text-xs"
           >
             <CheckCircle2 className="w-4 h-4" />
-            Record Client Payment
+            <span>Record Client Payment</span>
           </button>
         </div>
       </div>
@@ -1035,7 +1035,7 @@ export default function PaymentsTracker({
                 <button
                   type="submit"
                   disabled={isSubmitting}
-                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-emerald-600 hover:from-emerald-400 hover:to-emerald-500 text-slate-950 font-bold text-xs shadow-lg shadow-emerald-500/20 disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                  className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs shadow-xs transition-colors disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
                 >
                   {isSubmitting ? 'Recording...' : 'Confirm & Sync Ledger'}
                 </button>

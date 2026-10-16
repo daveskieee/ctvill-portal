@@ -309,19 +309,19 @@ export default function DocumentManager({
   }, [effectiveDocuments, activeCategory, searchQuery]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       
       {/* Header Bar */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 mb-1">
-            <span className="w-2.5 h-2.5 rounded-full bg-teal-400 animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-teal-400" />
             <span className="text-[10px] font-mono text-teal-400 font-bold uppercase tracking-wider">
               CENTRALIZED PROJECT ARCHIVE
             </span>
           </div>
-          <h2 className="text-xl font-black text-white flex items-center gap-2">
-            <FolderKanban className="w-6 h-6 text-teal-400" />
+          <h2 className="text-base font-bold text-white flex items-center gap-2">
+            <FolderKanban className="w-5 h-5 text-teal-400" />
             Document Management System
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
@@ -329,18 +329,18 @@ export default function DocumentManager({
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
+        <div className="flex items-center gap-2 flex-wrap">
           <input
             type="text"
             placeholder="Search documents..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
+            className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
           />
 
           <button
             onClick={() => setIsUploadModalOpen(true)}
-            className="flex items-center gap-1.5 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-lg shadow-teal-950 cursor-pointer"
+            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer"
           >
             <Upload className="w-4 h-4" />
             <span>Upload Document</span>
@@ -354,9 +354,9 @@ export default function DocumentManager({
           <button
             key={cat.id}
             onClick={() => setActiveCategory(cat.id)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold whitespace-nowrap transition-all cursor-pointer ${
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
               activeCategory === cat.id
-                ? 'bg-teal-600 text-white shadow-md shadow-teal-950'
+                ? 'bg-amber-500 text-slate-950 font-bold'
                 : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
             }`}
           >

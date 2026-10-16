@@ -482,58 +482,58 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
-          <button onClick={handleExport} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-300 text-xs font-semibold px-3 py-2 rounded-xl transition cursor-pointer">
+          <button onClick={handleExport} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer">
             <Download className="w-3.5 h-3.5 text-amber-400" />
-            Export CSV
+            <span>Export CSV</span>
           </button>
-          <button onClick={() => fetchRecords(true)} disabled={isRefreshing} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-750 border border-slate-700 text-slate-300 text-xs font-semibold px-3 py-2 rounded-xl transition cursor-pointer disabled:opacity-50">
+          <button onClick={() => fetchRecords(true)} disabled={isRefreshing} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50">
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-amber-400' : 'text-slate-400'}`} />
-            Refresh
+            <span>Refresh</span>
           </button>
           <button
             onClick={() => { setForm(EMPTY_FORM); setIsModalOpen(true); }}
-            className="flex items-center gap-2 bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-bold px-4 py-2 rounded-xl transition shadow-lg shadow-emerald-900/30 cursor-pointer text-xs"
+            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer text-xs"
           >
             <Plus className="w-4 h-4" />
-            Record Contractor Disbursement
+            <span>Record Contractor Disbursement</span>
           </button>
         </div>
       </div>
 
       {/* ── KPI Cards ── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         {[
-          { label: 'Total Subcontractor Billed', value: fmt(kpis.totalBilled), sub: `${records.length} invoices`, icon: FileText, color: 'text-amber-400', ring: 'border-amber-500/20 bg-amber-500/5' },
-          { label: 'Approved for Payout', value: fmt(kpis.approved), sub: 'Audit-verified', icon: ShieldCheck, color: 'text-emerald-400', ring: 'border-emerald-500/20 bg-emerald-500/5' },
-          { label: 'Pending Disbursement', value: fmt(kpis.pending), sub: `${records.filter(r=>r.status==='PENDING_AUDIT').length} awaiting audit`, icon: Clock, color: 'text-amber-400', ring: 'border-amber-500/20 bg-amber-500/5' },
-          { label: 'Total Disbursed', value: fmt(kpis.disbursed), sub: `${records.filter(r=>r.status==='PAID').length} releases`, icon: CreditCard, color: 'text-sky-400', ring: 'border-sky-500/20 bg-sky-500/5' },
+          { label: 'Total Subcontractor Billed', value: fmt(kpis.totalBilled), sub: `${records.length} invoices`, icon: FileText, color: 'text-amber-400', ring: 'border-slate-800 bg-slate-900/90' },
+          { label: 'Approved for Payout', value: fmt(kpis.approved), sub: 'Audit-verified', icon: ShieldCheck, color: 'text-emerald-400', ring: 'border-slate-800 bg-slate-900/90' },
+          { label: 'Pending Disbursement', value: fmt(kpis.pending), sub: `${records.filter(r=>r.status==='PENDING_AUDIT').length} awaiting audit`, icon: Clock, color: 'text-amber-400', ring: 'border-slate-800 bg-slate-900/90' },
+          { label: 'Total Disbursed', value: fmt(kpis.disbursed), sub: `${records.filter(r=>r.status==='PAID').length} releases`, icon: CreditCard, color: 'text-sky-400', ring: 'border-slate-800 bg-slate-900/90' },
         ].map(card => (
-          <div key={card.label} className={`rounded-2xl border p-4 ${card.ring}`}>
-            <div className="flex items-center justify-between mb-2">
+          <div key={card.label} className={`rounded-xl border p-3.5 shadow-xs ${card.ring}`}>
+            <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider leading-tight">{card.label}</span>
               <card.icon className={`w-4 h-4 ${card.color}`} />
             </div>
-            <div className="text-xl font-black text-white font-mono">{card.value}</div>
+            <div className="text-lg font-bold text-white font-mono">{card.value}</div>
             <div className="text-[10px] text-slate-500 mt-0.5">{card.sub}</div>
           </div>
         ))}
       </div>
 
       {/* ── Filters & Search Bar ── */}
-      <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center">
-        <div className="relative flex-1">
+      <div className="flex flex-col sm:flex-row gap-2.5 items-start sm:items-center">
+        <div className="relative flex-1 w-full">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500" />
           <input
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="Search payee, trade, project, reference…"
-            className="w-full bg-slate-900 border border-slate-800 text-slate-200 pl-9 pr-3 py-2 rounded-xl text-xs focus:outline-none focus:border-emerald-500/50"
+            className="w-full bg-slate-900 border border-slate-800 text-slate-200 pl-8 pr-3 py-1.5 rounded-lg text-xs focus:outline-none focus:border-amber-500/50"
           />
         </div>
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value as any)}
-          className="bg-slate-900 border border-slate-800 text-slate-300 text-xs px-3 py-2 rounded-xl focus:outline-none focus:border-emerald-500/50 cursor-pointer"
+          className="bg-slate-900 border border-slate-800 text-slate-300 text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-amber-500/50 cursor-pointer"
         >
           <option value="ALL">All Statuses</option>
           {(Object.keys(STATUS_CONFIG) as SubcontractorPayableStatus[]).map(s => (
@@ -543,7 +543,7 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
         <select
           value={projectFilter}
           onChange={e => setProjectFilter(e.target.value)}
-          className="bg-slate-900 border border-slate-800 text-slate-300 text-xs px-3 py-2 rounded-xl focus:outline-none focus:border-emerald-500/50 cursor-pointer"
+          className="bg-slate-900 border border-slate-800 text-slate-300 text-xs px-2.5 py-1.5 rounded-lg focus:outline-none focus:border-amber-500/50 cursor-pointer"
         >
           <option value="ALL">All Sites</option>
           {projectNames.map(p => <option key={p} value={p}>{p}</option>)}
@@ -554,7 +554,7 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
       </div>
 
       {/* ── Main Table ── */}
-      <div className="bg-slate-950/60 border border-slate-800/60 rounded-2xl overflow-hidden shadow-xl">
+      <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
@@ -1074,7 +1074,7 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
                 <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer">
                   Cancel
                 </button>
-                <button type="submit" disabled={isSaving} className="flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-bold text-xs transition shadow-lg shadow-emerald-900/30 cursor-pointer disabled:opacity-60">
+                <button type="submit" disabled={isSaving} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-colors shadow-xs cursor-pointer disabled:opacity-60">
                   {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
                   {isSaving ? 'Saving…' : 'Save Record'}
                 </button>
@@ -1120,7 +1120,7 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
             </div>
             <div className="flex justify-end gap-3 pt-1">
               <button onClick={() => setDisburseTarget(null)} className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer">Cancel</button>
-              <button onClick={handleDisburse} disabled={disbursing} className="flex items-center gap-2 px-5 py-2 rounded-xl bg-gradient-to-r from-sky-600 to-sky-700 hover:from-sky-500 hover:to-sky-600 text-white font-bold text-xs transition cursor-pointer disabled:opacity-60 shadow-lg shadow-sky-900/30">
+              <button onClick={handleDisburse} disabled={disbursing} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-colors cursor-pointer disabled:opacity-60 shadow-xs">
                 {disbursing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                 {disbursing ? 'Processing…' : 'Confirm Disbursement'}
               </button>

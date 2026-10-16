@@ -209,15 +209,15 @@ export default function WorkerMasterlistManager({
       )}
 
       {/* Header */}
-      <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-amber-950/30 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-xl text-amber-400">
-            <HardHat className="w-6 h-6" />
+          <div className="p-2 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-400">
+            <HardHat className="w-5 h-5" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h1 className="text-lg font-bold text-white tracking-tight">Labor Workforce Masterlist</h1>
-              <span className="text-[10px] font-mono uppercase bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded-full font-bold">
+              <h1 className="text-base font-bold text-white tracking-tight">Labor Workforce Masterlist</h1>
+              <span className="text-[10px] font-mono uppercase bg-amber-500/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-semibold">
                 {isFinance ? 'FINANCE & COMPENSATION' : 'ADMIN / OPERATIONS'}
               </span>
             </div>
@@ -229,7 +229,7 @@ export default function WorkerMasterlistManager({
 
         <button
           onClick={() => setIsAddModalOpen(true)}
-          className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center gap-2 transition-all cursor-pointer self-start md:self-auto"
+          className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg flex items-center gap-2 transition-colors cursor-pointer self-start md:self-auto"
         >
           <UserPlus className="w-4 h-4" />
           <span>Register New Worker</span>
@@ -237,7 +237,7 @@ export default function WorkerMasterlistManager({
       </div>
 
       {/* Filter Bar with Status Toggle Tabs */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3.5">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 shadow-xs flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3">
         <div className="flex-1 flex flex-col sm:flex-row items-center gap-3">
           {/* Search */}
           <div className="w-full sm:flex-1 relative">
@@ -281,14 +281,14 @@ export default function WorkerMasterlistManager({
                 key={tab.id}
                 type="button"
                 onClick={() => setStatusFilter(tab.id as any)}
-                className={`px-3 py-1.5 rounded-lg text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
+                className={`px-3 py-1.5 rounded-lg text-xs transition-colors cursor-pointer flex items-center gap-1.5 ${
                   statusFilter === tab.id
-                    ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/20'
+                    ? 'bg-amber-500 text-slate-950 font-bold'
                     : 'text-slate-400 hover:text-white hover:bg-slate-900'
                 }`}
               >
                 <span>{tab.label}</span>
-                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${
+                <span className={`text-[10px] px-1.5 py-0.2 rounded font-mono ${
                   statusFilter === tab.id ? 'bg-slate-950/20 text-slate-950 font-black' : 'bg-slate-800 text-slate-400'
                 }`}>
                   {tab.count}
@@ -300,7 +300,7 @@ export default function WorkerMasterlistManager({
           <button
             onClick={fetchWorkers}
             disabled={isLoading}
-            className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-xl flex items-center justify-center border border-slate-700 transition-colors cursor-pointer shrink-0"
+            className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg flex items-center justify-center border border-slate-700 transition-colors cursor-pointer shrink-0"
             title="Reload Workers"
           >
             <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin text-amber-400' : ''}`} />
@@ -309,7 +309,7 @@ export default function WorkerMasterlistManager({
       </div>
 
       {/* Workers Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl shadow-xl overflow-hidden flex flex-col flex-1">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1">
         <div className="p-4 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-bold text-white">

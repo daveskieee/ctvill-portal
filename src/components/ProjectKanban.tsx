@@ -228,7 +228,7 @@ export default function ProjectKanban({
                     onClearAllTasks();
                   }
                 }}
-                className="flex items-center gap-1.5 bg-slate-800 hover:bg-rose-950/70 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-700/50 text-xs font-semibold px-3 py-2 rounded-xl transition-all cursor-pointer"
+                className="flex items-center gap-1.5 bg-slate-800 hover:bg-rose-950/70 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-700/50 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                 title="Clear all tasks from the board"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -238,7 +238,7 @@ export default function ProjectKanban({
 
             <button
               onClick={() => setIsModalOpen(true)}
-              className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-lg shadow-emerald-950 cursor-pointer"
+              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer"
             >
               <Plus className="w-4 h-4" />
               <span>Create Task</span>

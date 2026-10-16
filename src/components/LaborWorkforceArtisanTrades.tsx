@@ -544,7 +544,7 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
           </div>
 
           {/* AI Workforce Optimization Engine */}
-          <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/40 border border-indigo-500/30 rounded-2xl p-6 shadow-lg space-y-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-4">
               <div className="flex items-center gap-3">
                 <div className="bg-indigo-600/30 border border-indigo-500/50 p-2.5 rounded-xl text-indigo-300">
@@ -818,13 +818,13 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                               </div>
 
                               {/* 3. IMPACT STATEMENT BANNER */}
-                              <div className="bg-gradient-to-r from-indigo-950/60 via-slate-900/60 to-indigo-950/40 border border-indigo-500/30 rounded-xl p-3 flex items-start gap-2.5 text-xs text-indigo-100 shadow-xs">
+                              <div className="bg-slate-950 border border-slate-800 rounded-lg p-3 flex items-start gap-2.5 text-xs text-slate-200">
                                 <TrendingUp className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
                                 <div className="space-y-0.5 flex-1 min-w-0">
                                   <span className="text-[10px] font-mono font-bold text-amber-400 uppercase tracking-wider block">
                                     Operational Impact
                                   </span>
-                                  <p className="leading-relaxed text-slate-200 text-xs">
+                                  <p className="leading-relaxed text-slate-300 text-xs">
                                     {rec.rationale || rec.impact || 'Mitigates critical path delay for milestone delivery.'}
                                   </p>
                                 </div>
@@ -845,7 +845,7 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                                 type="button"
                                 disabled={isReallocating}
                                 onClick={() => handleApproveCard(rec)}
-                                className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-teal-600 hover:from-indigo-500 hover:to-teal-500 text-white rounded-lg text-xs font-bold font-mono transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-indigo-600/20 disabled:opacity-60"
+                                className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs disabled:opacity-60"
                               >
                                 {isReallocating ? (
                                   <>

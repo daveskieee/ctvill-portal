@@ -39,6 +39,7 @@ import {
   UserRole, ROLE_HIERARCHY, hasRoleOrHigher, 
   normalizeRole, canAccessModule, getAttendanceCapabilities 
 } from '../utils/rbac';
+import { getSidebarSections } from '../config/navigation';
 import logoJpg from '../assets/images/ctvill/logo.jpg';
 import ProjectKanban from './ProjectKanban';
 import GanttTimeline from './GanttTimeline';
@@ -301,22 +302,24 @@ export default function AdminPortal({
   onRefreshAllData
 }: AdminPortalProps) {
   
-  // User Role Resolution via Centralized RBAC Hierarchy (OM -> PM -> TIMEKEEPER, FINANCE)
+  // User Role Resolution via Centralized RBAC Hierarchy (OM -> PM -> TIMEKEEPER, FINANCE, CLIENT)
   const currentRole = normalizeRole(session?.role);
   const isOperationsManager = currentRole === UserRole.OM;
   const isProjectManager = currentRole === UserRole.PM;
   const isTimekeeper = currentRole === UserRole.TIMEKEEPER;
   const isFinance = currentRole === UserRole.FINANCE;
+  const isClient = currentRole === UserRole.CLIENT;
 
   const isAdmin = isOperationsManager;
   const isEngineer = isProjectManager;
   const isOperationsDirector = isOperationsManager;
-  const rawRole = isTimekeeper ? 'TIMEKEEPER' : isFinance ? 'FINANCE' : isProjectManager ? 'ENGINEER' : 'ADMIN';
+  const rawRole = isTimekeeper ? 'TIMEKEEPER' : isFinance ? 'FINANCE' : isClient ? 'CLIENT' : isProjectManager ? 'ENGINEER' : 'ADMIN';
 
   // Navigation Tabs with Role-Aware Default Landing Page
   const [activeTab, setActiveTab] = useState<string>(() => {
     if (isTimekeeper) return 'timekeeper-attendance';
     if (isFinance) return 'finance-payroll';
+    if (isClient) return 'projects';
     if (isProjectManager) return 'projects';
     return 'dashboard';
   });
@@ -329,12 +332,14 @@ export default function AdminPortal({
         ? 'timekeeper-attendance' 
         : isFinance 
           ? 'finance-payroll' 
-          : isProjectManager 
-            ? 'projects' 
-            : 'dashboard';
+          : isClient
+            ? 'projects'
+            : isProjectManager 
+              ? 'projects' 
+              : 'dashboard';
       setActiveTab(defaultHome);
     }
-  }, [currentRole, activeTab, isTimekeeper, isFinance, isProjectManager]);
+  }, [currentRole, activeTab, isTimekeeper, isFinance, isClient, isProjectManager]);
 
   // URL Hash & Query Parameter Route Guard (Prevents URL Tampering)
   useEffect(() => {
@@ -1265,17 +1270,19 @@ export default function AdminPortal({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  // Filtered Quick Search Results for Header Command Palette
+  // Filtered Quick Search Results for Header Command Palette (Strict Role RBAC)
   const filteredQuickModules = useMemo(() => {
     if (!globalSearch.trim()) return [];
     const q = globalSearch.toLowerCase();
     return Object.entries(TAB_METADATA).filter(([id, meta]) => 
-      meta.title.toLowerCase().includes(q) ||
-      meta.subtitle.toLowerCase().includes(q) ||
-      meta.department.toLowerCase().includes(q) ||
-      id.toLowerCase().includes(q)
+      canAccessModule(currentRole, id) && (
+        meta.title.toLowerCase().includes(q) ||
+        meta.subtitle.toLowerCase().includes(q) ||
+        meta.department.toLowerCase().includes(q) ||
+        id.toLowerCase().includes(q)
+      )
     ).slice(0, 5);
-  }, [globalSearch]);
+  }, [globalSearch, currentRole]);
 
   const filteredQuickProjects = useMemo(() => {
     if (!globalSearch.trim()) return [];
@@ -1676,18 +1683,24 @@ export default function AdminPortal({
     { name: 'Handed Over', value: statusCounts.handedOver, color: '#475569' },
   ];
 
-  // Quick Jump Module Master List
+  // Quick Jump Module Master List (Filtered strictly by role authorization)
   const quickJumpModules = [
-    { id: 'overview', label: 'Executive Operations & Milestones', icon: TrendingUp, desc: 'Global KPIs & Capital Readiness' },
-    { id: 'tasks', label: 'PM Tasks (Kanban)', icon: Sparkles, desc: `${tasks.length} Construction Tasks` },
-    { id: 'gantt', label: 'Gantt Schedule', icon: BarChart3, desc: '16-Week Milestone Timeline' },
-    { id: 'site-diary', label: 'Weather Report', icon: CloudSun, desc: 'Live Atmospheric Telemetry & Station' },
-    { id: 'documents', label: 'Blueprint DMS', icon: FileCode, desc: `${documents.length} CAD & Legal Files` },
+    { id: 'dashboard', label: 'Executive Operations & Milestones', icon: TrendingUp, desc: 'Global KPIs & Capital Readiness' },
+    { id: 'projects', label: 'Commercial Sites Hub', icon: Building2, desc: `${projects.length} Active Sites` },
+    { id: 'kanban', label: 'PM Tasks (Kanban)', icon: Sparkles, desc: `${tasks.length} Construction Tasks` },
+    { id: 'gantt', label: 'Gantt Schedule', icon: BarChart3, desc: 'Critical Path & Milestones' },
+    { id: 'site-diary', label: 'Daily Diary & Weather', icon: CloudSun, desc: 'Field Observations & Weather' },
+    { id: 'documents', label: 'Detailed Engineering & CAD', icon: FileCode, desc: `${documents.length} CAD & Spec Files` },
     { id: 'risks', label: 'Risk Matrix (5x5)', icon: ShieldAlert, desc: `${risks.length} Tracked Hazards` },
-    { id: 'site-qa-defects', label: 'Civil Works & Defect Hub', icon: HardHat, desc: `${openDefectsCount} Open Punch-List Items` },
     { id: 'contractors', label: 'Workforce & Manpower', icon: Users, desc: `${totalManpower} Workers On-Site` },
-    { id: 'audit-trail', label: 'Operational Audit Trail', icon: History, desc: 'Immutable Blockchain Log' },
-  ];
+    { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call', icon: ClipboardCheck, desc: 'Daily Attendance Ledger' },
+    { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote, desc: 'Disbursements & AP' },
+    { id: 'payments', label: 'Progress Billings & Receipts', icon: DollarSign, desc: 'Client Billing Milestones' },
+    { id: 'quotation-leads', label: 'Fit-Out Estimates & Leads', icon: Briefcase, desc: `${quotations.length} Active Leads` },
+    { id: 'permits', label: 'PEZA & City Hall Permits', icon: FileCheck, desc: 'Statutory Clearances' },
+    { id: 'audit-trail', label: 'Operational Audit Trail', icon: History, desc: 'System Audit Records' },
+    { id: 'account-settings', label: 'My Account & Security', icon: UserCog, desc: 'Profile & Security' },
+  ].filter(m => canAccessModule(currentRole, m.id));
 
   // Manpower Roll-Call Audit Modal State
   const [isAuditModalOpen, setIsAuditModalOpen] = useState(false);
@@ -1973,194 +1986,13 @@ export default function AdminPortal({
     { name: 'Outsourced Trade Partners', value: outsourcedCount, color: '#f59e0b' }
   ] : [];
 
-  const sidebarSections = isTimekeeper ? [
-    {
-      id: 'tk-workforce',
-      title: 'Workforce & Attendance',
-      items: [
-        { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call', icon: ClipboardCheck },
-      ]
-    },
-    {
-      id: 'tk-system',
-      title: 'System & Security',
-      items: [
-        { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
-      ]
-    }
-  ] : isProjectManager ? [
-    {
-      id: 'pm-schedule',
-      title: 'Projects & Schedule',
-      items: [
-        { id: 'dashboard', label: 'Site Command Center', icon: HardHat },
-        { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
-        { id: 'gantt', label: 'Site Gantt Schedule', icon: BarChart3 },
-        { id: 'kanban', label: 'Field Kanban Tasks', icon: CheckSquare },
-        { id: 'schedule', label: 'Site Calendar & Visits', icon: CalendarDays },
-      ]
-    },
-    {
-      id: 'pm-operations',
-      title: 'Field Operations & Safety',
-      items: [
-        { id: 'site-diary', label: 'Daily Diary & Weather', icon: CloudSun },
-        { 
-          id: 'rfis', 
-          label: 'Site RFI Register', 
-          icon: FileSpreadsheet,
-          badge: rfis.filter(r => r.status === 'OPEN').length > 0 ? `${rfis.filter(r => r.status === 'OPEN').length}` : undefined 
-        },
-        { 
-          id: 'change-orders', 
-          label: 'Site Change Orders', 
-          icon: FileText,
-          badge: changeOrders.filter(c => c.status === 'PENDING').length > 0 ? `${changeOrders.filter(c => c.status === 'PENDING').length}` : undefined 
-        },
-        { id: 'risks', label: 'Jobsite Safety & Risks', icon: ShieldAlert },
-      ]
-    },
-    {
-      id: 'pm-workforce',
-      title: 'Workforce & Attendance',
-      items: [
-        { id: 'timekeeper-attendance', label: 'Artisan Roll-Call & Logs', icon: ClipboardCheck },
-        { id: 'contractors', label: 'Trade Crews & Foremen', icon: Users },
-      ]
-    },
-    {
-      id: 'pm-specs',
-      title: 'Design & Compliance',
-      items: [
-        { id: 'documents', label: 'Blueprints & MEPFS Specs', icon: FileCode },
-        { id: 'permits', label: 'PEZA & City Hall Permits', icon: FileCheck },
-        { id: 'audit-trail', label: 'Audit Trail & QA Logs', icon: History },
-      ]
-    },
-    {
-      id: 'pm-system',
-      title: 'System & Security',
-      items: [
-        { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
-      ]
-    }
-  ] : isFinance ? [
-    {
-      id: 'fin-treasury',
-      title: 'Finance & Commercial',
-      items: [
-        { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote },
-        { id: 'subcontractor-payables', label: 'Subcontractor Payables', icon: Receipt },
-        { id: 'dashboard', label: 'Financial Executive Overview', icon: TrendingUp },
-        { id: 'payments', label: 'Progress Billings & Receipts', icon: DollarSign },
-        { 
-          id: 'change-orders', 
-          label: 'Change Order Fund Releases', 
-          icon: FileText,
-          badge: changeOrders.filter(c => c.status === 'PENDING').length > 0 ? `${changeOrders.filter(c => c.status === 'PENDING').length}` : undefined 
-        },
-      ]
-    },
-    {
-      id: 'fin-sites',
-      title: 'Commercial Sites & Audit',
-      items: [
-        { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
-        { id: 'timekeeper-attendance', label: 'In-House Attendance Records', icon: ClipboardCheck },
-        { id: 'subcontractor-audits', label: 'Subcontractor Roll-Call Audits', icon: ShieldCheck },
-        { id: 'worker-masterlist', label: 'Worker Masterlist & Rates', icon: Users },
-        { 
-          id: 'quotation-leads', 
-          label: 'Quotation Estimates CRM', 
-          icon: Briefcase,
-          badge: quotations.filter(q => q.status === 'NEW_INQUIRY').length > 0 ? `${quotations.filter(q => q.status === 'NEW_INQUIRY').length}` : undefined 
-        },
-        { id: 'permits', label: 'PEZA & LGU Permits', icon: FileCheck },
-        { id: 'audit-trail', label: 'Financial Audit Trail', icon: History },
-      ]
-    },
-    {
-      id: 'fin-system',
-      title: 'System & Security',
-      items: [
-        { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
-      ]
-    }
-  ] : [
-    {
-      id: 'ops-projects',
-      title: 'Projects & Schedule',
-      items: [
-        { id: 'dashboard', label: 'Executive Portfolio', icon: TrendingUp },
-        { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
-        { id: 'gantt', label: 'Master Gantt & Timeline', icon: BarChart3 },
-        { id: 'kanban', label: 'Field Execution Kanban', icon: CheckSquare },
-        { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
-      ]
-    },
-    {
-      id: 'ops-operations',
-      title: 'Field Operations & Safety',
-      items: [
-        { id: 'site-diary', label: 'Site Diary & Weather', icon: CloudSun },
-        { 
-          id: 'rfis', 
-          label: 'Engineering RFIs Register', 
-          icon: FileSpreadsheet,
-          badge: rfis.filter(r => r.status === 'OPEN').length > 0 ? `${rfis.filter(r => r.status === 'OPEN').length}` : undefined 
-        },
-        { 
-          id: 'change-orders', 
-          label: 'Commercial Change Orders', 
-          icon: FileText,
-          badge: changeOrders.filter(c => c.status === 'PENDING').length > 0 ? `${changeOrders.filter(c => c.status === 'PENDING').length}` : undefined 
-        },
-        { id: 'risks', label: 'Jobsite Safety & Risk Matrix', icon: ShieldAlert },
-      ]
-    },
-    {
-      id: 'ops-workforce',
-      title: 'Workforce & Labor',
-      items: [
-        { id: 'contractors', label: 'Labor Workforce & Artisan Trades', icon: Users },
-        { id: 'worker-masterlist', label: 'Worker Masterlist & Rates', icon: Users },
-        { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call', icon: ClipboardCheck },
-        { id: 'subcontractor-audits', label: 'Subcontractor Roll-Call Audits', icon: ShieldCheck },
-      ]
-    },
-    {
-      id: 'ops-finance',
-      title: 'Finance & Commercial',
-      items: [
-        { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote },
-        { id: 'subcontractor-payables', label: 'Subcontractor Payables', icon: Receipt },
-        { id: 'payments', label: 'Progress Billings & Receipts', icon: DollarSign },
-        { 
-          id: 'quotation-leads', 
-          label: 'Fit-Out Estimates & Leads', 
-          icon: Briefcase,
-          badge: quotations.filter(q => q.status === 'NEW_INQUIRY').length > 0 ? `${quotations.filter(q => q.status === 'NEW_INQUIRY').length}` : undefined 
-        },
-      ]
-    },
-    {
-      id: 'ops-design',
-      title: 'Design & Compliance',
-      items: [
-        { id: 'documents', label: 'Detailed Engineering & CAD', icon: FileCode },
-        { id: 'permits', label: 'PEZA & City Hall Permits', icon: FileCheck },
-        { id: 'audit-trail', label: 'Audit Trail & QA Logs', icon: History },
-      ]
-    },
-    {
-      id: 'ops-settings',
-      title: 'System & Controls',
-      items: [
-        { id: 'account-settings', label: 'My Account & Security', icon: UserCog },
-        { id: 'operations-settings', label: 'Operations & System Settings', icon: Settings2 },
-      ]
-    }
-  ];
+  const sidebarSections = useMemo(() => {
+    return getSidebarSections(currentRole, {
+      rfis: rfis.filter(r => r.status === 'OPEN').length,
+      changeOrders: changeOrders.filter(c => c.status === 'PENDING').length,
+      quotations: quotations.filter(q => q.status === 'NEW_INQUIRY').length,
+    });
+  }, [currentRole, rfis, changeOrders, quotations]);
 
   return (
     <div className="h-screen h-[100dvh] bg-slate-900 text-slate-100 flex flex-col font-sans overflow-hidden">
@@ -2192,9 +2024,11 @@ export default function AdminPortal({
                     ? 'bg-indigo-500/10 border-indigo-500/30 text-indigo-300'
                     : isFinance
                     ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+                    : isClient
+                    ? 'bg-sky-500/10 border-sky-500/30 text-sky-300'
                     : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
                 }`}>
-                  {isTimekeeper ? 'TIMEKEEPER' : isProjectManager ? 'PROJECT MANAGER' : isFinance ? 'FINANCE' : 'OPERATIONS'}
+                  {isTimekeeper ? 'TIMEKEEPER' : isProjectManager ? 'PROJECT MANAGER' : isFinance ? 'FINANCE' : isClient ? 'CLIENT' : 'OPERATIONS'}
                 </span>
               </div>
             </div>
@@ -2793,14 +2627,16 @@ export default function AdminPortal({
                   <span className="bg-red-500/15 border border-red-500/40 text-red-300 font-mono text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
                     ACCESS RESTRICTED • 403 FORBIDDEN
                   </span>
-                  <h3 className="text-xl font-black text-white tracking-tight">
-                    {isTimekeeper ? 'Restricted Administrative Resource' : isProjectManager ? 'Executive / Financial Control Restricted' : 'Unauthorized Resource'}
+                  <h3 className="text-xl font-bold text-white tracking-tight">
+                    {isTimekeeper ? 'Restricted Administrative Resource' : isProjectManager ? 'Executive / Financial Control Restricted' : isClient ? 'Client Portal Restricted Area' : 'Unauthorized Resource'}
                   </h3>
                   <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed">
                     {isTimekeeper
                       ? 'Site Timekeeper accounts are strictly scoped to Daily Workforce Attendance check-ins. Access to executive controls, project scheduling, engineering specifications, financials, and company settings is prohibited under corporate RBAC security policy.'
                       : isProjectManager
                       ? 'Project Manager / Site Engineer accounts are scoped to assigned project field operations. Access to executive portfolio analytics, global financial ledgers, worker wage configurations, and corporate system settings is restricted to Operations Managers.'
+                      : isClient
+                      ? 'Client accounts are scoped to your assigned fit-out project, documents, and estimates. Internal operations and administrative modules are restricted.'
                       : `Your current role (${currentRole}) does not possess authorization to access the requested module.`}
                   </p>
                 </div>
@@ -2811,12 +2647,14 @@ export default function AdminPortal({
                         ? 'timekeeper-attendance' 
                         : isFinance 
                           ? 'finance-payroll' 
-                          : isProjectManager 
-                            ? 'projects' 
-                            : 'dashboard';
+                          : isClient
+                            ? 'projects'
+                            : isProjectManager 
+                              ? 'projects' 
+                              : 'dashboard';
                       setActiveTab(defaultHome);
                     }}
-                    className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-amber-500/20 cursor-pointer transition-all inline-flex items-center gap-2"
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg cursor-pointer transition-colors inline-flex items-center gap-2"
                   >
                     <ArrowRight className="w-4 h-4" />
                     <span>Return to Authorized Workspace</span>

@@ -541,7 +541,7 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
             {selectedContractor ? (
               <>
                 {/* Profile Cover & Header */}
-                <div className="relative bg-gradient-to-r from-slate-900 via-slate-850 to-teal-950/40 border-b border-slate-800 p-5 sm:p-6">
+                <div className="relative bg-slate-900 border-b border-slate-800 p-4 sm:p-5">
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div className="flex items-center gap-4">
                       {/* Large Profile Picture with Online Status Beacon */}
@@ -1226,7 +1226,7 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white rounded-xl font-bold font-mono cursor-pointer shadow-md transition flex items-center gap-1.5"
+                  className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-lg font-bold text-xs cursor-pointer shadow-xs transition-colors flex items-center gap-1.5"
                 >
                   <Check className="w-4 h-4" />
                   <span>Save Manual Allocation</span>
