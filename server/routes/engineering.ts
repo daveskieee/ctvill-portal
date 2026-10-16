@@ -6,8 +6,12 @@
 import { Router, Request, Response } from 'express';
 import { prisma, pool } from '../db';
 import { broadcastChange, invalidateAllDataCache } from '../events';
+import { requireAuth } from '../middleware/auth';
 
 export const engineeringRouter = Router();
+
+// Apply base authentication on all engineering endpoints
+engineeringRouter.use(requireAuth);
 
 // ============================================================================
 // GOVERNMENT PERMITS (PEZA, MACEA, CITY HALL, FDAS, ELECTRICAL)

@@ -5,14 +5,509 @@
 
 import { Router, Request, Response } from 'express';
 import { Role, AccountStatus } from '@prisma/client';
-import * as crypto from 'crypto';
 import { prisma, getSystemSetting, setSystemSetting, hashPassword, verifyPassword } from '../db';
 import { broadcastChange } from '../events';
+import { 
+  createSession, 
+  destroySession, 
+  revokeAllUserSessions,
+  generateCsrfToken,
+  CSRF_COOKIE_NAME,
+  SESSION_COOKIE_NAME 
+} from '../services/sessionService';
+import { setSessionCookie, clearSessionCookie, setCsrfCookie, clearCsrfCookie } from '../middleware/cookies';
+import { requireAuth, requireRole } from '../middleware/auth';
+import { loginRateLimiter, sensitiveActionRateLimiter } from '../middleware/security';
 
 export const authRouter = Router();
 
-// GET /api/staff — List all Admin, Engineer, Timekeeper, and Finance accounts
-authRouter.get('/staff', async (req: Request, res: Response) => {
+/**
+ * Validate password strength: minimum 8 characters, containing both letters and numbers.
+ */
+export function isPasswordStrong(password: string): { valid: boolean; reason?: string } {
+  if (!password || typeof password !== 'string' || password.length < 8) {
+    return { valid: false, reason: 'Password must be at least 8 characters long.' };
+  }
+  if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
+    return { valid: false, reason: 'Password must contain both letters and numbers.' };
+  }
+  return { valid: true };
+}
+
+/**
+ * Helper to build frontend-compatible session object from user record and settings
+ */
+async function buildSessionPayload(user: {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  accountStatus: AccountStatus;
+  contact?: string | null;
+  projectIds?: string[];
+}) {
+  const settingKey = `account_settings_${user.id}`;
+  const customSettings = (await getSystemSetting(settingKey)) || {};
+
+  const defaultTitle = (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
+    ? 'Site Engineer & Project Field Lead'
+    : user.role === Role.TIMEKEEPER
+    ? 'Site Timekeeper & Manpower Officer'
+    : user.role === Role.FINANCE
+    ? 'Finance Controller & Corporate Accounting Head'
+    : 'Operations Director & Project Lead';
+
+  const defaultDivision = user.role === Role.FINANCE
+    ? 'Finance & Treasury Department'
+    : user.role === Role.TIMEKEEPER
+    ? 'Site Operations & Manpower Field Unit'
+    : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
+    ? 'Civil Engineering & Project Execution'
+    : 'Commercial & Corporate Interiors';
+
+  const normalizedRole = user.role === Role.ADMIN ? 'Admin' 
+    : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer' 
+    : user.role === Role.TIMEKEEPER ? 'Timekeeper' 
+    : user.role === Role.FINANCE ? 'Finance' 
+    : 'Client';
+
+  return {
+    id: user.id,
+    email: customSettings.profileEmail || user.email,
+    name: customSettings.profileName || user.name,
+    role: normalizedRole,
+    clientId: user.role === Role.CLIENT ? user.id : undefined,
+    accountStatus: user.accountStatus,
+    avatarUrl: customSettings.avatarUrl || null,
+    title: customSettings.profileTitle || defaultTitle,
+    phone: customSettings.profilePhone || user.contact || '',
+    division: customSettings.profileDivision || defaultDivision,
+    projectIds: user.projectIds || [],
+  };
+}
+
+// ============================================================================
+// CSRF TOKEN ENDPOINT
+// ============================================================================
+authRouter.get('/auth/csrf', (req: Request, res: Response) => {
+  let token = req.cookies?.[CSRF_COOKIE_NAME];
+  if (!token) {
+    token = generateCsrfToken();
+    setCsrfCookie(res, token);
+  }
+  res.json({ csrfToken: token });
+});
+
+// ============================================================================
+// POST /api/auth/login — Secure Credential Verification with PostgreSQL Sessions
+// ============================================================================
+authRouter.post('/auth/login', loginRateLimiter, async (req: Request, res: Response) => {
+  const { email, password, rememberMe } = req.body;
+  try {
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    if (!normalizedEmail || !password) {
+      return res.status(400).json({ error: 'Email and password are required.' });
+    }
+
+    const user = await prisma.user.findFirst({
+      where: {
+        email: {
+          equals: normalizedEmail,
+          mode: 'insensitive'
+        }
+      }
+    });
+
+    // Constant-time generic error to prevent account enumeration
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    // Do not permit suspended accounts
+    if (user.accountStatus === AccountStatus.SUSPENDED) {
+      return res.status(403).json({ error: 'This account has been suspended. Please contact system administration.' });
+    }
+
+    // Do not leak invitation tokens or account state through login failures
+    if (user.accountStatus === AccountStatus.INVITED) {
+      return res.status(403).json({ 
+        error: 'This account has not been activated yet. Please use the activation link sent to your email.'
+      });
+    }
+
+    // Reject accounts without valid password hash
+    if (!user.passwordHash) {
+      return res.status(401).json({ 
+        error: 'Account requires activation. Please contact system administration for an activation link.' 
+      });
+    }
+
+    // Strict scrypt password verification — NO hardcoded demo passkey bypasses
+    const isPasswordValid = verifyPassword(String(password), user.passwordHash);
+    if (!isPasswordValid) {
+      return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    // Create cryptographically random server session backed by PostgreSQL
+    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || undefined;
+    const userAgent = req.headers['user-agent'] || undefined;
+
+    const { rawToken, expiresAt } = await createSession(user.id, {
+      rememberMe: Boolean(rememberMe),
+      ipAddress,
+      userAgent,
+    });
+
+    // Set HttpOnly session cookie
+    setSessionCookie(res, rawToken, expiresAt);
+
+    // Issue CSRF token
+    const csrfToken = generateCsrfToken();
+    setCsrfCookie(res, csrfToken);
+
+    const sessionPayload = await buildSessionPayload(user);
+
+    // Record login audit log
+    await prisma.processAuditLog.create({
+      data: {
+        entityType: 'USER',
+        entityId: user.id,
+        action: 'USER_LOGIN_SUCCESS',
+        actorName: user.name,
+        actorRole: user.role,
+        details: `User ${user.email} successfully authenticated from ${ipAddress || 'client'}.`,
+      }
+    }).catch(() => {});
+
+    res.json({
+      success: true,
+      session: sessionPayload,
+      csrfToken,
+    });
+  } catch (error) {
+    console.error('Error logging in:', error);
+    res.status(500).json({ error: 'Internal Server Error during authentication' });
+  }
+});
+
+// ============================================================================
+// POST /api/auth/logout — Invalidate server session & scrub cookies
+// ============================================================================
+authRouter.post('/auth/logout', async (req: Request, res: Response) => {
+  try {
+    const rawToken = req.cookies?.[SESSION_COOKIE_NAME] || 
+      (req.headers['authorization']?.startsWith('Bearer ') ? req.headers['authorization'].substring(7).trim() : undefined);
+
+    if (rawToken) {
+      await destroySession(rawToken);
+    }
+
+    clearSessionCookie(res);
+    clearCsrfCookie(res);
+
+    res.json({ success: true, message: 'Logged out successfully.' });
+  } catch (error) {
+    console.error('Error logging out:', error);
+    clearSessionCookie(res);
+    clearCsrfCookie(res);
+    res.json({ success: true });
+  }
+});
+
+// ============================================================================
+// GET /api/auth/me — Verified server session restoration endpoint
+// ============================================================================
+authRouter.get('/auth/me', requireAuth, async (req: Request, res: Response) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        accountStatus: true,
+        contact: true,
+        projectIds: true,
+      }
+    });
+
+    if (!user || user.accountStatus !== AccountStatus.ACTIVE) {
+      clearSessionCookie(res);
+      return res.status(401).json({ error: 'Session expired or account no longer active.' });
+    }
+
+    const sessionPayload = await buildSessionPayload(user);
+    const csrfToken = req.cookies?.[CSRF_COOKIE_NAME] || generateCsrfToken();
+    if (!req.cookies?.[CSRF_COOKIE_NAME]) {
+      setCsrfCookie(res, csrfToken);
+    }
+
+    res.json({
+      success: true,
+      user: sessionPayload,
+      session: sessionPayload,
+      csrfToken,
+    });
+  } catch (error) {
+    console.error('Error in /api/auth/me:', error);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// ============================================================================
+// GET /api/auth/profile — Returns persistent profile for authenticated session user
+// ============================================================================
+authRouter.get('/auth/profile', requireAuth, async (req: Request, res: Response) => {
+  try {
+    // Derive identity strictly from verified session
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user) {
+      return res.status(404).json({ error: 'User account not found' });
+    }
+
+    const settingKey = `account_settings_${user.id}`;
+    const customSettings = (await getSystemSetting(settingKey)) || {};
+
+    const defaultTitle = (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
+      ? 'Site Engineer & Project Field Lead'
+      : user.role === Role.TIMEKEEPER
+      ? 'Site Timekeeper & Manpower Officer'
+      : user.role === Role.FINANCE
+      ? 'Finance Controller & Corporate Accounting Head'
+      : 'Operations Director & Project Lead';
+
+    const defaultDivision = user.role === Role.FINANCE
+      ? 'Finance & Treasury Department'
+      : user.role === Role.TIMEKEEPER
+      ? 'Site Operations & Manpower Field Unit'
+      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
+      ? 'Civil Engineering & Project Execution'
+      : 'Commercial & Corporate Interiors';
+
+    const roleLabel = user.role === Role.ADMIN ? 'Admin'
+      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer'
+      : user.role === Role.TIMEKEEPER ? 'Timekeeper'
+      : user.role === Role.FINANCE ? 'Finance'
+      : 'Client';
+
+    const profile = {
+      id: user.id,
+      name: customSettings.profileName || user.name || '',
+      email: customSettings.profileEmail || user.email || '',
+      contact: customSettings.profilePhone || user.contact || '',
+      title: customSettings.profileTitle || defaultTitle,
+      division: customSettings.profileDivision || defaultDivision,
+      avatarUrl: customSettings.avatarUrl || null,
+      alertGantt: customSettings.alertGantt ?? true,
+      alertPunchlist: customSettings.alertPunchlist ?? true,
+      alertSiteDiary: customSettings.alertSiteDiary ?? true,
+      alertManpower: customSettings.alertManpower ?? true,
+      defaultPmsView: customSettings.defaultPmsView || 'dashboard',
+      sessionTimeout: customSettings.sessionTimeout || '8h',
+      role: roleLabel,
+    };
+
+    res.json({ success: true, profile });
+  } catch (error) {
+    console.error('Error fetching profile:', error);
+    res.status(500).json({ error: 'Failed to fetch profile' });
+  }
+});
+
+// ============================================================================
+// POST /api/auth/update-profile — Persist account changes for verified session user
+// ============================================================================
+authRouter.post('/auth/update-profile', requireAuth, sensitiveActionRateLimiter, async (req: Request, res: Response) => {
+  const { 
+    name, email, contact, title, division, avatarUrl,
+    alertGantt, alertPunchlist, alertSiteDiary, alertManpower,
+    defaultPmsView, sessionTimeout
+  } = req.body;
+
+  // Identity is strictly bound to req.user.id — NEVER client-supplied userId or email
+  const authenticatedUserId = req.user!.id;
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: authenticatedUserId } });
+    if (!user) {
+      return res.status(404).json({ error: 'User account not found' });
+    }
+
+    const normalizedNewEmail = email ? String(email).trim().toLowerCase() : '';
+    const isEmailChanging = Boolean(normalizedNewEmail && normalizedNewEmail !== user.email.toLowerCase());
+
+    // Re-authenticate user before allowing login email modification
+    if (isEmailChanging) {
+      const currentPassword = req.body.currentPassword;
+      if (!currentPassword) {
+        return res.status(401).json({
+          error: 'Current password required: Please confirm your password to update your login email address.'
+        });
+      }
+
+      if (!user.passwordHash || !verifyPassword(String(currentPassword), user.passwordHash)) {
+        return res.status(401).json({
+          error: 'Security verification failed: Incorrect current password. Email address was not modified.'
+        });
+      }
+
+      // Check collision with another user's email
+      const existingCollision = await prisma.user.findFirst({
+        where: {
+          email: { equals: normalizedNewEmail, mode: 'insensitive' },
+          id: { not: user.id }
+        }
+      });
+      if (existingCollision) {
+        return res.status(409).json({
+          error: 'An account with this email address already exists. Please choose a different address.'
+        });
+      }
+    }
+
+    const updatedEmail = isEmailChanging ? normalizedNewEmail : user.email;
+
+    // Update user in PostgreSQL (Prevents role or accountStatus elevation)
+    const updatedUser = await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        ...(name ? { name: String(name).trim() } : {}),
+        ...(isEmailChanging ? { email: normalizedNewEmail } : {}),
+        ...(contact !== undefined ? { contact: String(contact).trim() } : {}),
+      }
+    });
+
+    const defaultTitle = user.role === Role.PROJECT_MANAGER ? 'Senior Project Manager & Field Lead'
+      : user.role === Role.FINANCE ? 'Finance Controller & Corporate Accounting Head'
+      : 'Operations Director & Project Lead';
+    const defaultDivision = user.role === Role.FINANCE ? 'Finance & Treasury Department'
+      : 'Commercial & Corporate Interiors';
+
+    const settingsPayload = {
+      profileName: name ? String(name).trim() : updatedUser.name,
+      profileEmail: updatedEmail,
+      profilePhone: contact !== undefined ? String(contact).trim() : (updatedUser.contact || ''),
+      profileTitle: title || defaultTitle,
+      profileDivision: division || defaultDivision,
+      avatarUrl: avatarUrl !== undefined ? avatarUrl : null,
+      alertGantt: alertGantt !== undefined ? Boolean(alertGantt) : true,
+      alertPunchlist: alertPunchlist !== undefined ? Boolean(alertPunchlist) : true,
+      alertSiteDiary: alertSiteDiary !== undefined ? Boolean(alertSiteDiary) : true,
+      alertManpower: alertManpower !== undefined ? Boolean(alertManpower) : true,
+      defaultPmsView: defaultPmsView || 'dashboard',
+      sessionTimeout: sessionTimeout || '8h',
+    };
+
+    const settingKey = `account_settings_${user.id}`;
+    await setSystemSetting(settingKey, settingsPayload);
+
+    await prisma.processAuditLog.create({
+      data: {
+        entityType: 'USER',
+        entityId: user.id,
+        action: isEmailChanging ? 'PROFILE_AND_EMAIL_UPDATED' : 'PROFILE_UPDATED',
+        actorName: settingsPayload.profileName,
+        actorRole: user.role,
+        details: isEmailChanging
+          ? `Updated login email from "${user.email}" to "${updatedEmail}", name: "${settingsPayload.profileName}".`
+          : `Updated account settings: Name: "${settingsPayload.profileName}", Contact: "${settingsPayload.profilePhone}", Title: "${settingsPayload.profileTitle}".`,
+      }
+    }).catch(() => {});
+
+    broadcastChange('auditLogs');
+
+    const roleLabel = user.role === Role.ADMIN ? 'Admin'
+      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer'
+      : user.role === Role.FINANCE ? 'Finance'
+      : 'Client';
+
+    res.json({
+      success: true,
+      user: {
+        id: user.id,
+        name: settingsPayload.profileName,
+        email: settingsPayload.profileEmail,
+        contact: settingsPayload.profilePhone,
+        title: settingsPayload.profileTitle,
+        division: settingsPayload.profileDivision,
+        avatarUrl: settingsPayload.avatarUrl,
+        role: roleLabel,
+      },
+      settings: settingsPayload
+    });
+  } catch (error) {
+    console.error('Error updating profile:', error);
+    res.status(500).json({ error: 'Failed to update profile in database' });
+  }
+});
+
+// ============================================================================
+// POST /api/auth/change-password — User password update with strength check & session revocation
+// ============================================================================
+authRouter.post('/auth/change-password', requireAuth, sensitiveActionRateLimiter, async (req: Request, res: Response) => {
+  const { currentPassword, newPassword } = req.body;
+  const authenticatedUserId = req.user!.id;
+
+  try {
+    const strengthCheck = isPasswordStrong(newPassword);
+    if (!strengthCheck.valid) {
+      return res.status(400).json({ error: strengthCheck.reason });
+    }
+
+    const user = await prisma.user.findUnique({ where: { id: authenticatedUserId } });
+    if (!user) {
+      return res.status(404).json({ error: 'User account not found' });
+    }
+
+    if (!user.passwordHash || !verifyPassword(String(currentPassword || ''), user.passwordHash)) {
+      return res.status(400).json({ error: 'Current password is incorrect.' });
+    }
+
+    const newHash = hashPassword(String(newPassword));
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash: newHash }
+    });
+
+    // Revoke all existing sessions for this user so old sessions cannot continue
+    await revokeAllUserSessions(user.id);
+
+    // Issue a fresh new session for current connection
+    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || undefined;
+    const { rawToken, expiresAt } = await createSession(user.id, { ipAddress });
+    setSessionCookie(res, rawToken, expiresAt);
+
+    await prisma.processAuditLog.create({
+      data: {
+        entityType: 'USER',
+        entityId: user.id,
+        action: 'PASSWORD_UPDATED',
+        actorName: user.name,
+        actorRole: user.role,
+        details: `Password changed successfully for user account ${user.email}. Previous sessions invalidated.`,
+      }
+    }).catch(() => {});
+
+    broadcastChange('auditLogs');
+
+    res.json({ success: true, message: 'Password updated successfully. All other sessions invalidated.' });
+  } catch (error) {
+    console.error('Error updating password:', error);
+    res.status(500).json({ error: 'Failed to update password' });
+  }
+});
+
+// ============================================================================
+// STAFF MANAGEMENT ENDPOINTS (Strictly ADMIN only)
+// ============================================================================
+
+// GET /api/staff — List all staff accounts
+authRouter.get('/staff', requireAuth, requireRole(['ADMIN']), async (_req: Request, res: Response) => {
   try {
     const staff = await prisma.user.findMany({
       where: { role: { in: [Role.ADMIN, Role.ENGINEER, Role.TIMEKEEPER, Role.FINANCE, Role.PROJECT_MANAGER] } },
@@ -38,41 +533,50 @@ authRouter.get('/staff', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/staff — Create a new Admin or Project Manager account
-authRouter.post('/staff', async (req: Request, res: Response) => {
+// POST /api/staff — Create a new staff account (ADMIN only)
+authRouter.post('/staff', requireAuth, requireRole(['ADMIN']), sensitiveActionRateLimiter, async (req: Request, res: Response) => {
   try {
     const { email, name, password, role: rawRole, contact } = req.body;
     if (!email || !name || !password) {
       return res.status(400).json({ error: 'Email, name, and password are required.' });
     }
-    const normalizedEmail = email.trim().toLowerCase();
+
+    const strength = isPasswordStrong(String(password));
+    if (!strength.valid) {
+      return res.status(400).json({ error: strength.reason });
+    }
+
+    const normalizedEmail = String(email).trim().toLowerCase();
     const existing = await prisma.user.findFirst({ where: { email: { equals: normalizedEmail, mode: 'insensitive' } } });
     if (existing) {
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
+
     const role = rawRole === 'Admin' ? Role.ADMIN 
       : rawRole === 'Finance' ? Role.FINANCE 
       : rawRole === 'Timekeeper' ? Role.TIMEKEEPER 
       : Role.ENGINEER;
-    const passwordHash = hashPassword(password);
+
+    const passwordHash = hashPassword(String(password));
     const newUser = await prisma.user.create({
       data: {
         email: normalizedEmail,
-        name: name.trim(),
+        name: String(name).trim(),
         role,
         accountStatus: AccountStatus.ACTIVE,
         passwordHash,
-        contact: contact || '',
+        contact: contact ? String(contact).trim() : '',
       }
     });
+
     await prisma.processAuditLog.create({
       data: {
         entityType: 'USER',
         entityId: newUser.id,
         action: 'STAFF_ACCOUNT_CREATED',
-        actorName: 'System Admin',
+        actorName: req.user!.name,
         actorRole: 'ADMIN',
-        details: `Created ${role} account for ${name.trim()} (${normalizedEmail}).`,
+        details: `Created ${role} account for ${newUser.name} (${normalizedEmail}).`,
       }
     }).catch(() => {});
     broadcastChange('auditLogs');
@@ -95,19 +599,40 @@ authRouter.post('/staff', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/staff/:id — Remove a staff account (cannot delete own account)
-authRouter.delete('/staff/:id', async (req: Request, res: Response) => {
+// DELETE /api/staff/:id — Remove a staff account (ADMIN only, cannot delete self or last admin)
+authRouter.delete('/staff/:id', requireAuth, requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    if (id === req.user!.id) {
+      return res.status(403).json({ error: 'Cannot delete your own administrative account.' });
+    }
+
     const target = await prisma.user.findUnique({ where: { id } });
     if (!target) return res.status(404).json({ error: 'Staff account not found.' });
     if (target.role === Role.CLIENT) return res.status(403).json({ error: 'Use the client management module to remove client accounts.' });
+
     // Prevent deleting the last admin account
     if (target.role === Role.ADMIN) {
       const adminCount = await prisma.user.count({ where: { role: Role.ADMIN } });
       if (adminCount <= 1) return res.status(403).json({ error: 'Cannot delete the last admin account.' });
     }
+
+    // Invalidate target user's active sessions
+    await revokeAllUserSessions(id);
     await prisma.user.delete({ where: { id } });
+
+    await prisma.processAuditLog.create({
+      data: {
+        entityType: 'USER',
+        entityId: id,
+        action: 'STAFF_ACCOUNT_DELETED',
+        actorName: req.user!.name,
+        actorRole: 'ADMIN',
+        details: `Deleted ${target.role} account for ${target.name} (${target.email}).`,
+      }
+    }).catch(() => {});
+    broadcastChange('auditLogs');
+
     res.json({ success: true });
   } catch (error) {
     console.error('Error deleting staff account:', error);
@@ -115,417 +640,59 @@ authRouter.delete('/staff/:id', async (req: Request, res: Response) => {
   }
 });
 
-// PATCH /api/staff/:id/reset-password — Reset a staff member's password
-authRouter.patch('/staff/:id/reset-password', async (req: Request, res: Response) => {
+// PATCH /api/staff/:id/reset-password — Reset a staff member's password (ADMIN only)
+authRouter.patch('/staff/:id/reset-password', requireAuth, requireRole(['ADMIN']), sensitiveActionRateLimiter, async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     const { newPassword } = req.body;
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+
+    const strength = isPasswordStrong(String(newPassword || ''));
+    if (!strength.valid) {
+      return res.status(400).json({ error: strength.reason });
     }
-    const passwordHash = hashPassword(newPassword);
+
+    const target = await prisma.user.findUnique({ where: { id } });
+    if (!target) return res.status(404).json({ error: 'Staff account not found.' });
+
+    const passwordHash = hashPassword(String(newPassword));
     await prisma.user.update({ where: { id }, data: { passwordHash } });
-    res.json({ success: true });
+
+    // Invalidate target user's active sessions so they must sign in with new password
+    await revokeAllUserSessions(id);
+
+    await prisma.processAuditLog.create({
+      data: {
+        entityType: 'USER',
+        entityId: id,
+        action: 'STAFF_PASSWORD_RESET_BY_ADMIN',
+        actorName: req.user!.name,
+        actorRole: 'ADMIN',
+        details: `Administrator reset password for ${target.name} (${target.email}). Active sessions revoked.`,
+      }
+    }).catch(() => {});
+    broadcastChange('auditLogs');
+
+    res.json({ success: true, message: 'Password reset successfully. Active sessions revoked.' });
   } catch (error) {
     console.error('Error resetting password:', error);
     res.status(500).json({ error: 'Failed to reset password' });
   }
 });
 
-// POST /api/auth/login: Credential verification with PostgreSQL
-authRouter.post('/auth/login', async (req: Request, res: Response) => {
-  const { email, password } = req.body;
-  try {
-    const normalizedEmail = (email || '').trim().toLowerCase();
-    if (!normalizedEmail) {
-      return res.status(400).json({ error: 'Please provide an email address.' });
-    }
+// ============================================================================
+// ONBOARDING INVITATION VERIFICATION & ACTIVATION
+// ============================================================================
 
-    const user = await prisma.user.findFirst({
-      where: {
-        email: {
-          equals: normalizedEmail,
-          mode: 'insensitive'
-        }
-      },
-      include: {
-        clientPackage: true,
-        buyerKyc: true,
-      }
-    });
-
-    if (!user) {
-      return res.status(401).json({ error: 'No user account found matching this email.' });
-    }
-
-    // Password validation logic
-    let isPasswordValid = false;
-    if (user.passwordHash) {
-      isPasswordValid = verifyPassword(password || '', user.passwordHash);
-    } else {
-      // Demo fallback passkeys for newly created or legacy unhashed demo accounts
-      if (
-        password === 'admin123' || 
-        password === 'pm123' || 
-        password === 'tk123' || 
-        password === 'finance123' || 
-        password === 'client123' || 
-        password === 'demo-session-key'
-      ) {
-        isPasswordValid = true;
-      }
-    }
-
-    if (!isPasswordValid) {
-      if (user.accountStatus === 'INVITED') {
-        return res.status(403).json({
-          error: 'This account has not been activated yet. Please click your Handover Activation Link to set your password.',
-          isInvited: true,
-          inviteToken: user.inviteToken
-        });
-      }
-      return res.status(401).json({ error: 'Incorrect security passkey. Please verify your credentials.' });
-    }
-
-    // Per-user settings key — NEVER fall back to shared 'account_settings_admin'
-    const settingKey = `account_settings_${user.id}`;
-    const customSettings = (await getSystemSetting(settingKey)) || {};
-
-    // Role-based default titles and divisions
-    const defaultTitle = (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
-      ? 'Site Engineer & Project Field Lead'
-      : user.role === Role.TIMEKEEPER
-      ? 'Site Timekeeper & Manpower Officer'
-      : user.role === Role.FINANCE
-      ? 'Finance Controller & Corporate Accounting Head'
-      : 'Operations Director & Project Lead';
-    const defaultDivision = user.role === Role.FINANCE
-      ? 'Finance & Treasury Department'
-      : user.role === Role.TIMEKEEPER
-      ? 'Site Operations & Manpower Field Unit'
-      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
-      ? 'Civil Engineering & Project Execution'
-      : 'Commercial & Corporate Interiors';
-
-    const normalizedRole = user.role === Role.ADMIN ? 'Admin' 
-      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer' 
-      : user.role === Role.TIMEKEEPER ? 'Timekeeper' 
-      : user.role === Role.FINANCE ? 'Finance' 
-      : 'Client';
-
-    const session: any = {
-      id: user.id,
-      email: customSettings.profileEmail || user.email,
-      name: customSettings.profileName || user.name,
-      role: normalizedRole,
-      clientId: user.role === Role.CLIENT ? user.id : undefined,
-      accountStatus: user.accountStatus,
-      avatarUrl: customSettings.avatarUrl || null,
-      title: customSettings.profileTitle || defaultTitle,
-      phone: customSettings.profilePhone || user.contact || '',
-      division: customSettings.profileDivision || defaultDivision,
-      projectIds: user.projectIds || []
-    };
-
-    res.json({ success: true, session });
-  } catch (error) {
-    console.error('Error logging in:', error);
-    res.status(500).json({ error: 'Internal Server Error during authentication' });
-  }
-});
-
-// GET /api/auth/profile: Returns live persistent profile and PMS workspace preferences
-authRouter.get('/auth/profile', async (req: Request, res: Response) => {
-  try {
-    const { userId, email } = req.query;
-    let user = null;
-    if (userId) {
-      user = await prisma.user.findUnique({ where: { id: String(userId) } });
-    }
-    if (!user && email) {
-      user = await prisma.user.findFirst({ where: { email: String(email).trim().toLowerCase() } });
-    }
-    if (!user) {
-      user = await prisma.user.findFirst({ where: { role: Role.ADMIN } });
-    }
-
-    // Per-user settings key — NEVER fall back to shared 'account_settings_admin'
-    const settingKey = user ? `account_settings_${user.id}` : null;
-    const customSettings = settingKey ? ((await getSystemSetting(settingKey)) || {}) : {};
-
-    // Role-based defaults derived from the authenticated user's role
-    const defaultTitle = !user ? 'Operations Director & Project Lead'
-      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Site Engineer & Project Field Lead'
-      : user.role === Role.TIMEKEEPER ? 'Site Timekeeper & Manpower Officer'
-      : user.role === Role.FINANCE ? 'Finance Controller & Corporate Accounting Head'
-      : 'Operations Director & Project Lead';
-    const defaultDivision = !user ? 'Commercial & Corporate Interiors'
-      : user.role === Role.FINANCE ? 'Finance & Treasury Department'
-      : user.role === Role.TIMEKEEPER ? 'Site Operations & Manpower Field Unit'
-      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Civil Engineering & Project Execution'
-      : 'Commercial & Corporate Interiors';
-    const roleLabel = !user ? 'Admin'
-      : user.role === Role.ADMIN ? 'Admin'
-      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer'
-      : user.role === Role.TIMEKEEPER ? 'Timekeeper'
-      : user.role === Role.FINANCE ? 'Finance'
-      : 'Client';
-
-    const profile = {
-      id: user?.id || 'unknown',
-      name: customSettings.profileName || user?.name || '',
-      email: customSettings.profileEmail || user?.email || '',
-      contact: customSettings.profilePhone || user?.contact || '',
-      title: customSettings.profileTitle || defaultTitle,
-      division: customSettings.profileDivision || defaultDivision,
-      avatarUrl: customSettings.avatarUrl || null,
-      alertGantt: customSettings.alertGantt ?? true,
-      alertPunchlist: customSettings.alertPunchlist ?? true,
-      alertSiteDiary: customSettings.alertSiteDiary ?? true,
-      alertManpower: customSettings.alertManpower ?? true,
-      defaultPmsView: customSettings.defaultPmsView || 'dashboard',
-      sessionTimeout: customSettings.sessionTimeout || '8h',
-      role: roleLabel,
-    };
-
-    res.json({ success: true, profile });
-  } catch (error) {
-    console.error('Error fetching profile:', error);
-    res.status(500).json({ error: 'Failed to fetch profile' });
-  }
-});
-
-// POST /api/auth/update-profile: Persists account and profile changes
-authRouter.post('/auth/update-profile', async (req: Request, res: Response) => {
-  const { 
-    userId, name, email, contact, title, division, avatarUrl,
-    alertGantt, alertPunchlist, alertSiteDiary, alertManpower,
-    defaultPmsView, sessionTimeout
-  } = req.body;
-  const effectiveUserId = userId || req.body.id;
-  try {
-    let user = null;
-    if (effectiveUserId) {
-      user = await prisma.user.findUnique({ where: { id: effectiveUserId } });
-    }
-    if (!user && email) {
-      user = await prisma.user.findFirst({ where: { email: email.trim().toLowerCase() } });
-    }
-    if (!user) {
-      return res.status(404).json({ error: 'User account not found' });
-    }
-
-    const normalizedNewEmail = email ? email.trim().toLowerCase() : '';
-    const isEmailChanging = Boolean(normalizedNewEmail && normalizedNewEmail !== user.email.toLowerCase());
-
-    // SECURITY CHECK: Re-authenticate user before allowing login email modification
-    if (isEmailChanging) {
-      const currentPassword = req.body.currentPassword;
-      if (!currentPassword) {
-        return res.status(401).json({
-          error: 'Security passkey required: Please confirm your current passkey to update your official login email address.'
-        });
-      }
-
-      let isCurrentValid = false;
-      if (user.passwordHash) {
-        isCurrentValid = verifyPassword(currentPassword, user.passwordHash);
-      }
-      if (!isCurrentValid) {
-        if (
-          (currentPassword === 'admin123' && user.role === Role.ADMIN) ||
-          (currentPassword === 'pm123' && user.role === Role.PROJECT_MANAGER) ||
-          currentPassword === 'admin123' ||
-          currentPassword === 'pm123' ||
-          currentPassword === 'demo-session-key' ||
-          currentPassword === 'ctvill2026'
-        ) {
-          isCurrentValid = true;
-        }
-      }
-
-      if (!isCurrentValid) {
-        return res.status(401).json({
-          error: 'Security verification failed: Incorrect current passkey. Email address was not modified.'
-        });
-      }
-
-      // Check for collision with another user's email
-      const existingCollision = await prisma.user.findFirst({
-        where: {
-          email: { equals: normalizedNewEmail, mode: 'insensitive' },
-          id: { not: user.id }
-        }
-      });
-      if (existingCollision) {
-        return res.status(409).json({
-          error: 'An account with this email address already exists. Please choose a different address.'
-        });
-      }
-    }
-
-    const updatedEmail = isEmailChanging ? normalizedNewEmail : user.email;
-
-    // Update user in PostgreSQL
-    const updatedUser = await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        ...(name ? { name: name.trim() } : {}),
-        ...(isEmailChanging ? { email: normalizedNewEmail } : {}),
-        ...(contact !== undefined ? { contact: contact.trim() } : {}),
-      }
-    });
-
-    // Role-based defaults so each user gets appropriate fallbacks
-    const defaultTitle = user.role === Role.PROJECT_MANAGER ? 'Senior Project Manager & Field Lead'
-      : user.role === Role.FINANCE ? 'Finance Controller & Corporate Accounting Head'
-      : 'Operations Director & Project Lead';
-    const defaultDivision = user.role === Role.FINANCE ? 'Finance & Treasury Department'
-      : 'Commercial & Corporate Interiors';
-
-    const settingsPayload = {
-      profileName: name ? name.trim() : updatedUser.name,
-      profileEmail: updatedEmail,
-      profilePhone: contact !== undefined ? contact.trim() : (updatedUser.contact || ''),
-      profileTitle: title || defaultTitle,
-      profileDivision: division || defaultDivision,
-      avatarUrl: avatarUrl !== undefined ? avatarUrl : null,
-      alertGantt: alertGantt !== undefined ? alertGantt : true,
-      alertPunchlist: alertPunchlist !== undefined ? alertPunchlist : true,
-      alertSiteDiary: alertSiteDiary !== undefined ? alertSiteDiary : true,
-      alertManpower: alertManpower !== undefined ? alertManpower : true,
-      defaultPmsView: defaultPmsView || 'dashboard',
-      sessionTimeout: sessionTimeout || '8h',
-    };
-
-    const settingKey = `account_settings_${user.id}`;
-    await setSystemSetting(settingKey, settingsPayload);
-
-    await prisma.processAuditLog.create({
-      data: {
-        entityType: 'USER',
-        entityId: user.id,
-        action: isEmailChanging ? 'PROFILE_AND_EMAIL_UPDATED' : 'PROFILE_UPDATED',
-        actorName: settingsPayload.profileName,
-        actorRole: user.role === Role.ADMIN ? 'ADMIN' : user.role === Role.PROJECT_MANAGER ? 'PROJECT_MANAGER' : user.role === Role.FINANCE ? 'FINANCE' : 'CLIENT',
-        details: isEmailChanging
-          ? `Verified passkey and updated login email from "${user.email}" to "${updatedEmail}", name: "${settingsPayload.profileName}".`
-          : `Updated account settings: Name: "${settingsPayload.profileName}", Contact: "${settingsPayload.profilePhone}", Title: "${settingsPayload.profileTitle}".`,
-      }
-    }).catch(() => {});
-
-    broadcastChange('auditLogs');
-
-    const roleLabel = !user ? 'Admin'
-      : user.role === Role.ADMIN ? 'Admin'
-      : user.role === Role.PROJECT_MANAGER ? 'ProjectManager'
-      : user.role === Role.FINANCE ? 'Finance'
-      : 'Client';
-
-    res.json({
-      success: true,
-      user: {
-        id: user?.id || 'unknown',
-        name: settingsPayload.profileName,
-        email: settingsPayload.profileEmail,
-        contact: settingsPayload.profilePhone,
-        title: settingsPayload.profileTitle,
-        division: settingsPayload.profileDivision,
-        avatarUrl: settingsPayload.avatarUrl,
-        role: roleLabel,
-      },
-      settings: settingsPayload
-    });
-  } catch (error) {
-    console.error('Error updating profile:', error);
-    res.status(500).json({ error: 'Failed to update profile in database' });
-  }
-});
-
-// POST /api/auth/change-password: Validates and updates user security passkey
-authRouter.post('/auth/change-password', async (req: Request, res: Response) => {
-  const { userId, email, currentPassword, newPassword } = req.body;
-  try {
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ error: 'New passkey must be at least 6 characters.' });
-    }
-
-    let user = null;
-    if (userId) {
-      user = await prisma.user.findUnique({ where: { id: userId } });
-    }
-    if (!user && email) {
-      user = await prisma.user.findFirst({
-        where: {
-          email: { equals: email.trim().toLowerCase(), mode: 'insensitive' }
-        }
-      });
-    }
-    if (!user) {
-      user = await prisma.user.findFirst({ where: { role: Role.ADMIN } });
-    }
-    if (!user) {
-      return res.status(404).json({ error: 'User account not found' });
-    }
-
-    // Verify current password against database hash or default initial passkeys
-    let isCurrentValid = false;
-    if (user.passwordHash) {
-      isCurrentValid = verifyPassword(currentPassword || '', user.passwordHash);
-    }
-    if (!isCurrentValid) {
-      if (
-        (currentPassword === 'admin123' && user.role === Role.ADMIN) ||
-        (currentPassword === 'pm123' && user.role === Role.PROJECT_MANAGER) ||
-        currentPassword === 'admin123' ||
-        currentPassword === 'pm123' ||
-        currentPassword === 'demo-session-key' ||
-        currentPassword === 'ctvill2026'
-      ) {
-        isCurrentValid = true;
-      }
-    }
-
-    if (!isCurrentValid) {
-      return res.status(400).json({ error: 'Current security passkey is incorrect.' });
-    }
-
-    const newHash = hashPassword(newPassword);
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { passwordHash: newHash }
-    });
-
-    await prisma.processAuditLog.create({
-      data: {
-        entityType: 'CLIENT',
-        entityId: user.id,
-        action: 'PASSWORD_UPDATED',
-        actorName: user.name,
-        actorRole: 'ADMIN',
-        details: `Security passkey changed successfully for user account ${user.email}.`,
-      }
-    });
-
-    broadcastChange('auditLogs');
-
-    res.json({ success: true, message: 'Passkey updated successfully in database.' });
-  } catch (error) {
-    console.error('Error updating password:', error);
-    res.status(500).json({ error: 'Failed to update passkey in database' });
-  }
-});
-
-// POST /api/auth/verify-invite: Validates an onboarding invitation token
-authRouter.post('/auth/verify-invite', async (req: Request, res: Response) => {
+// POST /api/auth/verify-invite — Validates onboarding token
+authRouter.post('/auth/verify-invite', sensitiveActionRateLimiter, async (req: Request, res: Response) => {
   const { token } = req.body;
   if (!token) {
     return res.status(400).json({ error: 'Activation token is required.' });
   }
 
   try {
-    const cleanToken = token.trim();
-    let user = await prisma.user.findFirst({
+    const cleanToken = String(token).trim();
+    const user = await prisma.user.findFirst({
       where: { inviteToken: cleanToken },
       include: {
         clientPackage: true,
@@ -563,19 +730,20 @@ authRouter.post('/auth/verify-invite', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/auth/activate: Claim account and set password
-authRouter.post('/auth/activate', async (req: Request, res: Response) => {
+// POST /api/auth/activate — Claim account and set password
+authRouter.post('/auth/activate', sensitiveActionRateLimiter, async (req: Request, res: Response) => {
   const { token, password, contact } = req.body;
   if (!token || !password) {
     return res.status(400).json({ error: 'Activation token and new password are required.' });
   }
 
-  if (password.length < 6) {
-    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
+  const strength = isPasswordStrong(String(password));
+  if (!strength.valid) {
+    return res.status(400).json({ error: strength.reason });
   }
 
   try {
-    const cleanToken = token.trim();
+    const cleanToken = String(token).trim();
     const user = await prisma.user.findFirst({
       where: { inviteToken: cleanToken }
     });
@@ -587,16 +755,28 @@ authRouter.post('/auth/activate', async (req: Request, res: Response) => {
       });
     }
 
+    if (user.inviteTokenExpiry && new Date() > user.inviteTokenExpiry) {
+      return res.status(410).json({ error: 'This activation link has expired. Please contact the office for a new link.' });
+    }
+
     const updatedUser = await prisma.user.update({
       where: { id: user.id },
       data: {
-        passwordHash: hashPassword(password),
-        accountStatus: 'ACTIVE',
+        passwordHash: hashPassword(String(password)),
+        accountStatus: AccountStatus.ACTIVE,
         inviteToken: null,
         inviteTokenExpiry: null,
-        contact: contact || user.contact,
+        contact: contact ? String(contact).trim() : user.contact,
       }
     });
+
+    // Create active server session
+    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || undefined;
+    const { rawToken, expiresAt } = await createSession(updatedUser.id, { ipAddress });
+    setSessionCookie(res, rawToken, expiresAt);
+
+    const csrfToken = generateCsrfToken();
+    setCsrfCookie(res, csrfToken);
 
     await prisma.processAuditLog.create({
       data: {
@@ -604,29 +784,24 @@ authRouter.post('/auth/activate', async (req: Request, res: Response) => {
         entityId: user.id,
         action: 'BUYER_ACCOUNT_ACTIVATED',
         actorName: user.name,
-        actorRole: 'CLIENT',
-        details: `Account ${user.name} claimed portal access and set account credentials.`,
+        actorRole: user.role,
+        details: `Account ${user.name} claimed portal access and set credentials.`,
       }
-    });
+    }).catch(() => {});
 
-    const session: any = {
-      id: updatedUser.id,
-      email: updatedUser.email,
-      name: updatedUser.name,
-      role: updatedUser.role === Role.ADMIN ? 'Admin' : updatedUser.role === Role.PROJECT_MANAGER ? 'ProjectManager' : updatedUser.role === Role.FINANCE ? 'Finance' : 'Client',
-      clientId: updatedUser.id,
-      accountStatus: 'ACTIVE',
-    };
+    const sessionPayload = await buildSessionPayload(updatedUser);
 
-    res.json({ success: true, session });
+    res.json({ success: true, session: sessionPayload, csrfToken });
   } catch (error) {
     console.error('Error activating account:', error);
     res.status(500).json({ error: 'Internal Server Error' });
   }
 });
 
-// GET /api/users: Directory lookup for users / staff
-authRouter.get('/users', async (req: Request, res: Response) => {
+// ============================================================================
+// GET /api/users — Directory lookup (Authenticated staff only)
+// ============================================================================
+authRouter.get('/users', requireAuth, requireRole(['ADMIN', 'ENGINEER', 'FINANCE', 'TIMEKEEPER']), async (req: Request, res: Response) => {
   try {
     const { role } = req.query;
     const whereClause: any = {};

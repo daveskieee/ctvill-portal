@@ -7,8 +7,12 @@ import { Router, Request, Response } from 'express';
 import { GoogleGenAI } from '@google/genai';
 import { prisma, pool } from '../db';
 import { broadcastChange, invalidateAllDataCache } from '../events';
+import { requireAuth } from '../middleware/auth';
 
 export const workforceRouter = Router();
+
+// Apply authentication to workforce endpoints
+workforceRouter.use(requireAuth);
 
 // ============================================================================
 // CONTRACTORS & ARTISAN WORKFORCE DIRECTORY

@@ -6,9 +6,13 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { broadcastChange, invalidateAllDataCache } from '../events';
+import { requireAuth, checkUserProjectAccess } from '../middleware/auth';
 
 export function createGanttRouter(prisma: PrismaClient) {
   const router = Router();
+
+  // Apply authentication to all Gantt routes
+  router.use(requireAuth);
 
   function formatGanttDate(date: Date | string | null | undefined): string {
     if (!date) return '';
@@ -44,6 +48,10 @@ export function createGanttRouter(prisma: PrismaClient) {
       const { projectId } = req.params;
       if (!projectId) {
         return res.json({ data: [], links: [] });
+      }
+
+      if (!checkUserProjectAccess(req.user, projectId)) {
+        return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
       }
 
       const existingProject = await prisma.commercialProject.findUnique({ where: { id: projectId } });
@@ -116,6 +124,10 @@ export function createGanttRouter(prisma: PrismaClient) {
 
       if (!projectId) {
         return res.status(400).json({ error: 'Project ID is required' });
+      }
+
+      if (!checkUserProjectAccess(req.user, projectId)) {
+        return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
       }
 
       const existingProject = await prisma.commercialProject.findUnique({ where: { id: projectId } });

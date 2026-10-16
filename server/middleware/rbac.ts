@@ -11,6 +11,7 @@ export enum UserRole {
   FINANCE = 'FINANCE',            // Financial tier (70)
   PM = 'PROJECT_MANAGER',          // Mid-tier: Project Manager / Site Engineer (50)
   TIMEKEEPER = 'TIMEKEEPER',      // Leaf-tier: Site Timekeeper (10)
+  UNAUTHORIZED = 'UNAUTHORIZED',  // Tier for unknown / unmapped roles (0)
 }
 
 export const ROLE_HIERARCHY: Record<UserRole, number> = {
@@ -18,16 +19,17 @@ export const ROLE_HIERARCHY: Record<UserRole, number> = {
   [UserRole.FINANCE]: 70,
   [UserRole.PM]: 50,
   [UserRole.TIMEKEEPER]: 10,
+  [UserRole.UNAUTHORIZED]: 0,
 };
 
 export function normalizeRole(rawRole: string | undefined | null): UserRole {
-  if (!rawRole) return UserRole.OM;
+  if (!rawRole) return UserRole.UNAUTHORIZED;
   const upper = String(rawRole).toUpperCase().trim();
-  if (upper.includes('TIME')) return UserRole.TIMEKEEPER;
-  if (upper.includes('FINANCE') || upper.includes('TREASURY') || upper.includes('ACCOUNT')) return UserRole.FINANCE;
-  if (upper.includes('ENG') || upper.includes('PROJECT') || upper.includes('PM') || upper.includes('SITE_ENG')) return UserRole.PM;
-  if (upper === 'ADMIN' || upper.includes('OPERAT') || upper.includes('DIRECTOR') || upper === 'SUPERADMIN' || upper.includes('OM')) return UserRole.OM;
-  return UserRole.OM;
+  if (upper === 'TIMEKEEPER' || upper.includes('TIME')) return UserRole.TIMEKEEPER;
+  if (upper === 'FINANCE' || upper.includes('TREASURY') || upper.includes('ACCOUNT')) return UserRole.FINANCE;
+  if (upper === 'PROJECT_MANAGER' || upper === 'PM' || upper === 'ENGINEER' || upper.includes('ENG') || upper.includes('SITE_ENG')) return UserRole.PM;
+  if (upper === 'ADMIN' || upper.includes('OPERAT') || upper.includes('DIRECTOR') || upper === 'SUPERADMIN' || upper === 'OM') return UserRole.OM;
+  return UserRole.UNAUTHORIZED;
 }
 
 export const hasRoleOrHigher = (userRole: UserRole | AllowedAppRole | string, targetRole: UserRole): boolean => {
@@ -44,17 +46,19 @@ export function requireRoleOrHigher(targetRole: UserRole) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({
-        error: 'Unauthorized: Authentication credentials required.'
+        error: 'Unauthorized: Authentication credentials required.',
+        code: 'UNAUTHORIZED'
       });
     }
 
     const currentRole = normalizeRole(req.user.role);
-    if (ROLE_HIERARCHY[currentRole] >= ROLE_HIERARCHY[targetRole]) {
+    if (ROLE_HIERARCHY[currentRole] >= ROLE_HIERARCHY[targetRole] && currentRole !== UserRole.UNAUTHORIZED) {
       return next();
     }
 
     return res.status(403).json({
-      error: `Forbidden: Hierarchical access restriction. Required minimum tier: ${targetRole} (${ROLE_HIERARCHY[targetRole]}). Your tier: ${currentRole} (${ROLE_HIERARCHY[currentRole]}).`
+      error: `Forbidden: Hierarchical access restriction. Required minimum tier: ${targetRole} (${ROLE_HIERARCHY[targetRole]}). Your tier: ${currentRole} (${ROLE_HIERARCHY[currentRole]}).`,
+      code: 'FORBIDDEN_TIER'
     });
   };
 }

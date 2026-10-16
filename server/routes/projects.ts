@@ -7,8 +7,12 @@ import { Router, Request, Response } from 'express';
 import { prisma, pool } from '../db';
 import { broadcastChange, invalidateAllDataCache } from '../events';
 import { resolveProjectCoordinates, resolveLocalGeocoding } from '../services/geocoding';
+import { requireAuth, requireRole, checkUserProjectAccess } from '../middleware/auth';
 
 export const projectsRouter = Router();
+
+// Apply base authentication on all project management endpoints
+projectsRouter.use(requireAuth);
 
 // ============================================================================
 // COMMERCIAL PROJECTS REST API
@@ -25,10 +29,16 @@ projectsRouter.get('/geocoding/lookup', async (req: Request, res: Response) => {
   }
 });
 
-// GET /api/projects
+// GET /api/projects — Scoped to authorized projects for non-admin/finance users
 projectsRouter.get('/projects', async (req: Request, res: Response) => {
   try {
-    const dbProjects = await pool.query('SELECT * FROM commercial_projects ORDER BY created_at ASC');
+    let dbProjectsQuery = 'SELECT * FROM commercial_projects ORDER BY created_at ASC';
+    const params: any[] = [];
+    if (req.user?.role !== 'ADMIN' && req.user?.role !== 'FINANCE' && req.user?.projectIds && req.user.projectIds.length > 0) {
+      dbProjectsQuery = 'SELECT * FROM commercial_projects WHERE id = ANY($1) ORDER BY created_at ASC';
+      params.push(req.user.projectIds);
+    }
+    const dbProjects = await pool.query(dbProjectsQuery, params);
     const projects = await Promise.all((dbProjects.rows || []).map(async (p) => {
       let lat = p.latitude !== null && p.latitude !== undefined ? Number(p.latitude) : undefined;
       let lon = p.longitude !== null && p.longitude !== undefined ? Number(p.longitude) : undefined;
@@ -76,7 +86,7 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
 });
 
 // POST /api/projects
-projectsRouter.post('/projects', async (req: Request, res: Response) => {
+projectsRouter.post('/projects', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const {
       name,
@@ -202,6 +212,9 @@ projectsRouter.post('/projects', async (req: Request, res: Response) => {
 projectsRouter.patch('/projects/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
+    if (!checkUserProjectAccess(req.user, id)) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
+    }
     const {
       name,
       clientName,
@@ -312,6 +325,9 @@ projectsRouter.patch('/projects/:id', async (req: Request, res: Response) => {
 projectsRouter.put('/projects/:id/workers', async (req: Request, res: Response) => {
   try {
     const { id: projectId } = req.params;
+    if (!checkUserProjectAccess(req.user, projectId)) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
+    }
     const { workerId, action } = req.body;
 
     if (!workerId || !['add', 'remove'].includes(action)) {
@@ -395,7 +411,10 @@ projectsRouter.put('/projects/:id/workers', async (req: Request, res: Response) 
 projectsRouter.patch('/projects/:id/weather-suspension', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { suspended, reason, actorName } = req.body;
+    if (!checkUserProjectAccess(req.user, id)) {
+      return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
+    }
+    const { suspended, reason } = req.body;
     const isSuspended = Boolean(suspended);
 
     await pool.query(
@@ -408,8 +427,8 @@ projectsRouter.patch('/projects/:id/weather-suspension', async (req: Request, re
         entityType: 'CIVIL_WORKS',
         entityId: id,
         action: isSuspended ? 'WEATHER_SUSPENSION_ACTIVATED' : 'WEATHER_SUSPENSION_LIFTED',
-        actorName: actorName || 'Engr. Ricardo Ramos',
-        actorRole: 'PROJECT_MANAGER',
+        actorName: req.user?.name || 'Project Manager',
+        actorRole: req.user?.role || 'ENGINEER',
         details: isSuspended
           ? `Work Suspended due to Weather (Force Majeure): ${reason || 'Adverse weather on site'}. Timeline flagged for schedule delays.`
           : 'Weather suspension lifted. Regular site operations resumed.',
@@ -426,8 +445,8 @@ projectsRouter.patch('/projects/:id/weather-suspension', async (req: Request, re
   }
 });
 
-// DELETE /api/projects/:id (Safe cascade for tasks and links)
-projectsRouter.delete('/projects/:id', async (req: Request, res: Response) => {
+// DELETE /api/projects/:id (Safe cascade for tasks and links - ADMIN only)
+projectsRouter.delete('/projects/:id', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     // Clean up associated tasks safely
@@ -648,8 +667,8 @@ projectsRouter.patch('/tasks/:id', async (req: Request, res: Response) => {
   }
 });
 
-// DELETE /api/tasks-clear-all
-projectsRouter.delete('/tasks-clear-all', async (req: Request, res: Response) => {
+// DELETE /api/tasks-clear-all (ADMIN only)
+projectsRouter.delete('/tasks-clear-all', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
     await prisma.taskLink.deleteMany({}).catch(() => {});
     await prisma.projectTask.deleteMany({});

@@ -8,8 +8,17 @@ import { Role, PaymentMethod, PaymentStatus, PayrollRole, DisbursementType, Payr
 import { prisma, pool } from '../db';
 import { broadcastChange, invalidateAllDataCache } from '../events';
 import { sendFitOutQuotationEmail } from '../email';
+import { requireAuth, requireRole } from '../middleware/auth';
 
 export const financeRouter = Router();
+
+// Secure finance endpoints: only /quotations/submit is public (for landing page web leads)
+financeRouter.use((req: Request, res: Response, next) => {
+  if (req.path === '/quotations/submit') {
+    return next();
+  }
+  return requireAuth(req, res, next);
+});
 
 // ============================================================================
 // COMMERCIAL FIT-OUT QUOTATIONS & CRM LEADS
@@ -404,7 +413,7 @@ financeRouter.get('/payroll-records', async (req: Request, res: Response) => {
 });
 
 // POST /api/payroll/disburse
-financeRouter.post('/payroll/disburse', async (req: Request, res: Response) => {
+financeRouter.post('/payroll/disburse', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const { id, all } = req.body;
 
@@ -419,8 +428,8 @@ financeRouter.post('/payroll/disburse', async (req: Request, res: Response) => {
           entityType: 'PAYROLL',
           entityId: 'ALL_BATCH',
           action: 'PAYROLL_BATCH_DISBURSED',
-          actorName: 'Executive Finance',
-          actorRole: 'ADMIN',
+          actorName: req.user?.name || 'Finance Controller',
+          actorRole: req.user?.role || 'FINANCE',
           details: 'Disbursed all pending contractor and site worker payroll records.',
         }
       }).catch(() => {});
@@ -435,8 +444,8 @@ financeRouter.post('/payroll/disburse', async (req: Request, res: Response) => {
           entityType: 'PAYROLL',
           entityId: id,
           action: 'PAYROLL_RECORD_DISBURSED',
-          actorName: 'Executive Finance',
-          actorRole: 'ADMIN',
+          actorName: req.user?.name || 'Finance Controller',
+          actorRole: req.user?.role || 'FINANCE',
           details: `Disbursed payroll wage record ${id}.`,
         }
       }).catch(() => {});
@@ -456,7 +465,7 @@ financeRouter.post('/payroll/disburse', async (req: Request, res: Response) => {
 // ============================================================================
 
 // POST /api/payments/record
-financeRouter.post('/payments/record', async (req: Request, res: Response) => {
+financeRouter.post('/payments/record', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
     const { clientId, amount, paymentMethod, reference } = req.body;
     if (!clientId || !amount) {

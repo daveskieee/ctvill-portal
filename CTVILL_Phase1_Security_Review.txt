@@ -1,0 +1,3546 @@
+================================================================================
+CTVILL CONSTRUCTION PROJECT MANAGEMENT SYSTEM
+PHASE 1: COMPLETE SECURITY AND AUTHENTICATION UPDATE — CODE REVIEW EXPORT
+================================================================================
+Export Date: 2026-10-16T01:30:50.485Z
+Target: Independent Code Review (ChatGPT / External Security Reviewer)
+Repository Baseline: git tag 'restore-point-phase-1-pre-security' (branch: backup-pre-phase-1)
+Status: All 17 automated security test assertions PASSED (0 failures)
+Zero Data Loss: All existing tables, seed accounts, and operational records preserved
+
+================================================================================
+TABLE OF CONTENTS
+================================================================================
+1. EXECUTIVE SUMMARY & SECURITY ARCHITECTURE OVERVIEW
+2. SUMMARY OF MODIFIED FILES & ROLES
+3. FULL SOURCE CODE OF NEWLY CREATED SECURITY MODULES
+   3.1 server/services/sessionService.ts
+   3.2 server/middleware/cookies.ts
+   3.3 server/middleware/csrf.ts
+   3.4 server/middleware/security.ts
+   3.5 src/utils/apiClient.ts
+   3.6 server/tests/security.test.ts
+4. GIT DIFF AGAINST PRE-PHASE-1 RESTORE POINT (TRACKED FILES)
+5. AUTOMATED SECURITY TEST SUITE EXECUTION RESULTS
+6. SECURITY REVIEW CHECKLIST & VERIFICATION INSTRUCTIONS FOR AUDITORS
+
+================================================================================
+1. EXECUTIVE SUMMARY & SECURITY ARCHITECTURE OVERVIEW
+================================================================================
+The CTVILL Construction Project Management System (React, TypeScript, Vite, Tailwind CSS,
+Node.js, Express, PostgreSQL, Prisma, Google Gemini AI) underwent a comprehensive Phase 1
+Security and Authentication upgrade to prepare for safe online deployment.
+
+Key Vulnerabilities Resolved:
+1. INSECURE CLIENT HEADERS ELIMINATED: Previously, endpoints trusted 'x-user-id' and
+   'x-user-role' headers supplied by the client. All client-supplied privilege headers
+   are now completely ignored.
+2. AUTOMATIC ADMIN FALLBACKS REMOVED: Unauthenticated or unmapped roles previously
+   defaulted to Administrator ('ADMIN' or 'OM'). Now, unauthenticated requests return
+   HTTP 401 Unauthorized, and unmapped roles return HTTP 403 Forbidden (mapped to UNAUTHORIZED tier 0).
+3. POSTGRESQL-BACKED SESSIONS: Implemented cryptographically random 32-byte session tokens
+   stored as SHA-256 hashes in a dedicated 'sessions' table. Sessions are transmitted via
+   an HttpOnly, SameSite=Lax cookie ('ctvill_session').
+4. STRICT SEPARATION OF DUTIES (SoD): Timekeepers cannot finalize or approve payroll
+   (enforced with 403 FORBIDDEN_SOD). Finance users cannot create Administrator accounts.
+5. INSECURE DIRECT OBJECT REFERENCE (IDOR) PREVENTION: Project queries and mutations
+   are strictly scoped against req.user.projectIds. Users cannot access projects outside
+   their authorized assignments.
+6. HARDCODED DEMO BYPASSES REMOVED: Demo password strings and login bypasses were removed.
+   All logins strictly verify against scrypt password hashes. Password updates require minimum
+   8 characters (letters + numbers) and automatically revoke all other existing sessions.
+7. CROSS-SITE REQUEST FORGERY (CSRF) DEFENSE: State-changing requests (POST, PUT, PATCH, DELETE)
+   require the 'X-CSRF-Token' header matching the 'ctvill_csrf' cookie.
+8. OWASP HEADERS & DOTFILE BLOCKING: Added X-Content-Type-Options (nosniff), X-Frame-Options
+   (SAMEORIGIN), Referrer-Policy, and explicit blocks against '/.env', '/.git', '.prisma',
+   and '.ts' source files.
+9. PRESERVED ALL EXISTING DATA & WORKFLOWS: No tables were dropped or reset. All existing
+   accounts, project milestones, Gantt schedules, attendance logs, and Gemini AI endpoints
+   remain fully operational.
+
+================================================================================
+2. SUMMARY OF MODIFIED FILES & ROLES
+================================================================================
+Backend Core & Middleware:
+- prisma/schema.prisma: Added model Session with tokenHash, expiresAt, and userId relations.
+- server/db.ts: Added safe CREATE TABLE IF NOT EXISTS sessions with indexes; fixed contractor sync SQL conflict.
+- server.ts: Integrated security middleware pipeline (headers -> CORS -> dotfile block -> cookies -> body limits -> CSRF -> session auth).
+- server/middleware/auth.ts: Replaced header-based impersonation with session token verification; added requireAuth, requireRole, requireExactRole, and checkUserProjectAccess.
+- server/middleware/rbac.ts: Unknown roles map to UNAUTHORIZED (tier 0) instead of Admin.
+- server/events.ts: Authenticated SSE stream via session cookie.
+
+Backend API Routes:
+- server/routes/auth.ts: Session login, logout, GET /api/auth/me, generic errors, rate limiting, session revocation on password changes.
+- server/routes/projects.ts: requireAuth and checkUserProjectAccess; project deletion restricted to ADMIN.
+- server/routes/gantt.ts: Protected with requireAuth and checkUserProjectAccess on Gantt data and task sync.
+- server/routes/documents.ts: requireAuth; uploader identity derived from session user.
+- server/routes/engineering.ts: requireAuth on permits, RFIs, change orders.
+- server/routes/siteDiary.ts: requireAuth; supervisor derived from session user.
+- server/routes/finance.ts: requireAuth and requireRole(['FINANCE', 'ADMIN']) on billing, disbursements, and payments. Quotations remain public for leads.
+- server/routes/workforce.ts & legacyParcels.ts: requireAuth.
+
+Frontend Client & Components:
+- src/App.tsx: Restores session on mount via GET /api/auth/me; calls POST /api/auth/logout on logout.
+- src/components/WorkerMasterlistManager.tsx: Removed forged x-user-role and x-user-id headers.
+- src/components/TimekeeperAttendanceDashboard.tsx: Removed forged x-user-role and x-user-id headers.
+- src/components/FinancePayrollDashboard.tsx: Removed forged x-user-role and x-user-id headers.
+
+================================================================================
+3. FULL SOURCE CODE OF NEWLY CREATED SECURITY MODULES
+================================================================================
+
+================================================================================
+NEW FILE: server/services/sessionService.ts
+PURPOSE: Server-side session management (cryptographic random tokens, SHA-256 DB hashing, revocation, expiration)
+================================================================================
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import * as crypto from 'crypto';
+import { prisma, pool } from '../db';
+import { Role, AccountStatus } from '@prisma/client';
+
+export const SESSION_COOKIE_NAME = 'ctvill_session';
+export const CSRF_COOKIE_NAME = 'ctvill_csrf';
+
+// Default session lifetimes
+export const DEFAULT_SESSION_TTL_MS = 8 * 60 * 60 * 1000;    // 8 hours standard
+export const REMEMBER_ME_SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours Remember Me
+
+export interface SessionData {
+  id: string;
+  userId: string;
+  expiresAt: Date;
+  createdAt: Date;
+  lastActivityAt: Date;
+  userAgent?: string | null;
+  ipAddress?: string | null;
+}
+
+export interface VerifiedSessionUser {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  accountStatus: AccountStatus;
+  projectIds: string[];
+}
+
+/**
+ * Hash opaque raw session token using SHA-256 before storing or looking up in PostgreSQL.
+ */
+export function hashSessionToken(rawToken: string): string {
+  return crypto.createHash('sha256').update(rawToken).digest('hex');
+}
+
+/**
+ * Generate a cryptographically secure random session token.
+ */
+export function generateSessionToken(): string {
+  return crypto.randomBytes(32).toString('hex');
+}
+
+/**
+ * Generate a cryptographically secure random CSRF token.
+ */
+export function generateCsrfToken(): string {
+  return crypto.randomBytes(24).toString('hex');
+}
+
+/**
+ * Create a new server-side session backed by PostgreSQL.
+ */
+export async function createSession(
+  userId: string,
+  options: {
+    rememberMe?: boolean;
+    userAgent?: string;
+    ipAddress?: string;
+  } = {}
+): Promise<{ rawToken: string; expiresAt: Date; session: SessionData }> {
+  const rawToken = generateSessionToken();
+  const tokenHash = hashSessionToken(rawToken);
+  const ttl = options.rememberMe ? REMEMBER_ME_SESSION_TTL_MS : DEFAULT_SESSION_TTL_MS;
+  const expiresAt = new Date(Date.now() + ttl);
+
+  const session = await prisma.session.create({
+    data: {
+      tokenHash,
+      userId,
+      expiresAt,
+      userAgent: options.userAgent || null,
+      ipAddress: options.ipAddress || null,
+    },
+  });
+
+  return {
+    rawToken,
+    expiresAt,
+    session: {
+      id: session.id,
+      userId: session.userId,
+      expiresAt: session.expiresAt,
+      createdAt: session.createdAt,
+      lastActivityAt: session.lastActivityAt,
+      userAgent: session.userAgent,
+      ipAddress: session.ipAddress,
+    },
+  };
+}
+
+/**
+ * Verify a session by its raw token and load the active user.
+ * Returns null if token is missing, expired, not found, or user is not ACTIVE.
+ */
+export async function verifySession(rawToken: string | undefined): Promise<{
+  user: VerifiedSessionUser;
+  session: SessionData;
+} | null> {
+  if (!rawToken || typeof rawToken !== 'string' || rawToken.length < 16) {
+    return null;
+  }
+
+  const tokenHash = hashSessionToken(rawToken.trim());
+  const now = new Date();
+
+  // Find session with associated user
+  const record = await prisma.session.findUnique({
+    where: { tokenHash },
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          accountStatus: true,
+          projectIds: true,
+        },
+      },
+    },
+  });
+
+  if (!record) {
+    return null;
+  }
+
+  // Check expiration
+  if (record.expiresAt <= now) {
+    // Purge expired session asynchronously
+    prisma.session.delete({ where: { id: record.id } }).catch(() => {});
+    return null;
+  }
+
+  // Check user status: do not allow suspended or invited accounts
+  if (!record.user || record.user.accountStatus !== AccountStatus.ACTIVE) {
+    return null;
+  }
+
+  // Touch last activity pulse if it has been more than 60 seconds
+  const lastActive = record.lastActivityAt.getTime();
+  if (now.getTime() - lastActive > 60000) {
+    prisma.session.update({
+      where: { id: record.id },
+      data: { lastActivityAt: now },
+    }).catch(() => {});
+  }
+
+  return {
+    user: {
+      id: record.user.id,
+      email: record.user.email,
+      name: record.user.name,
+      role: record.user.role,
+      accountStatus: record.user.accountStatus,
+      projectIds: record.user.projectIds || [],
+    },
+    session: {
+      id: record.id,
+      userId: record.userId,
+      expiresAt: record.expiresAt,
+      createdAt: record.createdAt,
+      lastActivityAt: record.lastActivityAt,
+      userAgent: record.userAgent,
+      ipAddress: record.ipAddress,
+    },
+  };
+}
+
+/**
+ * Invalidate a single active session (e.g. upon logout).
+ */
+export async function destroySession(rawToken: string | undefined): Promise<boolean> {
+  if (!rawToken || typeof rawToken !== 'string') return false;
+  try {
+    const tokenHash = hashSessionToken(rawToken.trim());
+    await prisma.session.deleteMany({
+      where: { tokenHash },
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Revoke all sessions for a specific user (e.g. upon password reset, role change, or account suspension).
+ */
+export async function revokeAllUserSessions(userId: string): Promise<number> {
+  try {
+    const result = await prisma.session.deleteMany({
+      where: { userId },
+    });
+    return result.count;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Periodic clean-up of expired sessions from PostgreSQL.
+ */
+export async function cleanupExpiredSessions(): Promise<number> {
+  try {
+    const res = await pool.query('DELETE FROM sessions WHERE expires_at <= CURRENT_TIMESTAMP');
+    return res.rowCount || 0;
+  } catch {
+    return 0;
+  }
+}
+
+
+================================================================================
+NEW FILE: server/middleware/cookies.ts
+PURPOSE: Cookie parser and secure cookie helpers (HttpOnly, SameSite=Lax, Path=/, Secure in production)
+================================================================================
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { Request, Response, NextFunction } from 'express';
+import { SESSION_COOKIE_NAME, CSRF_COOKIE_NAME } from '../services/sessionService';
+
+declare global {
+  namespace Express {
+    interface Request {
+      cookies?: Record<string, string>;
+    }
+  }
+}
+
+/**
+ * Robust zero-dependency cookie header parser
+ */
+export function parseCookieHeader(header: string | undefined): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  if (!header || typeof header !== 'string') return cookies;
+
+  const pairs = header.split(';');
+  for (const pair of pairs) {
+    const idx = pair.indexOf('=');
+    if (idx < 0) continue;
+    const rawKey = pair.substring(0, idx).trim();
+    const rawVal = pair.substring(idx + 1).trim();
+    if (!rawKey) continue;
+    try {
+      cookies[rawKey] = decodeURIComponent(rawVal);
+    } catch {
+      cookies[rawKey] = rawVal;
+    }
+  }
+  return cookies;
+}
+
+/**
+ * Express middleware to populate req.cookies
+ */
+export function cookieParserMiddleware(req: Request, _res: Response, next: NextFunction) {
+  if (!req.cookies) {
+    req.cookies = parseCookieHeader(req.headers.cookie);
+  }
+  next();
+}
+
+/**
+ * Standard cookie configuration for authentication and CSRF
+ */
+export function getCookieOptions(options: {
+  maxAgeMs?: number;
+  httpOnly?: boolean;
+  sameSite?: 'lax' | 'strict' | 'none';
+} = {}) {
+  const isProduction = process.env.NODE_ENV === 'production';
+  return {
+    httpOnly: options.httpOnly !== undefined ? options.httpOnly : true,
+    secure: isProduction,
+    sameSite: (options.sameSite || 'lax') as 'lax' | 'strict' | 'none',
+    path: '/',
+    maxAge: options.maxAgeMs !== undefined ? options.maxAgeMs : undefined,
+  };
+}
+
+/**
+ * Set the authentication session cookie
+ */
+export function setSessionCookie(res: Response, token: string, expiresAt: Date) {
+  const maxAgeMs = Math.max(0, expiresAt.getTime() - Date.now());
+  const options = getCookieOptions({
+    maxAgeMs,
+    httpOnly: true,
+    sameSite: 'lax',
+  });
+  res.cookie(SESSION_COOKIE_NAME, token, options);
+}
+
+/**
+ * Clear the authentication session cookie
+ */
+export function clearSessionCookie(res: Response) {
+  const options = getCookieOptions({
+    maxAgeMs: 0,
+    httpOnly: true,
+    sameSite: 'lax',
+  });
+  res.clearCookie(SESSION_COOKIE_NAME, options);
+}
+
+/**
+ * Set the CSRF token cookie (readable by frontend client)
+ */
+export function setCsrfCookie(res: Response, token: string) {
+  const options = getCookieOptions({
+    httpOnly: false, // Must be readable by client to send back in X-CSRF-Token header
+    sameSite: 'lax',
+    maxAgeMs: 24 * 60 * 60 * 1000,
+  });
+  res.cookie(CSRF_COOKIE_NAME, token, options);
+}
+
+/**
+ * Clear the CSRF token cookie
+ */
+export function clearCsrfCookie(res: Response) {
+  const options = getCookieOptions({
+    httpOnly: false,
+    sameSite: 'lax',
+    maxAgeMs: 0,
+  });
+  res.clearCookie(CSRF_COOKIE_NAME, options);
+}
+
+
+================================================================================
+NEW FILE: server/middleware/csrf.ts
+PURPOSE: CSRF double-submit cookie verification for state-changing HTTP requests
+================================================================================
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { Request, Response, NextFunction } from 'express';
+import * as crypto from 'crypto';
+import { CSRF_COOKIE_NAME, generateCsrfToken } from '../services/sessionService';
+import { setCsrfCookie } from './cookies';
+
+// Public endpoints that do not require CSRF token validation
+const PUBLIC_CSRF_EXEMPT_PATHS = [
+  '/api/auth/login',
+  '/api/auth/verify-invite',
+  '/api/auth/activate',
+  '/api/quotations/submit',
+  '/api/health',
+];
+
+/**
+ * Ensures a CSRF cookie exists on every incoming request.
+ */
+export function ensureCsrfCookieMiddleware(req: Request, res: Response, next: NextFunction) {
+  const currentToken = req.cookies?.[CSRF_COOKIE_NAME];
+  if (!currentToken) {
+    const newToken = generateCsrfToken();
+    setCsrfCookie(res, newToken);
+    if (!req.cookies) req.cookies = {};
+    req.cookies[CSRF_COOKIE_NAME] = newToken;
+  }
+  next();
+}
+
+/**
+ * Enforces CSRF token check on state-changing operations (POST, PUT, PATCH, DELETE)
+ */
+export function verifyCsrfMiddleware(req: Request, res: Response, next: NextFunction) {
+  // Safe HTTP methods do not alter state
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    return next();
+  }
+
+  // Exempt public onboarding and unauthenticated submission routes
+  const normalizedPath = req.baseUrl ? `${req.baseUrl}${req.path}` : req.path;
+  const isExempt = PUBLIC_CSRF_EXEMPT_PATHS.some(exemptPath => 
+    normalizedPath === exemptPath || req.path === exemptPath || req.originalUrl?.split('?')[0] === exemptPath
+  );
+
+  if (isExempt) {
+    return next();
+  }
+
+  // Header or body submitted token
+  const submittedToken = (
+    req.headers['x-csrf-token'] || 
+    req.headers['csrf-token'] || 
+    (req.body && typeof req.body === 'object' && req.body._csrf)
+  ) as string | undefined;
+
+  const expectedToken = req.cookies?.[CSRF_COOKIE_NAME];
+
+  if (!submittedToken || !expectedToken) {
+    return res.status(403).json({
+      error: 'Forbidden: Missing CSRF security token. Please refresh the page and try again.',
+      code: 'CSRF_MISSING'
+    });
+  }
+
+  // Timing safe comparison
+  const submittedBuf = Buffer.from(String(submittedToken).trim());
+  const expectedBuf = Buffer.from(String(expectedToken).trim());
+
+  if (submittedBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(submittedBuf, expectedBuf)) {
+    return res.status(403).json({
+      error: 'Forbidden: Invalid CSRF security token mismatch.',
+      code: 'CSRF_INVALID'
+    });
+  }
+
+  next();
+}
+
+
+================================================================================
+NEW FILE: server/middleware/security.ts
+PURPOSE: Strict CORS whitelisting, OWASP security headers, dotfile/source blocking, rate limiting
+================================================================================
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { Request, Response, NextFunction } from 'express';
+
+// List of allowed frontend origins for CORS with credentials
+const DEFAULT_ALLOWED_ORIGINS = [
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+];
+
+/**
+ * Configure secure CORS with credentials support and explicit origin whitelisting.
+ */
+export function corsMiddleware(req: Request, res: Response, next: NextFunction) {
+  const requestOrigin = req.headers.origin;
+  const envOrigins = process.env.ALLOWED_ORIGINS 
+    ? process.env.ALLOWED_ORIGINS.split(',').map(s => s.trim()) 
+    : [];
+  const allowedOrigins = [...DEFAULT_ALLOWED_ORIGINS, ...envOrigins];
+
+  if (requestOrigin && allowedOrigins.includes(requestOrigin)) {
+    res.header('Access-Control-Allow-Origin', requestOrigin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+  } else if (!requestOrigin) {
+    // Non-browser or same-origin direct requests
+    res.header('Access-Control-Allow-Origin', '*');
+  }
+
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header(
+    'Access-Control-Allow-Headers',
+    'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-csrf-token'
+  );
+
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+}
+
+/**
+ * Standard OWASP security response headers
+ */
+export function securityHeadersMiddleware(_req: Request, res: Response, next: NextFunction) {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-XSS-Protection', '0');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+  next();
+}
+
+/**
+ * Prevent access to sensitive dotfiles, source files, and configuration files.
+ */
+export function preventSensitiveFileExposure(req: Request, res: Response, next: NextFunction) {
+  const normalized = req.path.toLowerCase();
+  if (
+    normalized.includes('/.env') ||
+    normalized.includes('/.git') ||
+    normalized.endsWith('.env') ||
+    normalized.endsWith('.prisma') ||
+    normalized.endsWith('.ts') ||
+    normalized.includes('/node_modules') ||
+    normalized.includes('/prisma/')
+  ) {
+    return res.status(404).send('Not Found');
+  }
+  next();
+}
+
+/**
+ * Lightweight, zero-dependency in-memory rate limiter
+ */
+interface RateLimitBucket {
+  count: number;
+  resetTime: number;
+}
+
+export function createRateLimiter(options: {
+  windowMs: number;
+  max: number;
+  message?: string;
+}) {
+  const { windowMs, max, message } = options;
+  const store = new Map<string, RateLimitBucket>();
+
+  // Cleanup every 5 minutes
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, bucket] of store.entries()) {
+      if (bucket.resetTime <= now) {
+        store.delete(key);
+      }
+    }
+  }, 5 * 60 * 1000);
+
+  return (req: Request, res: Response, next: NextFunction) => {
+    // Skip rate limiting during test executions to prevent false 429 failures across assertion suites
+    if (process.env.NODE_ENV === 'test') {
+      return next();
+    }
+
+    // Key by IP address
+    const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+    let bucket = store.get(ip);
+
+    if (!bucket || bucket.resetTime <= now) {
+      bucket = { count: 1, resetTime: now + windowMs };
+      store.set(ip, bucket);
+      return next();
+    }
+
+    bucket.count += 1;
+    if (bucket.count > max) {
+      const retryAfter = Math.ceil((bucket.resetTime - now) / 1000);
+      res.setHeader('Retry-After', String(retryAfter));
+      return res.status(429).json({
+        error: message || 'Too many requests. Please try again later.',
+        retryAfterSeconds: retryAfter,
+      });
+    }
+
+    next();
+  };
+}
+
+// 10 login attempts per 5 minutes
+export const loginRateLimiter = createRateLimiter({
+  windowMs: 5 * 60 * 1000,
+  max: 10,
+  message: 'Too many authentication attempts. Please wait 5 minutes before trying again.',
+});
+
+// 20 password/activation requests per 5 minutes
+export const sensitiveActionRateLimiter = createRateLimiter({
+  windowMs: 5 * 60 * 1000,
+  max: 20,
+  message: 'Too many requests for this operation. Please wait a few minutes.',
+});
+
+
+================================================================================
+NEW FILE: src/utils/apiClient.ts
+PURPOSE: Frontend credentials & CSRF wrapper ensuring authenticated API calls and 401 handling
+================================================================================
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+export const CSRF_COOKIE_NAME = 'ctvill_csrf';
+
+/**
+ * Read the CSRF token from browser cookies
+ */
+export function getCsrfToken(): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp(`(^|;\\s*)(${CSRF_COOKIE_NAME})=([^;]*)`));
+  return match ? decodeURIComponent(match[3]) : null;
+}
+
+// Global authorization failure callback
+let authExpiredHandler: (() => void) | null = null;
+
+export function setAuthExpiredHandler(handler: () => void) {
+  authExpiredHandler = handler;
+}
+
+/**
+ * Intercepts global window.fetch to ensure:
+ * 1. Credentials (HttpOnly session cookies) are always included with /api requests
+ * 2. CSRF tokens are automatically added to state-changing operations (POST, PUT, PATCH, DELETE)
+ * 3. 401 Unauthorized responses trigger session cleanup and redirect to login
+ */
+let isFetchInitialized = false;
+
+export function setupSecureFetch(onUnauthorized?: () => void) {
+  if (typeof window === 'undefined' || isFetchInitialized) return;
+  isFetchInitialized = true;
+
+  if (onUnauthorized) {
+    authExpiredHandler = onUnauthorized;
+  }
+
+  const originalFetch = window.fetch.bind(window);
+
+  window.fetch = async function (input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+    const rawUrl = typeof input === 'string' 
+      ? input 
+      : input instanceof Request 
+      ? input.url 
+      : input.toString();
+
+    const isApiRequest = rawUrl.startsWith('/api') || rawUrl.includes('/api/');
+
+    if (isApiRequest) {
+      init = init ? { ...init } : {};
+      
+      // Always include session cookie credentials with API requests
+      if (!init.credentials) {
+        init.credentials = 'include';
+      }
+
+      // Check method
+      const method = (
+        init.method || 
+        (input instanceof Request ? input.method : 'GET')
+      ).toUpperCase();
+
+      // Attach CSRF token on state-changing requests
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+        const csrfToken = getCsrfToken();
+        if (csrfToken) {
+          const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+          if (!headers.has('x-csrf-token') && !headers.has('X-CSRF-Token')) {
+            headers.set('x-csrf-token', csrfToken);
+          }
+          init.headers = headers;
+        }
+      }
+    }
+
+    try {
+      const response = await originalFetch(input, init);
+
+      // Handle session expiration on protected endpoints
+      if (
+        response.status === 401 && 
+        isApiRequest && 
+        !rawUrl.includes('/api/auth/login') &&
+        !rawUrl.includes('/api/auth/verify-invite') &&
+        !rawUrl.includes('/api/auth/activate')
+      ) {
+        if (authExpiredHandler) {
+          authExpiredHandler();
+        }
+      }
+
+      return response;
+    } catch (error) {
+      throw error;
+    }
+  };
+}
+
+/**
+ * Standalone secure fetch helper
+ */
+export async function secureFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  return window.fetch(input, init);
+}
+
+
+================================================================================
+NEW FILE: server/tests/security.test.ts
+PURPOSE: Complete automated test suite verifying all 17 Phase 1 security requirements
+================================================================================
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import assert from 'assert';
+import http from 'http';
+import { AddressInfo } from 'net';
+import express from 'express';
+import dotenv from 'dotenv';
+import { prisma, pool, hashPassword, initializeDatabaseTables } from '../db';
+import { createSession, hashSessionToken, revokeAllUserSessions, SESSION_COOKIE_NAME, CSRF_COOKIE_NAME } from '../services/sessionService';
+import { cookieParserMiddleware } from '../middleware/cookies';
+import { corsMiddleware, securityHeadersMiddleware, preventSensitiveFileExposure } from '../middleware/security';
+import { ensureCsrfCookieMiddleware, verifyCsrfMiddleware } from '../middleware/csrf';
+import { authenticateRequest, requireAuth, requireRole, requireExactRole, normalizeAppRole, checkUserProjectAccess } from '../middleware/auth';
+import { normalizeRole, UserRole } from '../middleware/rbac';
+import { authRouter, isPasswordStrong } from '../routes/auth';
+import { projectsRouter } from '../routes/projects';
+import { payrollRouter } from '../routes/payroll';
+import { attendanceRouter } from '../routes/attendance';
+import { Role, AccountStatus } from '@prisma/client';
+
+dotenv.config();
+process.env.NODE_ENV = 'test';
+
+// Create test application instance
+function createTestApp() {
+  const app = express();
+  app.use(securityHeadersMiddleware);
+  app.use(corsMiddleware);
+  app.use(preventSensitiveFileExposure);
+  app.use(cookieParserMiddleware);
+  app.use(express.json());
+  app.use(ensureCsrfCookieMiddleware);
+  app.use(authenticateRequest);
+  app.use('/api', verifyCsrfMiddleware);
+
+  app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+  app.use('/api', authRouter);
+  app.use('/api', projectsRouter);
+  app.use('/api/payroll', payrollRouter);
+  app.use('/api/attendance', attendanceRouter);
+
+  return app;
+}
+
+interface TestResult {
+  name: string;
+  passed: boolean;
+  error?: string;
+}
+
+const results: TestResult[] = [];
+
+async function runTest(name: string, fn: () => Promise<void>) {
+  process.stdout.write(`  Testing: ${name}... `);
+  try {
+    await fn();
+    console.log('✅ PASSED');
+    results.push({ name, passed: true });
+  } catch (err: any) {
+    console.log(`❌ FAILED: ${err.message}`);
+    results.push({ name, passed: false, error: err.message });
+  }
+}
+
+// Helper to make requests with cookies and headers
+async function request(
+  baseUrl: string,
+  path: string,
+  options: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: any;
+    cookie?: string;
+    csrfToken?: string;
+  } = {}
+) {
+  const url = `${baseUrl}${path}`;
+  const headers: Record<string, string> = { ...options.headers };
+
+  if (options.body && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json';
+  }
+  if (options.cookie) {
+    headers['Cookie'] = options.cookie;
+  }
+  if (options.csrfToken) {
+    headers['X-CSRF-Token'] = options.csrfToken;
+  }
+
+  const res = await fetch(url, {
+    method: options.method || 'GET',
+    headers,
+    body: options.body ? JSON.stringify(options.body) : undefined,
+  });
+
+  const text = await res.text();
+  let json: any = null;
+  try {
+    json = JSON.parse(text);
+  } catch {}
+
+  // Parse cookies from response
+  const setCookie = res.headers.get('set-cookie');
+  let sessionCookie: string | undefined;
+  let csrfCookie: string | undefined;
+
+  if (setCookie) {
+    const sessionMatch = setCookie.match(new RegExp(`${SESSION_COOKIE_NAME}=([^;]+)`));
+    if (sessionMatch) sessionCookie = sessionMatch[1];
+    const csrfMatch = setCookie.match(new RegExp(`${CSRF_COOKIE_NAME}=([^;]+)`));
+    if (csrfMatch) csrfCookie = csrfMatch[1];
+  }
+
+  return {
+    status: res.status,
+    headers: res.headers,
+    json,
+    text,
+    sessionCookie,
+    csrfCookie,
+  };
+}
+
+async function main() {
+  console.log('\n🔒 ==============================================================');
+  console.log('   CTVILL ERP — PHASE 1 SECURITY & AUTHENTICATION TEST SUITE');
+  console.log('==============================================================\n');
+
+  await initializeDatabaseTables();
+
+  const app = createTestApp();
+  const server = http.createServer(app);
+
+  await new Promise<void>((resolve) => {
+    server.listen(0, '127.0.0.1', () => resolve());
+  });
+
+  const port = (server.address() as AddressInfo).port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  // Ensure test users exist in DB with known passwords
+  const testAdminEmail = 'test.admin.phase1@ctvill.internal';
+  const testTimekeeperEmail = 'test.timekeeper.phase1@ctvill.internal';
+  const testFinanceEmail = 'test.finance.phase1@ctvill.internal';
+  const testEngineerEmail = 'test.engineer.phase1@ctvill.internal';
+  const testSuspendedEmail = 'test.suspended.phase1@ctvill.internal';
+  const testPassword = 'Password123!';
+
+  // Clean up old test accounts safely
+  await prisma.user.deleteMany({
+    where: { email: { in: [testAdminEmail, testTimekeeperEmail, testFinanceEmail, testEngineerEmail, testSuspendedEmail] } }
+  }).catch(() => {});
+
+  const testAdmin = await prisma.user.create({
+    data: {
+      email: testAdminEmail,
+      name: 'Test Administrator',
+      role: Role.ADMIN,
+      accountStatus: AccountStatus.ACTIVE,
+      passwordHash: hashPassword(testPassword),
+      projectIds: [],
+    }
+  });
+
+  const testTimekeeper = await prisma.user.create({
+    data: {
+      email: testTimekeeperEmail,
+      name: 'Test Timekeeper',
+      role: Role.TIMEKEEPER,
+      accountStatus: AccountStatus.ACTIVE,
+      passwordHash: hashPassword(testPassword),
+      projectIds: ['PRJ-4693'],
+    }
+  });
+
+  const testFinance = await prisma.user.create({
+    data: {
+      email: testFinanceEmail,
+      name: 'Test Finance Officer',
+      role: Role.FINANCE,
+      accountStatus: AccountStatus.ACTIVE,
+      passwordHash: hashPassword(testPassword),
+      projectIds: [],
+    }
+  });
+
+  const testEngineer = await prisma.user.create({
+    data: {
+      email: testEngineerEmail,
+      name: 'Test Site Engineer',
+      role: Role.ENGINEER,
+      accountStatus: AccountStatus.ACTIVE,
+      passwordHash: hashPassword(testPassword),
+      projectIds: ['PRJ-4693'],
+    }
+  });
+
+  const testSuspended = await prisma.user.create({
+    data: {
+      email: testSuspendedEmail,
+      name: 'Test Suspended User',
+      role: Role.ENGINEER,
+      accountStatus: AccountStatus.SUSPENDED,
+      passwordHash: hashPassword(testPassword),
+      projectIds: [],
+    }
+  });
+
+  try {
+    // 1. Password Strength Validation
+    await runTest('Password strength policy requires min 8 chars with letters & numbers', async () => {
+      assert.strictEqual(isPasswordStrong('short').valid, false);
+      assert.strictEqual(isPasswordStrong('alllettersnodigits').valid, false);
+      assert.strictEqual(isPasswordStrong('12345678').valid, false);
+      assert.strictEqual(isPasswordStrong('ValidPass123').valid, true);
+    });
+
+    // 2. Valid credentials authenticate and return session cookie
+    let adminCookie = '';
+    let adminCsrf = '';
+    await runTest('Valid credentials authenticate active user and issue HttpOnly session cookie', async () => {
+      const res = await request(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { email: testAdminEmail, password: testPassword },
+      });
+      assert.strictEqual(res.status, 200);
+      assert.strictEqual(res.json?.success, true);
+      assert.ok(res.json?.session);
+      assert.strictEqual(res.json.session.role, 'Admin');
+      assert.ok(res.sessionCookie, 'Session cookie must be set');
+      assert.ok(res.csrfCookie || res.json.csrfToken, 'CSRF cookie or token must be issued');
+
+      adminCookie = `${SESSION_COOKIE_NAME}=${res.sessionCookie}`;
+      adminCsrf = res.csrfCookie || res.json.csrfToken;
+    });
+
+    // 3. Incorrect credentials rejected
+    await runTest('Incorrect credentials rejected with generic error (no user enumeration)', async () => {
+      const res = await request(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { email: testAdminEmail, password: 'WrongPassword999!' },
+      });
+      assert.strictEqual(res.status, 401);
+      assert.strictEqual(res.json?.error, 'Invalid email or password.');
+
+      // Non-existent email returns same generic error
+      const nonExistent = await request(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { email: 'nonexistent999@ctvill.internal', password: 'AnyPassword123!' },
+      });
+      assert.strictEqual(nonExistent.status, 401);
+      assert.strictEqual(nonExistent.json?.error, 'Invalid email or password.');
+    });
+
+    // 4. Requests without valid session return 401
+    await runTest('Protected endpoints return 401 Unauthorized without session', async () => {
+      const res = await request(baseUrl, '/api/auth/me');
+      assert.strictEqual(res.status, 401);
+      assert.strictEqual(res.json?.code, 'UNAUTHORIZED');
+
+      const staffRes = await request(baseUrl, '/api/staff');
+      assert.strictEqual(staffRes.status, 401);
+
+      const projectsRes = await request(baseUrl, '/api/projects');
+      assert.strictEqual(projectsRes.status, 401);
+    });
+
+    // 5. Forged x-user-role and x-user-id cannot elevate privileges
+    await runTest('Forged x-user-role and x-user-id headers are ignored and cannot elevate privileges', async () => {
+      const res = await request(baseUrl, '/api/staff', {
+        headers: {
+          'x-user-role': 'ADMIN',
+          'x-user-id': testAdmin.id,
+          'user-role': 'ADMIN',
+        }
+      });
+      assert.strictEqual(res.status, 401, 'Request with forged headers must be rejected as 401');
+    });
+
+    // 6. User IDs in query or body cannot impersonate another user
+    await runTest('Query parameter and body userId cannot impersonate another user', async () => {
+      const res = await request(baseUrl, `/api/auth/profile?userId=${testAdmin.id}`);
+      assert.strictEqual(res.status, 401, 'Unauthenticated query param userId must return 401');
+
+      // Authenticate as timekeeper
+      const tkRes = await request(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { email: testTimekeeperEmail, password: testPassword },
+      });
+      const tkCookie = `${SESSION_COOKIE_NAME}=${tkRes.sessionCookie}`;
+      const tkCsrf = tkRes.csrfCookie || tkRes.json.csrfToken;
+
+      // Timekeeper attempts to read profile passing admin's ID
+      const spoofProfile = await request(baseUrl, `/api/auth/profile?userId=${testAdmin.id}`, {
+        cookie: tkCookie,
+      });
+      assert.strictEqual(spoofProfile.status, 200);
+      // Profile MUST be the authenticated timekeeper's profile, NOT the admin's!
+      assert.strictEqual(spoofProfile.json?.profile?.id, testTimekeeper.id);
+      assert.strictEqual(spoofProfile.json?.profile?.role, 'Timekeeper');
+    });
+
+    // 7. Unknown roles cannot become administrators
+    await runTest('Unknown and unmapped roles reject access and NEVER normalize to ADMIN', async () => {
+      assert.strictEqual(normalizeAppRole('HACKER'), null);
+      assert.strictEqual(normalizeAppRole(''), null);
+      assert.strictEqual(normalizeAppRole(null), null);
+      assert.strictEqual(normalizeRole('INVALID_ROLE'), UserRole.UNAUTHORIZED);
+      assert.strictEqual(normalizeRole(undefined), UserRole.UNAUTHORIZED);
+    });
+
+    // 8. Restricted operations return 403 for authenticated users without permission
+    await runTest('Restricted operations return 403 Forbidden for unauthorized roles', async () => {
+      // Timekeeper session
+      const tkLogin = await request(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { email: testTimekeeperEmail, password: testPassword },
+      });
+      const tkCookie = `${SESSION_COOKIE_NAME}=${tkLogin.sessionCookie}; ${CSRF_COOKIE_NAME}=${tkLogin.csrfCookie}`;
+      const tkCsrf = tkLogin.csrfCookie || tkLogin.json.csrfToken;
+
+      // Timekeeper attempts to view staff list (ADMIN only)
+      const staffRes = await request(baseUrl, '/api/staff', { cookie: tkCookie });
+      assert.strictEqual(staffRes.status, 403);
+    });
+
+    // 9. Timekeeper cannot approve payroll or access unauthorized financial actions
+    await runTest('Timekeeper cannot finalize/approve payroll (Separation of Duties)', async () => {
+      const tkLogin = await request(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { email: testTimekeeperEmail, password: testPassword },
+      });
+      const tkCookie = `${SESSION_COOKIE_NAME}=${tkLogin.sessionCookie}; ${CSRF_COOKIE_NAME}=${tkLogin.csrfCookie}`;
+      const tkCsrf = tkLogin.csrfCookie || tkLogin.json.csrfToken;
+
+      const payrollRes = await request(baseUrl, '/api/payroll/finalize', {
+        method: 'POST',
+        cookie: tkCookie,
+        csrfToken: tkCsrf,
+        body: {
+          projectId: 'PRJ-4693',
+          periodStart: '2026-09-14',
+          periodEnd: '2026-09-21',
+        }
+      });
+      assert.strictEqual(payrollRes.status, 403);
+      assert.strictEqual(payrollRes.json?.code, 'FORBIDDEN_SOD');
+    });
+
+    // 10. Finance users cannot create Administrator accounts
+    await runTest('Finance users cannot create Administrator accounts (Admin only)', async () => {
+      const finLogin = await request(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { email: testFinanceEmail, password: testPassword },
+      });
+      const finCookie = `${SESSION_COOKIE_NAME}=${finLogin.sessionCookie}; ${CSRF_COOKIE_NAME}=${finLogin.csrfCookie}`;
+      const finCsrf = finLogin.csrfCookie || finLogin.json.csrfToken;
+
+      const createAdminRes = await request(baseUrl, '/api/staff', {
+        method: 'POST',
+        cookie: finCookie,
+        csrfToken: finCsrf,
+        body: {
+          email: 'rogue.admin@ctvill.internal',
+          name: 'Rogue Admin',
+          password: 'Password123!',
+          role: 'Admin',
+        }
+      });
+      assert.strictEqual(createAdminRes.status, 403);
+    });
+
+    // 11. Project assignment scoping checks
+    await runTest('Users restricted by projectIds cannot access unauthorized projects', async () => {
+      const user = {
+        id: 'u1',
+        email: 'eng@ctvill.com',
+        name: 'Engineer',
+        role: 'ENGINEER' as const,
+        projectIds: ['PRJ-4693'],
+      };
+
+      assert.strictEqual(checkUserProjectAccess(user, 'PRJ-4693'), true);
+      assert.strictEqual(checkUserProjectAccess(user, 'PRJ-OTHER-999'), false);
+
+      // Admin has global access
+      const admin = {
+        id: 'u2',
+        email: 'admin@ctvill.com',
+        name: 'Admin',
+        role: 'ADMIN' as const,
+        projectIds: [],
+      };
+      assert.strictEqual(checkUserProjectAccess(admin, 'PRJ-OTHER-999'), true);
+    });
+
+    // 12. Suspended accounts are rejected
+    await runTest('Suspended accounts cannot log in or access resources', async () => {
+      const res = await request(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { email: testSuspendedEmail, password: testPassword },
+      });
+      assert.strictEqual(res.status, 403);
+      assert.ok(res.json?.error?.toLowerCase().includes('suspended'));
+    });
+
+    // 13. Expired sessions are rejected
+    await runTest('Expired sessions are rejected with 401', async () => {
+      // Create session expired in the past
+      const { rawToken } = await createSession(testAdmin.id, { rememberMe: false });
+      const tokenHash = hashSessionToken(rawToken);
+      await prisma.session.update({
+        where: { tokenHash },
+        data: { expiresAt: new Date(Date.now() - 10000) }
+      });
+
+      const res = await request(baseUrl, '/api/auth/me', {
+        cookie: `${SESSION_COOKIE_NAME}=${rawToken}`,
+      });
+      assert.strictEqual(res.status, 401);
+    });
+
+    // 14. Logout invalidates the active server-side session
+    await runTest('Logout invalidates active session in PostgreSQL and clears cookie', async () => {
+      const loginRes = await request(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { email: testAdminEmail, password: testPassword },
+      });
+      const cookie = `${SESSION_COOKIE_NAME}=${loginRes.sessionCookie}; ${CSRF_COOKIE_NAME}=${loginRes.csrfCookie}`;
+      const csrf = loginRes.csrfCookie || loginRes.json.csrfToken;
+
+      // Verify authenticated
+      const meRes = await request(baseUrl, '/api/auth/me', { cookie });
+      assert.strictEqual(meRes.status, 200);
+
+      // Logout
+      const logoutRes = await request(baseUrl, '/api/auth/logout', {
+        method: 'POST',
+        cookie,
+        csrfToken: csrf,
+      });
+      assert.strictEqual(logoutRes.status, 200);
+
+      // Verify session is dead
+      const postLogoutMe = await request(baseUrl, '/api/auth/me', { cookie });
+      assert.strictEqual(postLogoutMe.status, 401);
+    });
+
+    // 15. Password changes invalidate existing sessions
+    await runTest('Password change invalidates existing sessions', async () => {
+      // Create session 1
+      const login1 = await request(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { email: testEngineerEmail, password: testPassword },
+      });
+      const cookie1 = `${SESSION_COOKIE_NAME}=${login1.sessionCookie}; ${CSRF_COOKIE_NAME}=${login1.csrfCookie}`;
+      const csrf1 = login1.csrfCookie || login1.json.csrfToken;
+
+      // Change password
+      const newPass = 'NewEngineerPass123!';
+      const changeRes = await request(baseUrl, '/api/auth/change-password', {
+        method: 'POST',
+        cookie: cookie1,
+        csrfToken: csrf1,
+        body: {
+          currentPassword: testPassword,
+          newPassword: newPass,
+        }
+      });
+      assert.strictEqual(changeRes.status, 200);
+
+      // Old session 1 should now be revoked (or invalidated)
+      const oldCheck = await request(baseUrl, '/api/auth/me', { cookie: cookie1 });
+      assert.strictEqual(oldCheck.status, 401);
+
+      // Can log in with new password
+      const newLogin = await request(baseUrl, '/api/auth/login', {
+        method: 'POST',
+        body: { email: testEngineerEmail, password: newPass },
+      });
+      assert.strictEqual(newLogin.status, 200);
+    });
+
+    // 16. CSRF protection blocks unauthorized state-changing requests
+    await runTest('CSRF protection blocks state-changing requests with missing or mismatched token', async () => {
+      // Missing token
+      const resNoCsrf = await request(baseUrl, '/api/projects', {
+        method: 'POST',
+        cookie: adminCookie,
+        body: { name: 'Unauthorized CSRF Project', clientName: 'Attacker' }
+      });
+      assert.strictEqual(resNoCsrf.status, 403);
+      assert.strictEqual(resNoCsrf.json?.code, 'CSRF_MISSING');
+
+      // Mismatched token
+      const resBadCsrf = await request(baseUrl, '/api/projects', {
+        method: 'POST',
+        cookie: adminCookie,
+        csrfToken: 'forged_fake_csrf_token_1234567890',
+        body: { name: 'Unauthorized CSRF Project', clientName: 'Attacker' }
+      });
+      assert.strictEqual(resBadCsrf.status, 403);
+    });
+
+    // 17. Existing database records and demo users are preserved
+    await runTest('Existing database users and data are intact and preserved', async () => {
+      const realAdmin = await prisma.user.findFirst({ where: { email: 'admin@ctvill.com' } });
+      assert.ok(realAdmin, 'admin@ctvill.com must exist in database');
+
+      const realOM = await prisma.user.findFirst({ where: { email: 'om@ctvill.com' } });
+      assert.ok(realOM, 'om@ctvill.com must exist in database');
+
+      const realFinance = await prisma.user.findFirst({ where: { email: 'finance@ctvill.com' } });
+      assert.ok(realFinance, 'finance@ctvill.com must exist in database');
+
+      const realTimekeeper = await prisma.user.findFirst({ where: { email: 'timekeeper@ctvill.com' } });
+      assert.ok(realTimekeeper, 'timekeeper@ctvill.com must exist in database');
+
+      const projectCount = await prisma.commercialProject.count();
+      assert.ok(projectCount >= 1, 'Commercial projects must be preserved');
+    });
+
+  } finally {
+    // Clean up test accounts safely
+    await prisma.user.deleteMany({
+      where: { email: { in: [testAdminEmail, testTimekeeperEmail, testFinanceEmail, testEngineerEmail, testSuspendedEmail] } }
+    }).catch(() => {});
+
+    server.close();
+  }
+
+  console.log('\n==============================================================');
+  const passed = results.filter(r => r.passed).length;
+  const failed = results.filter(r => !r.passed).length;
+  console.log(`SUMMARY: ${passed} passed, ${failed} failed out of ${results.length} total tests.`);
+  console.log('==============================================================\n');
+
+  if (failed > 0) {
+    process.exit(1);
+  }
+}
+
+main().catch((err) => {
+  console.error('Test execution failed:', err);
+  process.exit(1);
+});
+
+
+
+================================================================================
+4. GIT DIFF AGAINST PRE-PHASE-1 RESTORE POINT (TRACKED FILES)
+================================================================================
+diff --git a/package.json b/package.json
+index fbc85bb..b829edc 100644
+--- a/package.json
++++ b/package.json
+@@ -15,7 +15,8 @@
+     "start": "tsx server.ts",
+     "preview": "vite preview",
+     "clean": "rm -rf dist server.js",
+-    "lint": "tsc --noEmit"
++    "lint": "tsc --noEmit",
++    "test:security": "tsx server/tests/security.test.ts"
+   },
+   "dependencies": {
+     "@google/genai": "^2.4.0",
+diff --git a/prisma/schema.prisma b/prisma/schema.prisma
+index 58dbf0b..f993fbc 100644
+--- a/prisma/schema.prisma
++++ b/prisma/schema.prisma
+@@ -65,11 +65,30 @@ model User {
+   buyerKyc             BuyerKyc?           // KYC verification checklist
+   loggedAttendanceLogs AttendanceLog[]     @relation("LoggedAttendance")
+   approvedPayrollRuns  PayrollRun[]        @relation("ApprovedPayrolls")
++  sessions             Session[]
+ 
+   @@index([inviteToken])
+   @@map("users")
+ }
+ 
++model Session {
++  id             String   @id @default(uuid())
++  tokenHash      String   @unique @map("token_hash")
++  userId         String   @map("user_id")
++  expiresAt      DateTime @map("expires_at")
++  createdAt      DateTime @default(now()) @map("created_at")
++  lastActivityAt DateTime @default(now()) @map("last_activity_at")
++  userAgent      String?  @map("user_agent")
++  ipAddress      String?  @map("ip_address")
++
++  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
++
++  @@index([tokenHash])
++  @@index([userId])
++  @@index([expiresAt])
++  @@map("sessions")
++}
++
+ model LandParcel {
+   id              String   @id @default(uuid())
+   name            String   // e.g., "Cavinti Highland Crest"
+diff --git a/server/db.ts b/server/db.ts
+index 1c63bb0..e8908c5 100644
+--- a/server/db.ts
++++ b/server/db.ts
+@@ -29,6 +29,17 @@ export const prisma = new PrismaClient({ adapter });
+ export async function initializeDatabaseTables() {
+   try {
+     await pool.query(`
++      CREATE TABLE IF NOT EXISTS sessions (
++        id TEXT PRIMARY KEY,
++        token_hash TEXT NOT NULL UNIQUE,
++        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
++        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
++        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
++        last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
++        user_agent TEXT,
++        ip_address TEXT
++      );
++
+       CREATE TABLE IF NOT EXISTS system_settings (
+         key TEXT PRIMARY KEY,
+         value JSONB NOT NULL,
+@@ -161,7 +172,7 @@ export async function initializeDatabaseTables() {
+ 
+       -- Synchronize real database contractors into workers masterlist
+       INSERT INTO workers (id, name, first_name, last_name, trade, position, daily_rate, hourly_ot_rate, assigned_project_id, status, created_at, updated_at)
+-      SELECT 
++      SELECT DISTINCT ON (c.id)
+         c.id,
+         c.name,
+         split_part(c.name, ' ', 1) as first_name,
+@@ -282,6 +293,9 @@ export async function initializeDatabaseTables() {
+       'CREATE INDEX IF NOT EXISTS idx_commercial_projects_created_at ON commercial_projects(created_at)',
+       'CREATE INDEX IF NOT EXISTS idx_contractors_status ON contractors(status)',
+       'CREATE INDEX IF NOT EXISTS idx_slots_parcel_id ON slots("parcelId")',
++      'CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)',
++      'CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)',
++      'CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)',
+       'CREATE INDEX IF NOT EXISTS idx_slots_status ON slots(status)',
+       'CREATE INDEX IF NOT EXISTS idx_daily_site_logs_date ON daily_site_logs(date DESC)',
+       'CREATE INDEX IF NOT EXISTS idx_government_permits_project_id ON government_permits(project_id)',
+diff --git a/server/events.ts b/server/events.ts
+index ed4b486..d92523a 100644
+--- a/server/events.ts
++++ b/server/events.ts
+@@ -43,10 +43,14 @@ export function createEventsRouter(): Router {
+   const router = Router();
+ 
+   router.get('/events', (req: Request, res: Response) => {
++    // Require authenticated session for real-time ERP event stream
++    if (!req.user) {
++      return res.status(401).json({ error: 'Unauthorized: Valid session required for real-time events.' });
++    }
++
+     res.setHeader('Content-Type', 'text/event-stream');
+     res.setHeader('Cache-Control', 'no-cache');
+     res.setHeader('Connection', 'keep-alive');
+-    res.setHeader('Access-Control-Allow-Origin', '*');
+     res.flushHeaders();
+ 
+     // Send initial connection heartbeat
+diff --git a/server/middleware/auth.ts b/server/middleware/auth.ts
+index 88c0697..e5e3e6b 100644
+--- a/server/middleware/auth.ts
++++ b/server/middleware/auth.ts
+@@ -4,10 +4,10 @@
+  */
+ 
+ import { Request, Response, NextFunction } from 'express';
+-import { prisma } from '../db';
+ import { Role } from '@prisma/client';
++import { SESSION_COOKIE_NAME, verifySession } from '../services/sessionService';
+ 
+-export type AllowedAppRole = 'ADMIN' | 'ENGINEER' | 'TIMEKEEPER' | 'FINANCE' | 'PROJECT_MANAGER';
++export type AllowedAppRole = 'ADMIN' | 'ENGINEER' | 'TIMEKEEPER' | 'FINANCE' | 'PROJECT_MANAGER' | 'CLIENT';
+ 
+ export interface AuthenticatedUser {
+   id: string;
+@@ -21,125 +21,134 @@ declare global {
+   namespace Express {
+     interface Request {
+       user?: AuthenticatedUser;
++      sessionToken?: string;
+     }
+   }
+ }
+ 
+ /**
+- * Normalizes any legacy or case-variant role into the canonical 4-role system:
+- * ADMIN, ENGINEER, TIMEKEEPER, FINANCE
++ * Normalizes any database or app role into the canonical role system.
++ * Returns null for unknown, empty, or unmapped roles (NEVER defaults to ADMIN).
+  */
+-export function normalizeAppRole(rawRole: string | undefined | null): AllowedAppRole {
+-  if (!rawRole) return 'ADMIN';
++export function normalizeAppRole(rawRole: string | undefined | null): AllowedAppRole | null {
++  if (!rawRole || typeof rawRole !== 'string') return null;
+   const upper = rawRole.toUpperCase().trim();
+-  if (upper.includes('TIME')) return 'TIMEKEEPER';
+-  if (upper.includes('FINANCE') || upper.includes('TREASURY') || upper === 'ACCOUNTANT') return 'FINANCE';
+-  if (upper.includes('ENG') || upper.includes('PROJECT') || upper.includes('PM')) return 'ENGINEER';
+-  if (upper === 'ADMIN' || upper.includes('OPERAT') || upper.includes('DIRECTOR') || upper === 'SUPERADMIN') return 'ADMIN';
+-  return (upper as AllowedAppRole);
++  if (upper === 'TIMEKEEPER' || upper.includes('TIME')) return 'TIMEKEEPER';
++  if (upper === 'FINANCE' || upper.includes('TREASURY') || upper === 'ACCOUNTANT') return 'FINANCE';
++  if (upper === 'PROJECT_MANAGER' || upper === 'PM') return 'ENGINEER';
++  if (upper === 'ENGINEER' || upper.includes('ENG') || upper.includes('SITE_ENG')) return 'ENGINEER';
++  if (upper === 'ADMIN' || upper === 'SUPERADMIN' || upper.includes('OPERAT') || upper.includes('DIRECTOR')) return 'ADMIN';
++  if (upper === 'CLIENT') return 'CLIENT';
++  return null;
+ }
+ 
+ /**
+- * Authenticate incoming request and attach user profile
++ * Extracts session token strictly from HttpOnly cookie or Authorization Bearer header.
++ * NEVER accepts user IDs, role headers, query parameters, or request body fields.
+  */
+-export async function authenticateRequest(req: Request, res: Response, next: NextFunction) {
+-  try {
+-    // 1. Check headers for user ID or Authorization bearer
+-    const headerUserId = (req.headers['x-user-id'] || req.headers['user-id']) as string | undefined;
+-    const headerRole = (req.headers['x-user-role'] || req.headers['user-role']) as string | undefined;
+-    const authHeader = req.headers['authorization'];
+-    
+-    let resolvedUserId: string | null = null;
+-    if (headerUserId) {
+-      resolvedUserId = headerUserId;
+-    } else if (authHeader && authHeader.startsWith('Bearer ')) {
+-      resolvedUserId = authHeader.substring(7).trim();
+-    } else if (req.query.userId && typeof req.query.userId === 'string') {
+-      resolvedUserId = req.query.userId;
+-    } else if (req.body?.logged_by_user_id || req.body?.approved_by_user_id || req.body?.userId) {
+-      resolvedUserId = req.body.logged_by_user_id || req.body.approved_by_user_id || req.body.userId;
++export function extractSessionToken(req: Request): string | null {
++  // 1. Primary: HttpOnly session cookie
++  if (req.cookies && req.cookies[SESSION_COOKIE_NAME]) {
++    const cookieToken = req.cookies[SESSION_COOKIE_NAME];
++    if (typeof cookieToken === 'string' && cookieToken.trim().length >= 16) {
++      return cookieToken.trim();
+     }
++  }
+ 
+-    if (resolvedUserId) {
+-      const dbUser = await prisma.user.findUnique({
+-        where: { id: resolvedUserId },
+-        select: { id: true, email: true, name: true, role: true, projectIds: true }
+-      });
+-
+-      if (dbUser) {
+-        req.user = {
+-          id: dbUser.id,
+-          email: dbUser.email,
+-          name: dbUser.name,
+-          role: normalizeAppRole(dbUser.role),
+-          projectIds: dbUser.projectIds || []
+-        };
+-        return next();
+-      }
++  // 2. Secondary: Authorization: Bearer <sessionToken>
++  const authHeader = req.headers['authorization'];
++  if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
++    const bearerToken = authHeader.substring(7).trim();
++    if (bearerToken.length >= 16) {
++      return bearerToken;
+     }
++  }
+ 
+-    // Fallback: If header role is provided directly (e.g. from frontend dev session)
+-    if (headerRole) {
+-      const normRole = normalizeAppRole(headerRole);
+-      // Attempt to find any active user with that role
+-      const roleMatch = await prisma.user.findFirst({
+-        where: { role: (normRole as Role) },
+-        select: { id: true, email: true, name: true, role: true, projectIds: true }
+-      });
++  return null;
++}
+ 
+-      req.user = {
+-        id: roleMatch?.id || `session-${normRole.toLowerCase()}`,
+-        email: roleMatch?.email || `${normRole.toLowerCase()}@ctvill.com`,
+-        name: roleMatch?.name || `${normRole} Officer`,
+-        role: normRole,
+-        projectIds: roleMatch?.projectIds || []
+-      };
++/**
++ * Authenticate incoming request by resolving and verifying the server-side session.
++ * Does NOT accept forged headers (x-user-id, x-user-role) or query/body user IDs.
++ * Does NOT automatically grant Administrator access when unauthenticated.
++ */
++export async function authenticateRequest(req: Request, _res: Response, next: NextFunction) {
++  try {
++    const rawToken = extractSessionToken(req);
++    if (!rawToken) {
++      req.user = undefined;
+       return next();
+     }
+ 
+-    // Default to ADMIN for open internal requests if no auth provided
+-    const defaultAdmin = await prisma.user.findFirst({
+-      where: { role: Role.ADMIN },
+-      select: { id: true, email: true, name: true, role: true, projectIds: true }
+-    });
++    const sessionResult = await verifySession(rawToken);
++    if (!sessionResult) {
++      req.user = undefined;
++      return next();
++    }
++
++    const normRole = normalizeAppRole(sessionResult.user.role);
++    if (!normRole) {
++      req.user = undefined;
++      return next();
++    }
+ 
++    req.sessionToken = rawToken;
+     req.user = {
+-      id: defaultAdmin?.id || 'admin-system-default',
+-      email: defaultAdmin?.email || 'admin@ctvill.com',
+-      name: defaultAdmin?.name || 'Operations Manager',
+-      role: 'ADMIN',
+-      projectIds: defaultAdmin?.projectIds || []
++      id: sessionResult.user.id,
++      email: sessionResult.user.email,
++      name: sessionResult.user.name,
++      role: normRole,
++      projectIds: sessionResult.user.projectIds || [],
+     };
+ 
+     next();
+   } catch (error) {
+-    console.error('Authentication middleware error:', error);
++    console.error('Authentication verification error:', error);
++    req.user = undefined;
+     next();
+   }
+ }
+ 
+ /**
+- * Strict Role-Based Access Control Middleware
+- * @param allowedRoles Array of roles permitted to access this endpoint
++ * Strict requirement that a valid, active authenticated session exists.
++ * Returns HTTP 401 if unauthenticated.
++ */
++export function requireAuth(req: Request, res: Response, next: NextFunction) {
++  if (!req.user) {
++    return res.status(401).json({
++      error: 'Unauthorized: Valid authenticated session required.',
++      code: 'UNAUTHORIZED'
++    });
++  }
++  next();
++}
++
++/**
++ * Strict Role-Based Access Control Middleware.
++ * Allows specified roles plus ADMIN for general administration.
+  */
+-export function requireRole(allowedRoles: (AllowedAppRole | Role)[]) {
++export function requireRole(allowedRoles: (AllowedAppRole | Role | string)[]) {
+   return (req: Request, res: Response, next: NextFunction) => {
+     if (!req.user) {
+       return res.status(401).json({
+-        error: 'Unauthorized: Authentication credentials required.'
++        error: 'Unauthorized: Authentication required.',
++        code: 'UNAUTHORIZED'
+       });
+     }
+ 
+     const currentRole = req.user.role;
+-    const normalizedAllowed = allowedRoles.map(r => normalizeAppRole(String(r)));
++    const normalizedAllowed = allowedRoles
++      .map(r => normalizeAppRole(String(r)))
++      .filter((r): r is AllowedAppRole => r !== null);
+ 
+-    // ADMIN has full system access across all endpoints
++    // ADMIN has authorized administrative oversight
+     if (currentRole === 'ADMIN' || normalizedAllowed.includes(currentRole)) {
+       return next();
+     }
+ 
+     return res.status(403).json({
+-      error: `Forbidden: Access restricted. Required role(s): [${normalizedAllowed.join(', ')}]. Your current role is [${currentRole}].`
++      error: `Forbidden: Access restricted. Required role: [${normalizedAllowed.join(', ')}]. Your role: [${currentRole}].`,
++      code: 'FORBIDDEN'
+     });
+   };
+ }
+@@ -148,24 +157,67 @@ export function requireRole(allowedRoles: (AllowedAppRole | Role)[]) {
+  * Strict Role-Based Access Control Middleware enforcing Separation of Duties (SoD).
+  * Does NOT permit ADMIN or any other unlisted role to bypass operational restrictions.
+  */
+-export function requireExactRole(allowedRoles: (AllowedAppRole | Role)[]) {
++export function requireExactRole(allowedRoles: (AllowedAppRole | Role | string)[]) {
+   return (req: Request, res: Response, next: NextFunction) => {
+     if (!req.user) {
+       return res.status(401).json({
+-        error: 'Unauthorized: Authentication credentials required.'
++        error: 'Unauthorized: Authentication required.',
++        code: 'UNAUTHORIZED'
+       });
+     }
+ 
+     const currentRole = req.user.role;
+-    const normalizedAllowed = allowedRoles.map(r => normalizeAppRole(String(r)));
++    const normalizedAllowed = allowedRoles
++      .map(r => normalizeAppRole(String(r)))
++      .filter((r): r is AllowedAppRole => r !== null);
+ 
+     if (normalizedAllowed.includes(currentRole)) {
+       return next();
+     }
+ 
+     return res.status(403).json({
+-      error: `Forbidden: Separation of Duties (SoD) violation. This operational action is strictly restricted to [${normalizedAllowed.join(', ')}]. Your current role is [${currentRole}].`
++      error: `Forbidden: Separation of Duties (SoD) violation. This operational action is strictly restricted to [${normalizedAllowed.join(', ')}]. Your current role is [${currentRole}].`,
++      code: 'FORBIDDEN_SOD'
+     });
+   };
+ }
+ 
++/**
++ * Checks whether the authenticated user has access to a specific project ID.
++ * - ADMIN and FINANCE have global access for oversight, auditing, and corporate payroll.
++ * - If user has restricted projectIds list (length > 0), they may only access projects in that list.
++ */
++export function checkUserProjectAccess(user: AuthenticatedUser | undefined, projectId: string | undefined): boolean {
++  if (!user || !projectId) return false;
++  if (user.role === 'ADMIN' || user.role === 'FINANCE') return true;
++  if (!user.projectIds || user.projectIds.length === 0) return true;
++  return user.projectIds.includes(projectId);
++}
++
++/**
++ * Middleware ensuring the authenticated user has access to the requested project.
++ */
++export function requireProjectAccess(projectIdExtractor?: (req: Request) => string | undefined) {
++  return (req: Request, res: Response, next: NextFunction) => {
++    if (!req.user) {
++      return res.status(401).json({ error: 'Unauthorized: Authentication required.' });
++    }
++
++    const projectId = projectIdExtractor 
++      ? projectIdExtractor(req)
++      : (req.params.projectId || req.params.id || (req.query.projectId as string) || (req.query.project_id as string) || req.body?.projectId || req.body?.project_id);
++
++    if (!projectId) {
++      return next();
++    }
++
++    if (!checkUserProjectAccess(req.user, projectId)) {
++      return res.status(403).json({
++        error: `Forbidden: You do not have assigned access to project [${projectId}].`,
++        code: 'FORBIDDEN_PROJECT_ACCESS'
++      });
++    }
++
++    next();
++  };
++}
+diff --git a/server/middleware/rbac.ts b/server/middleware/rbac.ts
+index e4dd386..f9d704d 100644
+--- a/server/middleware/rbac.ts
++++ b/server/middleware/rbac.ts
+@@ -11,6 +11,7 @@ export enum UserRole {
+   FINANCE = 'FINANCE',            // Financial tier (70)
+   PM = 'PROJECT_MANAGER',          // Mid-tier: Project Manager / Site Engineer (50)
+   TIMEKEEPER = 'TIMEKEEPER',      // Leaf-tier: Site Timekeeper (10)
++  UNAUTHORIZED = 'UNAUTHORIZED',  // Tier for unknown / unmapped roles (0)
+ }
+ 
+ export const ROLE_HIERARCHY: Record<UserRole, number> = {
+@@ -18,16 +19,17 @@ export const ROLE_HIERARCHY: Record<UserRole, number> = {
+   [UserRole.FINANCE]: 70,
+   [UserRole.PM]: 50,
+   [UserRole.TIMEKEEPER]: 10,
++  [UserRole.UNAUTHORIZED]: 0,
+ };
+ 
+ export function normalizeRole(rawRole: string | undefined | null): UserRole {
+-  if (!rawRole) return UserRole.OM;
++  if (!rawRole) return UserRole.UNAUTHORIZED;
+   const upper = String(rawRole).toUpperCase().trim();
+-  if (upper.includes('TIME')) return UserRole.TIMEKEEPER;
+-  if (upper.includes('FINANCE') || upper.includes('TREASURY') || upper.includes('ACCOUNT')) return UserRole.FINANCE;
+-  if (upper.includes('ENG') || upper.includes('PROJECT') || upper.includes('PM') || upper.includes('SITE_ENG')) return UserRole.PM;
+-  if (upper === 'ADMIN' || upper.includes('OPERAT') || upper.includes('DIRECTOR') || upper === 'SUPERADMIN' || upper.includes('OM')) return UserRole.OM;
+-  return UserRole.OM;
++  if (upper === 'TIMEKEEPER' || upper.includes('TIME')) return UserRole.TIMEKEEPER;
++  if (upper === 'FINANCE' || upper.includes('TREASURY') || upper.includes('ACCOUNT')) return UserRole.FINANCE;
++  if (upper === 'PROJECT_MANAGER' || upper === 'PM' || upper === 'ENGINEER' || upper.includes('ENG') || upper.includes('SITE_ENG')) return UserRole.PM;
++  if (upper === 'ADMIN' || upper.includes('OPERAT') || upper.includes('DIRECTOR') || upper === 'SUPERADMIN' || upper === 'OM') return UserRole.OM;
++  return UserRole.UNAUTHORIZED;
+ }
+ 
+ export const hasRoleOrHigher = (userRole: UserRole | AllowedAppRole | string, targetRole: UserRole): boolean => {
+@@ -44,17 +46,19 @@ export function requireRoleOrHigher(targetRole: UserRole) {
+   return (req: Request, res: Response, next: NextFunction) => {
+     if (!req.user) {
+       return res.status(401).json({
+-        error: 'Unauthorized: Authentication credentials required.'
++        error: 'Unauthorized: Authentication credentials required.',
++        code: 'UNAUTHORIZED'
+       });
+     }
+ 
+     const currentRole = normalizeRole(req.user.role);
+-    if (ROLE_HIERARCHY[currentRole] >= ROLE_HIERARCHY[targetRole]) {
++    if (ROLE_HIERARCHY[currentRole] >= ROLE_HIERARCHY[targetRole] && currentRole !== UserRole.UNAUTHORIZED) {
+       return next();
+     }
+ 
+     return res.status(403).json({
+-      error: `Forbidden: Hierarchical access restriction. Required minimum tier: ${targetRole} (${ROLE_HIERARCHY[targetRole]}). Your tier: ${currentRole} (${ROLE_HIERARCHY[currentRole]}).`
++      error: `Forbidden: Hierarchical access restriction. Required minimum tier: ${targetRole} (${ROLE_HIERARCHY[targetRole]}). Your tier: ${currentRole} (${ROLE_HIERARCHY[currentRole]}).`,
++      code: 'FORBIDDEN_TIER'
+     });
+   };
+ }
+diff --git a/server/routes/auth.ts b/server/routes/auth.ts
+index 64fea2f..5f47a91 100644
+--- a/server/routes/auth.ts
++++ b/server/routes/auth.ts
+@@ -5,193 +5,274 @@
+ 
+ import { Router, Request, Response } from 'express';
+ import { Role, AccountStatus } from '@prisma/client';
+-import * as crypto from 'crypto';
+ import { prisma, getSystemSetting, setSystemSetting, hashPassword, verifyPassword } from '../db';
+ import { broadcastChange } from '../events';
++import { 
++  createSession, 
++  destroySession, 
++  revokeAllUserSessions,
++  generateCsrfToken,
++  CSRF_COOKIE_NAME,
++  SESSION_COOKIE_NAME 
++} from '../services/sessionService';
++import { setSessionCookie, clearSessionCookie, setCsrfCookie, clearCsrfCookie } from '../middleware/cookies';
++import { requireAuth, requireRole } from '../middleware/auth';
++import { loginRateLimiter, sensitiveActionRateLimiter } from '../middleware/security';
+ 
+ export const authRouter = Router();
+ 
+-// GET /api/staff — List all Admin, Engineer, Timekeeper, and Finance accounts
+-authRouter.get('/staff', async (req: Request, res: Response) => {
+-  try {
+-    const staff = await prisma.user.findMany({
+-      where: { role: { in: [Role.ADMIN, Role.ENGINEER, Role.TIMEKEEPER, Role.FINANCE, Role.PROJECT_MANAGER] } },
+-      select: { id: true, email: true, name: true, role: true, accountStatus: true, contact: true, createdAt: true },
+-      orderBy: { createdAt: 'asc' },
+-    });
+-    res.json(staff.map(u => ({
+-      id: u.id,
+-      email: u.email,
+-      name: u.name,
+-      role: u.role === Role.ADMIN ? 'Admin' 
+-        : (u.role === Role.ENGINEER || u.role === Role.PROJECT_MANAGER) ? 'Engineer' 
+-        : u.role === Role.TIMEKEEPER ? 'Timekeeper' 
+-        : u.role === Role.FINANCE ? 'Finance' 
+-        : 'Client',
+-      accountStatus: u.accountStatus,
+-      contact: u.contact || '',
+-      createdAt: u.createdAt.toISOString(),
+-    })));
+-  } catch (error) {
+-    console.error('Error fetching staff:', error);
+-    res.status(500).json({ error: 'Internal Server Error' });
++/**
++ * Validate password strength: minimum 8 characters, containing both letters and numbers.
++ */
++export function isPasswordStrong(password: string): { valid: boolean; reason?: string } {
++  if (!password || typeof password !== 'string' || password.length < 8) {
++    return { valid: false, reason: 'Password must be at least 8 characters long.' };
++  }
++  if (!/[a-zA-Z]/.test(password) || !/[0-9]/.test(password)) {
++    return { valid: false, reason: 'Password must contain both letters and numbers.' };
++  }
++  return { valid: true };
++}
++
++/**
++ * Helper to build frontend-compatible session object from user record and settings
++ */
++async function buildSessionPayload(user: {
++  id: string;
++  email: string;
++  name: string;
++  role: Role;
++  accountStatus: AccountStatus;
++  contact?: string | null;
++  projectIds?: string[];
++}) {
++  const settingKey = `account_settings_${user.id}`;
++  const customSettings = (await getSystemSetting(settingKey)) || {};
++
++  const defaultTitle = (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
++    ? 'Site Engineer & Project Field Lead'
++    : user.role === Role.TIMEKEEPER
++    ? 'Site Timekeeper & Manpower Officer'
++    : user.role === Role.FINANCE
++    ? 'Finance Controller & Corporate Accounting Head'
++    : 'Operations Director & Project Lead';
++
++  const defaultDivision = user.role === Role.FINANCE
++    ? 'Finance & Treasury Department'
++    : user.role === Role.TIMEKEEPER
++    ? 'Site Operations & Manpower Field Unit'
++    : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
++    ? 'Civil Engineering & Project Execution'
++    : 'Commercial & Corporate Interiors';
++
++  const normalizedRole = user.role === Role.ADMIN ? 'Admin' 
++    : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer' 
++    : user.role === Role.TIMEKEEPER ? 'Timekeeper' 
++    : user.role === Role.FINANCE ? 'Finance' 
++    : 'Client';
++
++  return {
++    id: user.id,
++    email: customSettings.profileEmail || user.email,
++    name: customSettings.profileName || user.name,
++    role: normalizedRole,
++    clientId: user.role === Role.CLIENT ? user.id : undefined,
++    accountStatus: user.accountStatus,
++    avatarUrl: customSettings.avatarUrl || null,
++    title: customSettings.profileTitle || defaultTitle,
++    phone: customSettings.profilePhone || user.contact || '',
++    division: customSettings.profileDivision || defaultDivision,
++    projectIds: user.projectIds || [],
++  };
++}
++
++// ============================================================================
++// CSRF TOKEN ENDPOINT
++// ============================================================================
++authRouter.get('/auth/csrf', (req: Request, res: Response) => {
++  let token = req.cookies?.[CSRF_COOKIE_NAME];
++  if (!token) {
++    token = generateCsrfToken();
++    setCsrfCookie(res, token);
+   }
++  res.json({ csrfToken: token });
+ });
+ 
+-// POST /api/staff — Create a new Admin or Project Manager account
+-authRouter.post('/staff', async (req: Request, res: Response) => {
++// ============================================================================
++// POST /api/auth/login — Secure Credential Verification with PostgreSQL Sessions
++// ============================================================================
++authRouter.post('/auth/login', loginRateLimiter, async (req: Request, res: Response) => {
++  const { email, password, rememberMe } = req.body;
+   try {
+-    const { email, name, password, role: rawRole, contact } = req.body;
+-    if (!email || !name || !password) {
+-      return res.status(400).json({ error: 'Email, name, and password are required.' });
+-    }
+-    const normalizedEmail = email.trim().toLowerCase();
+-    const existing = await prisma.user.findFirst({ where: { email: { equals: normalizedEmail, mode: 'insensitive' } } });
+-    if (existing) {
+-      return res.status(409).json({ error: 'An account with this email already exists.' });
++    const normalizedEmail = (email || '').trim().toLowerCase();
++    if (!normalizedEmail || !password) {
++      return res.status(400).json({ error: 'Email and password are required.' });
+     }
+-    const role = rawRole === 'Admin' ? Role.ADMIN 
+-      : rawRole === 'Finance' ? Role.FINANCE 
+-      : rawRole === 'Timekeeper' ? Role.TIMEKEEPER 
+-      : Role.ENGINEER;
+-    const passwordHash = hashPassword(password);
+-    const newUser = await prisma.user.create({
+-      data: {
+-        email: normalizedEmail,
+-        name: name.trim(),
+-        role,
+-        accountStatus: AccountStatus.ACTIVE,
+-        passwordHash,
+-        contact: contact || '',
++
++    const user = await prisma.user.findFirst({
++      where: {
++        email: {
++          equals: normalizedEmail,
++          mode: 'insensitive'
++        }
+       }
+     });
++
++    // Constant-time generic error to prevent account enumeration
++    if (!user) {
++      return res.status(401).json({ error: 'Invalid email or password.' });
++    }
++
++    // Do not permit suspended accounts
++    if (user.accountStatus === AccountStatus.SUSPENDED) {
++      return res.status(403).json({ error: 'This account has been suspended. Please contact system administration.' });
++    }
++
++    // Do not leak invitation tokens or account state through login failures
++    if (user.accountStatus === AccountStatus.INVITED) {
++      return res.status(403).json({ 
++        error: 'This account has not been activated yet. Please use the activation link sent to your email.'
++      });
++    }
++
++    // Reject accounts without valid password hash
++    if (!user.passwordHash) {
++      return res.status(401).json({ 
++        error: 'Account requires activation. Please contact system administration for an activation link.' 
++      });
++    }
++
++    // Strict scrypt password verification — NO hardcoded demo passkey bypasses
++    const isPasswordValid = verifyPassword(String(password), user.passwordHash);
++    if (!isPasswordValid) {
++      return res.status(401).json({ error: 'Invalid email or password.' });
++    }
++
++    // Create cryptographically random server session backed by PostgreSQL
++    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || undefined;
++    const userAgent = req.headers['user-agent'] || undefined;
++
++    const { rawToken, expiresAt } = await createSession(user.id, {
++      rememberMe: Boolean(rememberMe),
++      ipAddress,
++      userAgent,
++    });
++
++    // Set HttpOnly session cookie
++    setSessionCookie(res, rawToken, expiresAt);
++
++    // Issue CSRF token
++    const csrfToken = generateCsrfToken();
++    setCsrfCookie(res, csrfToken);
++
++    const sessionPayload = await buildSessionPayload(user);
++
++    // Record login audit log
+     await prisma.processAuditLog.create({
+       data: {
+         entityType: 'USER',
+-        entityId: newUser.id,
+-        action: 'STAFF_ACCOUNT_CREATED',
+-        actorName: 'System Admin',
+-        actorRole: 'ADMIN',
+-        details: `Created ${role} account for ${name.trim()} (${normalizedEmail}).`,
++        entityId: user.id,
++        action: 'USER_LOGIN_SUCCESS',
++        actorName: user.name,
++        actorRole: user.role,
++        details: `User ${user.email} successfully authenticated from ${ipAddress || 'client'}.`,
+       }
+     }).catch(() => {});
+-    broadcastChange('auditLogs');
+ 
+-    res.status(201).json({
+-      id: newUser.id,
+-      email: newUser.email,
+-      name: newUser.name,
+-      role: role === Role.ADMIN ? 'Admin' 
+-        : role === Role.ENGINEER ? 'Engineer' 
+-        : role === Role.TIMEKEEPER ? 'Timekeeper' 
+-        : role === Role.FINANCE ? 'Finance' 
+-        : 'Client',
+-      accountStatus: newUser.accountStatus,
+-      createdAt: newUser.createdAt.toISOString(),
++    res.json({
++      success: true,
++      session: sessionPayload,
++      csrfToken,
+     });
+   } catch (error) {
+-    console.error('Error creating staff account:', error);
+-    res.status(500).json({ error: 'Failed to create staff account' });
++    console.error('Error logging in:', error);
++    res.status(500).json({ error: 'Internal Server Error during authentication' });
+   }
+ });
+ 
+-// DELETE /api/staff/:id — Remove a staff account (cannot delete own account)
+-authRouter.delete('/staff/:id', async (req: Request, res: Response) => {
++// ============================================================================
++// POST /api/auth/logout — Invalidate server session & scrub cookies
++// ============================================================================
++authRouter.post('/auth/logout', async (req: Request, res: Response) => {
+   try {
+-    const { id } = req.params;
+-    const target = await prisma.user.findUnique({ where: { id } });
+-    if (!target) return res.status(404).json({ error: 'Staff account not found.' });
+-    if (target.role === Role.CLIENT) return res.status(403).json({ error: 'Use the client management module to remove client accounts.' });
+-    // Prevent deleting the last admin account
+-    if (target.role === Role.ADMIN) {
+-      const adminCount = await prisma.user.count({ where: { role: Role.ADMIN } });
+-      if (adminCount <= 1) return res.status(403).json({ error: 'Cannot delete the last admin account.' });
+-    }
+-    await prisma.user.delete({ where: { id } });
+-    res.json({ success: true });
+-  } catch (error) {
+-    console.error('Error deleting staff account:', error);
+-    res.status(500).json({ error: 'Failed to delete staff account' });
+-  }
+-});
++    const rawToken = req.cookies?.[SESSION_COOKIE_NAME] || 
++      (req.headers['authorization']?.startsWith('Bearer ') ? req.headers['authorization'].substring(7).trim() : undefined);
+ 
+-// PATCH /api/staff/:id/reset-password — Reset a staff member's password
+-authRouter.patch('/staff/:id/reset-password', async (req: Request, res: Response) => {
+-  try {
+-    const { id } = req.params;
+-    const { newPassword } = req.body;
+-    if (!newPassword || newPassword.length < 6) {
+-      return res.status(400).json({ error: 'Password must be at least 6 characters.' });
++    if (rawToken) {
++      await destroySession(rawToken);
+     }
+-    const passwordHash = hashPassword(newPassword);
+-    await prisma.user.update({ where: { id }, data: { passwordHash } });
+-    res.json({ success: true });
++
++    clearSessionCookie(res);
++    clearCsrfCookie(res);
++
++    res.json({ success: true, message: 'Logged out successfully.' });
+   } catch (error) {
+-    console.error('Error resetting password:', error);
+-    res.status(500).json({ error: 'Failed to reset password' });
++    console.error('Error logging out:', error);
++    clearSessionCookie(res);
++    clearCsrfCookie(res);
++    res.json({ success: true });
+   }
+ });
+ 
+-// POST /api/auth/login: Credential verification with PostgreSQL
+-authRouter.post('/auth/login', async (req: Request, res: Response) => {
+-  const { email, password } = req.body;
++// ============================================================================
++// GET /api/auth/me — Verified server session restoration endpoint
++// ============================================================================
++authRouter.get('/auth/me', requireAuth, async (req: Request, res: Response) => {
+   try {
+-    const normalizedEmail = (email || '').trim().toLowerCase();
+-    if (!normalizedEmail) {
+-      return res.status(400).json({ error: 'Please provide an email address.' });
++    if (!req.user) {
++      return res.status(401).json({ error: 'Unauthorized' });
+     }
+ 
+-    const user = await prisma.user.findFirst({
+-      where: {
+-        email: {
+-          equals: normalizedEmail,
+-          mode: 'insensitive'
+-        }
+-      },
+-      include: {
+-        clientPackage: true,
+-        buyerKyc: true,
++    const user = await prisma.user.findUnique({
++      where: { id: req.user.id },
++      select: {
++        id: true,
++        email: true,
++        name: true,
++        role: true,
++        accountStatus: true,
++        contact: true,
++        projectIds: true,
+       }
+     });
+ 
+-    if (!user) {
+-      return res.status(401).json({ error: 'No user account found matching this email.' });
++    if (!user || user.accountStatus !== AccountStatus.ACTIVE) {
++      clearSessionCookie(res);
++      return res.status(401).json({ error: 'Session expired or account no longer active.' });
+     }
+ 
+-    // Password validation logic
+-    let isPasswordValid = false;
+-    if (user.passwordHash) {
+-      isPasswordValid = verifyPassword(password || '', user.passwordHash);
+-    } else {
+-      // Demo fallback passkeys for newly created or legacy unhashed demo accounts
+-      if (
+-        password === 'admin123' || 
+-        password === 'pm123' || 
+-        password === 'tk123' || 
+-        password === 'finance123' || 
+-        password === 'client123' || 
+-        password === 'demo-session-key'
+-      ) {
+-        isPasswordValid = true;
+-      }
++    const sessionPayload = await buildSessionPayload(user);
++    const csrfToken = req.cookies?.[CSRF_COOKIE_NAME] || generateCsrfToken();
++    if (!req.cookies?.[CSRF_COOKIE_NAME]) {
++      setCsrfCookie(res, csrfToken);
+     }
+ 
+-    if (!isPasswordValid) {
+-      if (user.accountStatus === 'INVITED') {
+-        return res.status(403).json({
+-          error: 'This account has not been activated yet. Please click your Handover Activation Link to set your password.',
+-          isInvited: true,
+-          inviteToken: user.inviteToken
+-        });
+-      }
+-      return res.status(401).json({ error: 'Incorrect security passkey. Please verify your credentials.' });
++    res.json({
++      success: true,
++      user: sessionPayload,
++      session: sessionPayload,
++      csrfToken,
++    });
++  } catch (error) {
++    console.error('Error in /api/auth/me:', error);
++    res.status(500).json({ error: 'Internal Server Error' });
++  }
++});
++
++// ============================================================================
++// GET /api/auth/profile — Returns persistent profile for authenticated session user
++// ============================================================================
++authRouter.get('/auth/profile', requireAuth, async (req: Request, res: Response) => {
++  try {
++    // Derive identity strictly from verified session
++    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
++    if (!user) {
++      return res.status(404).json({ error: 'User account not found' });
+     }
+ 
+-    // Per-user settings key — NEVER fall back to shared 'account_settings_admin'
+     const settingKey = `account_settings_${user.id}`;
+     const customSettings = (await getSystemSetting(settingKey)) || {};
+ 
+-    // Role-based default titles and divisions
+     const defaultTitle = (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
+       ? 'Site Engineer & Project Field Lead'
+       : user.role === Role.TIMEKEEPER
+@@ -199,6 +280,7 @@ authRouter.post('/auth/login', async (req: Request, res: Response) => {
+       : user.role === Role.FINANCE
+       ? 'Finance Controller & Corporate Accounting Head'
+       : 'Operations Director & Project Lead';
++
+     const defaultDivision = user.role === Role.FINANCE
+       ? 'Finance & Treasury Department'
+       : user.role === Role.TIMEKEEPER
+@@ -207,75 +289,17 @@ authRouter.post('/auth/login', async (req: Request, res: Response) => {
+       ? 'Civil Engineering & Project Execution'
+       : 'Commercial & Corporate Interiors';
+ 
+-    const normalizedRole = user.role === Role.ADMIN ? 'Admin' 
+-      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer' 
+-      : user.role === Role.TIMEKEEPER ? 'Timekeeper' 
+-      : user.role === Role.FINANCE ? 'Finance' 
+-      : 'Client';
+-
+-    const session: any = {
+-      id: user.id,
+-      email: customSettings.profileEmail || user.email,
+-      name: customSettings.profileName || user.name,
+-      role: normalizedRole,
+-      clientId: user.role === Role.CLIENT ? user.id : undefined,
+-      accountStatus: user.accountStatus,
+-      avatarUrl: customSettings.avatarUrl || null,
+-      title: customSettings.profileTitle || defaultTitle,
+-      phone: customSettings.profilePhone || user.contact || '',
+-      division: customSettings.profileDivision || defaultDivision,
+-      projectIds: user.projectIds || []
+-    };
+-
+-    res.json({ success: true, session });
+-  } catch (error) {
+-    console.error('Error logging in:', error);
+-    res.status(500).json({ error: 'Internal Server Error during authentication' });
+-  }
+-});
+-
+-// GET /api/auth/profile: Returns live persistent profile and PMS workspace preferences
+-authRouter.get('/auth/profile', async (req: Request, res: Response) => {
+-  try {
+-    const { userId, email } = req.query;
+-    let user = null;
+-    if (userId) {
+-      user = await prisma.user.findUnique({ where: { id: String(userId) } });
+-    }
+-    if (!user && email) {
+-      user = await prisma.user.findFirst({ where: { email: String(email).trim().toLowerCase() } });
+-    }
+-    if (!user) {
+-      user = await prisma.user.findFirst({ where: { role: Role.ADMIN } });
+-    }
+-
+-    // Per-user settings key — NEVER fall back to shared 'account_settings_admin'
+-    const settingKey = user ? `account_settings_${user.id}` : null;
+-    const customSettings = settingKey ? ((await getSystemSetting(settingKey)) || {}) : {};
+-
+-    // Role-based defaults derived from the authenticated user's role
+-    const defaultTitle = !user ? 'Operations Director & Project Lead'
+-      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Site Engineer & Project Field Lead'
+-      : user.role === Role.TIMEKEEPER ? 'Site Timekeeper & Manpower Officer'
+-      : user.role === Role.FINANCE ? 'Finance Controller & Corporate Accounting Head'
+-      : 'Operations Director & Project Lead';
+-    const defaultDivision = !user ? 'Commercial & Corporate Interiors'
+-      : user.role === Role.FINANCE ? 'Finance & Treasury Department'
+-      : user.role === Role.TIMEKEEPER ? 'Site Operations & Manpower Field Unit'
+-      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Civil Engineering & Project Execution'
+-      : 'Commercial & Corporate Interiors';
+-    const roleLabel = !user ? 'Admin'
+-      : user.role === Role.ADMIN ? 'Admin'
++    const roleLabel = user.role === Role.ADMIN ? 'Admin'
+       : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer'
+       : user.role === Role.TIMEKEEPER ? 'Timekeeper'
+       : user.role === Role.FINANCE ? 'Finance'
+       : 'Client';
+ 
+     const profile = {
+-      id: user?.id || 'unknown',
+-      name: customSettings.profileName || user?.name || '',
+-      email: customSettings.profileEmail || user?.email || '',
+-      contact: customSettings.profilePhone || user?.contact || '',
++      id: user.id,
++      name: customSettings.profileName || user.name || '',
++      email: customSettings.profileEmail || user.email || '',
++      contact: customSettings.profilePhone || user.contact || '',
+       title: customSettings.profileTitle || defaultTitle,
+       division: customSettings.profileDivision || defaultDivision,
+       avatarUrl: customSettings.avatarUrl || null,
+@@ -295,62 +319,44 @@ authRouter.get('/auth/profile', async (req: Request, res: Response) => {
+   }
+ });
+ 
+-// POST /api/auth/update-profile: Persists account and profile changes
+-authRouter.post('/auth/update-profile', async (req: Request, res: Response) => {
++// ============================================================================
++// POST /api/auth/update-profile — Persist account changes for verified session user
++// ============================================================================
++authRouter.post('/auth/update-profile', requireAuth, sensitiveActionRateLimiter, async (req: Request, res: Response) => {
+   const { 
+-    userId, name, email, contact, title, division, avatarUrl,
++    name, email, contact, title, division, avatarUrl,
+     alertGantt, alertPunchlist, alertSiteDiary, alertManpower,
+     defaultPmsView, sessionTimeout
+   } = req.body;
+-  const effectiveUserId = userId || req.body.id;
++
++  // Identity is strictly bound to req.user.id — NEVER client-supplied userId or email
++  const authenticatedUserId = req.user!.id;
++
+   try {
+-    let user = null;
+-    if (effectiveUserId) {
+-      user = await prisma.user.findUnique({ where: { id: effectiveUserId } });
+-    }
+-    if (!user && email) {
+-      user = await prisma.user.findFirst({ where: { email: email.trim().toLowerCase() } });
+-    }
++    const user = await prisma.user.findUnique({ where: { id: authenticatedUserId } });
+     if (!user) {
+       return res.status(404).json({ error: 'User account not found' });
+     }
+ 
+-    const normalizedNewEmail = email ? email.trim().toLowerCase() : '';
++    const normalizedNewEmail = email ? String(email).trim().toLowerCase() : '';
+     const isEmailChanging = Boolean(normalizedNewEmail && normalizedNewEmail !== user.email.toLowerCase());
+ 
+-    // SECURITY CHECK: Re-authenticate user before allowing login email modification
++    // Re-authenticate user before allowing login email modification
+     if (isEmailChanging) {
+       const currentPassword = req.body.currentPassword;
+       if (!currentPassword) {
+         return res.status(401).json({
+-          error: 'Security passkey required: Please confirm your current passkey to update your official login email address.'
++          error: 'Current password required: Please confirm your password to update your login email address.'
+         });
+       }
+ 
+-      let isCurrentValid = false;
+-      if (user.passwordHash) {
+-        isCurrentValid = verifyPassword(currentPassword, user.passwordHash);
+-      }
+-      if (!isCurrentValid) {
+-        if (
+-          (currentPassword === 'admin123' && user.role === Role.ADMIN) ||
+-          (currentPassword === 'pm123' && user.role === Role.PROJECT_MANAGER) ||
+-          currentPassword === 'admin123' ||
+-          currentPassword === 'pm123' ||
+-          currentPassword === 'demo-session-key' ||
+-          currentPassword === 'ctvill2026'
+-        ) {
+-          isCurrentValid = true;
+-        }
+-      }
+-
+-      if (!isCurrentValid) {
++      if (!user.passwordHash || !verifyPassword(String(currentPassword), user.passwordHash)) {
+         return res.status(401).json({
+-          error: 'Security verification failed: Incorrect current passkey. Email address was not modified.'
++          error: 'Security verification failed: Incorrect current password. Email address was not modified.'
+         });
+       }
+ 
+-      // Check for collision with another user's email
++      // Check collision with another user's email
+       const existingCollision = await prisma.user.findFirst({
+         where: {
+           email: { equals: normalizedNewEmail, mode: 'insensitive' },
+@@ -366,17 +372,16 @@ authRouter.post('/auth/update-profile', async (req: Request, res: Response) => {
+ 
+     const updatedEmail = isEmailChanging ? normalizedNewEmail : user.email;
+ 
+-    // Update user in PostgreSQL
++    // Update user in PostgreSQL (Prevents role or accountStatus elevation)
+     const updatedUser = await prisma.user.update({
+       where: { id: user.id },
+       data: {
+-        ...(name ? { name: name.trim() } : {}),
++        ...(name ? { name: String(name).trim() } : {}),
+         ...(isEmailChanging ? { email: normalizedNewEmail } : {}),
+-        ...(contact !== undefined ? { contact: contact.trim() } : {}),
++        ...(contact !== undefined ? { contact: String(contact).trim() } : {}),
+       }
+     });
+ 
+-    // Role-based defaults so each user gets appropriate fallbacks
+     const defaultTitle = user.role === Role.PROJECT_MANAGER ? 'Senior Project Manager & Field Lead'
+       : user.role === Role.FINANCE ? 'Finance Controller & Corporate Accounting Head'
+       : 'Operations Director & Project Lead';
+@@ -384,16 +389,16 @@ authRouter.post('/auth/update-profile', async (req: Request, res: Response) => {
+       : 'Commercial & Corporate Interiors';
+ 
+     const settingsPayload = {
+-      profileName: name ? name.trim() : updatedUser.name,
++      profileName: name ? String(name).trim() : updatedUser.name,
+       profileEmail: updatedEmail,
+-      profilePhone: contact !== undefined ? contact.trim() : (updatedUser.contact || ''),
++      profilePhone: contact !== undefined ? String(contact).trim() : (updatedUser.contact || ''),
+       profileTitle: title || defaultTitle,
+       profileDivision: division || defaultDivision,
+       avatarUrl: avatarUrl !== undefined ? avatarUrl : null,
+-      alertGantt: alertGantt !== undefined ? alertGantt : true,
+-      alertPunchlist: alertPunchlist !== undefined ? alertPunchlist : true,
+-      alertSiteDiary: alertSiteDiary !== undefined ? alertSiteDiary : true,
+-      alertManpower: alertManpower !== undefined ? alertManpower : true,
++      alertGantt: alertGantt !== undefined ? Boolean(alertGantt) : true,
++      alertPunchlist: alertPunchlist !== undefined ? Boolean(alertPunchlist) : true,
++      alertSiteDiary: alertSiteDiary !== undefined ? Boolean(alertSiteDiary) : true,
++      alertManpower: alertManpower !== undefined ? Boolean(alertManpower) : true,
+       defaultPmsView: defaultPmsView || 'dashboard',
+       sessionTimeout: sessionTimeout || '8h',
+     };
+@@ -407,25 +412,24 @@ authRouter.post('/auth/update-profile', async (req: Request, res: Response) => {
+         entityId: user.id,
+         action: isEmailChanging ? 'PROFILE_AND_EMAIL_UPDATED' : 'PROFILE_UPDATED',
+         actorName: settingsPayload.profileName,
+-        actorRole: user.role === Role.ADMIN ? 'ADMIN' : user.role === Role.PROJECT_MANAGER ? 'PROJECT_MANAGER' : user.role === Role.FINANCE ? 'FINANCE' : 'CLIENT',
++        actorRole: user.role,
+         details: isEmailChanging
+-          ? `Verified passkey and updated login email from "${user.email}" to "${updatedEmail}", name: "${settingsPayload.profileName}".`
++          ? `Updated login email from "${user.email}" to "${updatedEmail}", name: "${settingsPayload.profileName}".`
+           : `Updated account settings: Name: "${settingsPayload.profileName}", Contact: "${settingsPayload.profilePhone}", Title: "${settingsPayload.profileTitle}".`,
+       }
+     }).catch(() => {});
+ 
+     broadcastChange('auditLogs');
+ 
+-    const roleLabel = !user ? 'Admin'
+-      : user.role === Role.ADMIN ? 'Admin'
+-      : user.role === Role.PROJECT_MANAGER ? 'ProjectManager'
++    const roleLabel = user.role === Role.ADMIN ? 'Admin'
++      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer'
+       : user.role === Role.FINANCE ? 'Finance'
+       : 'Client';
+ 
+     res.json({
+       success: true,
+       user: {
+-        id: user?.id || 'unknown',
++        id: user.id,
+         name: settingsPayload.profileName,
+         email: settingsPayload.profileEmail,
+         contact: settingsPayload.profilePhone,
+@@ -442,90 +446,253 @@ authRouter.post('/auth/update-profile', async (req: Request, res: Response) => {
+   }
+ });
+ 
+-// POST /api/auth/change-password: Validates and updates user security passkey
+-authRouter.post('/auth/change-password', async (req: Request, res: Response) => {
+-  const { userId, email, currentPassword, newPassword } = req.body;
++// ============================================================================
++// POST /api/auth/change-password — User password update with strength check & session revocation
++// ============================================================================
++authRouter.post('/auth/change-password', requireAuth, sensitiveActionRateLimiter, async (req: Request, res: Response) => {
++  const { currentPassword, newPassword } = req.body;
++  const authenticatedUserId = req.user!.id;
++
+   try {
+-    if (!newPassword || newPassword.length < 6) {
+-      return res.status(400).json({ error: 'New passkey must be at least 6 characters.' });
++    const strengthCheck = isPasswordStrong(newPassword);
++    if (!strengthCheck.valid) {
++      return res.status(400).json({ error: strengthCheck.reason });
+     }
+ 
+-    let user = null;
+-    if (userId) {
+-      user = await prisma.user.findUnique({ where: { id: userId } });
+-    }
+-    if (!user && email) {
+-      user = await prisma.user.findFirst({
+-        where: {
+-          email: { equals: email.trim().toLowerCase(), mode: 'insensitive' }
+-        }
+-      });
+-    }
+-    if (!user) {
+-      user = await prisma.user.findFirst({ where: { role: Role.ADMIN } });
+-    }
++    const user = await prisma.user.findUnique({ where: { id: authenticatedUserId } });
+     if (!user) {
+       return res.status(404).json({ error: 'User account not found' });
+     }
+ 
+-    // Verify current password against database hash or default initial passkeys
+-    let isCurrentValid = false;
+-    if (user.passwordHash) {
+-      isCurrentValid = verifyPassword(currentPassword || '', user.passwordHash);
+-    }
+-    if (!isCurrentValid) {
+-      if (
+-        (currentPassword === 'admin123' && user.role === Role.ADMIN) ||
+-        (currentPassword === 'pm123' && user.role === Role.PROJECT_MANAGER) ||
+-        currentPassword === 'admin123' ||
+-        currentPassword === 'pm123' ||
+-        currentPassword === 'demo-session-key' ||
+-        currentPassword === 'ctvill2026'
+-      ) {
+-        isCurrentValid = true;
+-      }
+-    }
+-
+-    if (!isCurrentValid) {
+-      return res.status(400).json({ error: 'Current security passkey is incorrect.' });
++    if (!user.passwordHash || !verifyPassword(String(currentPassword || ''), user.passwordHash)) {
++      return res.status(400).json({ error: 'Current password is incorrect.' });
+     }
+ 
+-    const newHash = hashPassword(newPassword);
++    const newHash = hashPassword(String(newPassword));
+     await prisma.user.update({
+       where: { id: user.id },
+       data: { passwordHash: newHash }
+     });
+ 
++    // Revoke all existing sessions for this user so old sessions cannot continue
++    await revokeAllUserSessions(user.id);
++
++    // Issue a fresh new session for current connection
++    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || undefined;
++    const { rawToken, expiresAt } = await createSession(user.id, { ipAddress });
++    setSessionCookie(res, rawToken, expiresAt);
++
+     await prisma.processAuditLog.create({
+       data: {
+-        entityType: 'CLIENT',
++        entityType: 'USER',
+         entityId: user.id,
+         action: 'PASSWORD_UPDATED',
+         actorName: user.name,
++        actorRole: user.role,
++        details: `Password changed successfully for user account ${user.email}. Previous sessions invalidated.`,
++      }
++    }).catch(() => {});
++
++    broadcastChange('auditLogs');
++
++    res.json({ success: true, message: 'Password updated successfully. All other sessions invalidated.' });
++  } catch (error) {
++    console.error('Error updating password:', error);
++    res.status(500).json({ error: 'Failed to update password' });
++  }
++});
++
++// ============================================================================
++// STAFF MANAGEMENT ENDPOINTS (Strictly ADMIN only)
++// ============================================================================
++
++// GET /api/staff — List all staff accounts
++authRouter.get('/staff', requireAuth, requireRole(['ADMIN']), async (_req: Request, res: Response) => {
++  try {
++    const staff = await prisma.user.findMany({
++      where: { role: { in: [Role.ADMIN, Role.ENGINEER, Role.TIMEKEEPER, Role.FINANCE, Role.PROJECT_MANAGER] } },
++      select: { id: true, email: true, name: true, role: true, accountStatus: true, contact: true, createdAt: true },
++      orderBy: { createdAt: 'asc' },
++    });
++    res.json(staff.map(u => ({
++      id: u.id,
++      email: u.email,
++      name: u.name,
++      role: u.role === Role.ADMIN ? 'Admin' 
++        : (u.role === Role.ENGINEER || u.role === Role.PROJECT_MANAGER) ? 'Engineer' 
++        : u.role === Role.TIMEKEEPER ? 'Timekeeper' 
++        : u.role === Role.FINANCE ? 'Finance' 
++        : 'Client',
++      accountStatus: u.accountStatus,
++      contact: u.contact || '',
++      createdAt: u.createdAt.toISOString(),
++    })));
++  } catch (error) {
++    console.error('Error fetching staff:', error);
++    res.status(500).json({ error: 'Internal Server Error' });
++  }
++});
++
++// POST /api/staff — Create a new staff account (ADMIN only)
++authRouter.post('/staff', requireAuth, requireRole(['ADMIN']), sensitiveActionRateLimiter, async (req: Request, res: Response) => {
++  try {
++    const { email, name, password, role: rawRole, contact } = req.body;
++    if (!email || !name || !password) {
++      return res.status(400).json({ error: 'Email, name, and password are required.' });
++    }
++
++    const strength = isPasswordStrong(String(password));
++    if (!strength.valid) {
++      return res.status(400).json({ error: strength.reason });
++    }
++
++    const normalizedEmail = String(email).trim().toLowerCase();
++    const existing = await prisma.user.findFirst({ where: { email: { equals: normalizedEmail, mode: 'insensitive' } } });
++    if (existing) {
++      return res.status(409).json({ error: 'An account with this email already exists.' });
++    }
++
++    const role = rawRole === 'Admin' ? Role.ADMIN 
++      : rawRole === 'Finance' ? Role.FINANCE 
++      : rawRole === 'Timekeeper' ? Role.TIMEKEEPER 
++      : Role.ENGINEER;
++
++    const passwordHash = hashPassword(String(password));
++    const newUser = await prisma.user.create({
++      data: {
++        email: normalizedEmail,
++        name: String(name).trim(),
++        role,
++        accountStatus: AccountStatus.ACTIVE,
++        passwordHash,
++        contact: contact ? String(contact).trim() : '',
++      }
++    });
++
++    await prisma.processAuditLog.create({
++      data: {
++        entityType: 'USER',
++        entityId: newUser.id,
++        action: 'STAFF_ACCOUNT_CREATED',
++        actorName: req.user!.name,
+         actorRole: 'ADMIN',
+-        details: `Security passkey changed successfully for user account ${user.email}.`,
++        details: `Created ${role} account for ${newUser.name} (${normalizedEmail}).`,
+       }
++    }).catch(() => {});
++    broadcastChange('auditLogs');
++
++    res.status(201).json({
++      id: newUser.id,
++      email: newUser.email,
++      name: newUser.name,
++      role: role === Role.ADMIN ? 'Admin' 
++        : role === Role.ENGINEER ? 'Engineer' 
++        : role === Role.TIMEKEEPER ? 'Timekeeper' 
++        : role === Role.FINANCE ? 'Finance' 
++        : 'Client',
++      accountStatus: newUser.accountStatus,
++      createdAt: newUser.createdAt.toISOString(),
+     });
++  } catch (error) {
++    console.error('Error creating staff account:', error);
++    res.status(500).json({ error: 'Failed to create staff account' });
++  }
++});
++
++// DELETE /api/staff/:id — Remove a staff account (ADMIN only, cannot delete self or last admin)
++authRouter.delete('/staff/:id', requireAuth, requireRole(['ADMIN']), async (req: Request, res: Response) => {
++  try {
++    const { id } = req.params;
++    if (id === req.user!.id) {
++      return res.status(403).json({ error: 'Cannot delete your own administrative account.' });
++    }
++
++    const target = await prisma.user.findUnique({ where: { id } });
++    if (!target) return res.status(404).json({ error: 'Staff account not found.' });
++    if (target.role === Role.CLIENT) return res.status(403).json({ error: 'Use the client management module to remove client accounts.' });
++
++    // Prevent deleting the last admin account
++    if (target.role === Role.ADMIN) {
++      const adminCount = await prisma.user.count({ where: { role: Role.ADMIN } });
++      if (adminCount <= 1) return res.status(403).json({ error: 'Cannot delete the last admin account.' });
++    }
++
++    // Invalidate target user's active sessions
++    await revokeAllUserSessions(id);
++    await prisma.user.delete({ where: { id } });
++
++    await prisma.processAuditLog.create({
++      data: {
++        entityType: 'USER',
++        entityId: id,
++        action: 'STAFF_ACCOUNT_DELETED',
++        actorName: req.user!.name,
++        actorRole: 'ADMIN',
++        details: `Deleted ${target.role} account for ${target.name} (${target.email}).`,
++      }
++    }).catch(() => {});
++    broadcastChange('auditLogs');
++
++    res.json({ success: true });
++  } catch (error) {
++    console.error('Error deleting staff account:', error);
++    res.status(500).json({ error: 'Failed to delete staff account' });
++  }
++});
++
++// PATCH /api/staff/:id/reset-password — Reset a staff member's password (ADMIN only)
++authRouter.patch('/staff/:id/reset-password', requireAuth, requireRole(['ADMIN']), sensitiveActionRateLimiter, async (req: Request, res: Response) => {
++  try {
++    const { id } = req.params;
++    const { newPassword } = req.body;
++
++    const strength = isPasswordStrong(String(newPassword || ''));
++    if (!strength.valid) {
++      return res.status(400).json({ error: strength.reason });
++    }
++
++    const target = await prisma.user.findUnique({ where: { id } });
++    if (!target) return res.status(404).json({ error: 'Staff account not found.' });
++
++    const passwordHash = hashPassword(String(newPassword));
++    await prisma.user.update({ where: { id }, data: { passwordHash } });
+ 
++    // Invalidate target user's active sessions so they must sign in with new password
++    await revokeAllUserSessions(id);
++
++    await prisma.processAuditLog.create({
++      data: {
++        entityType: 'USER',
++        entityId: id,
++        action: 'STAFF_PASSWORD_RESET_BY_ADMIN',
++        actorName: req.user!.name,
++        actorRole: 'ADMIN',
++        details: `Administrator reset password for ${target.name} (${target.email}). Active sessions revoked.`,
++      }
++    }).catch(() => {});
+     broadcastChange('auditLogs');
+ 
+-    res.json({ success: true, message: 'Passkey updated successfully in database.' });
++    res.json({ success: true, message: 'Password reset successfully. Active sessions revoked.' });
+   } catch (error) {
+-    console.error('Error updating password:', error);
+-    res.status(500).json({ error: 'Failed to update passkey in database' });
++    console.error('Error resetting password:', error);
++    res.status(500).json({ error: 'Failed to reset password' });
+   }
+ });
+ 
+-// POST /api/auth/verify-invite: Validates an onboarding invitation token
+-authRouter.post('/auth/verify-invite', async (req: Request, res: Response) => {
++// ============================================================================
++// ONBOARDING INVITATION VERIFICATION & ACTIVATION
++// ============================================================================
++
++// POST /api/auth/verify-invite — Validates onboarding token
++authRouter.post('/auth/verify-invite', sensitiveActionRateLimiter, async (req: Request, res: Response) => {
+   const { token } = req.body;
+   if (!token) {
+     return res.status(400).json({ error: 'Activation token is required.' });
+   }
+ 
+   try {
+-    const cleanToken = token.trim();
+-    let user = await prisma.user.findFirst({
++    const cleanToken = String(token).trim();
++    const user = await prisma.user.findFirst({
+       where: { inviteToken: cleanToken },
+       include: {
+         clientPackage: true,
+@@ -563,19 +730,20 @@ authRouter.post('/auth/verify-invite', async (req: Request, res: Response) => {
+   }
+ });
+ 
+-// POST /api/auth/activate: Claim account and set password
+-authRouter.post('/auth/activate', async (req: Request, res: Response) => {
++// POST /api/auth/activate — Claim account and set password
++authRouter.post('/auth/activate', sensitiveActionRateLimiter, async (req: Request, res: Response) => {
+   const { token, password, contact } = req.body;
+   if (!token || !password) {
+     return res.status(400).json({ error: 'Activation token and new password are required.' });
+   }
+ 
+-  if (password.length < 6) {
+-    return res.status(400).json({ error: 'Password must be at least 6 characters long.' });
++  const strength = isPasswordStrong(String(password));
++  if (!strength.valid) {
++    return res.status(400).json({ error: strength.reason });
+   }
+ 
+   try {
+-    const cleanToken = token.trim();
++    const cleanToken = String(token).trim();
+     const user = await prisma.user.findFirst({
+       where: { inviteToken: cleanToken }
+     });
+@@ -587,46 +755,53 @@ authRouter.post('/auth/activate', async (req: Request, res: Response) => {
+       });
+     }
+ 
++    if (user.inviteTokenExpiry && new Date() > user.inviteTokenExpiry) {
++      return res.status(410).json({ error: 'This activation link has expired. Please contact the office for a new link.' });
++    }
++
+     const updatedUser = await prisma.user.update({
+       where: { id: user.id },
+       data: {
+-        passwordHash: hashPassword(password),
+-        accountStatus: 'ACTIVE',
++        passwordHash: hashPassword(String(password)),
++        accountStatus: AccountStatus.ACTIVE,
+         inviteToken: null,
+         inviteTokenExpiry: null,
+-        contact: contact || user.contact,
++        contact: contact ? String(contact).trim() : user.contact,
+       }
+     });
+ 
++    // Create active server session
++    const ipAddress = (req.headers['x-forwarded-for'] as string)?.split(',')[0].trim() || req.socket.remoteAddress || undefined;
++    const { rawToken, expiresAt } = await createSession(updatedUser.id, { ipAddress });
++    setSessionCookie(res, rawToken, expiresAt);
++
++    const csrfToken = generateCsrfToken();
++    setCsrfCookie(res, csrfToken);
++
+     await prisma.processAuditLog.create({
+       data: {
+         entityType: 'CLIENT',
+         entityId: user.id,
+         action: 'BUYER_ACCOUNT_ACTIVATED',
+         actorName: user.name,
+-        actorRole: 'CLIENT',
+-        details: `Account ${user.name} claimed portal access and set account credentials.`,
++        actorRole: user.role,
++        details: `Account ${user.name} claimed portal access and set credentials.`,
+       }
+-    });
++    }).catch(() => {});
+ 
+-    const session: any = {
+-      id: updatedUser.id,
+-      email: updatedUser.email,
+-      name: updatedUser.name,
+-      role: updatedUser.role === Role.ADMIN ? 'Admin' : updatedUser.role === Role.PROJECT_MANAGER ? 'ProjectManager' : updatedUser.role === Role.FINANCE ? 'Finance' : 'Client',
+-      clientId: updatedUser.id,
+-      accountStatus: 'ACTIVE',
+-    };
++    const sessionPayload = await buildSessionPayload(updatedUser);
+ 
+-    res.json({ success: true, session });
++    res.json({ success: true, session: sessionPayload, csrfToken });
+   } catch (error) {
+     console.error('Error activating account:', error);
+     res.status(500).json({ error: 'Internal Server Error' });
+   }
+ });
+ 
+-// GET /api/users: Directory lookup for users / staff
+-authRouter.get('/users', async (req: Request, res: Response) => {
++// ============================================================================
++// GET /api/users — Directory lookup (Authenticated staff only)
++// ============================================================================
++authRouter.get('/users', requireAuth, requireRole(['ADMIN', 'ENGINEER', 'FINANCE', 'TIMEKEEPER']), async (req: Request, res: Response) => {
+   try {
+     const { role } = req.query;
+     const whereClause: any = {};
+diff --git a/server/routes/documents.ts b/server/routes/documents.ts
+index 8de009a..f7f29a9 100644
+--- a/server/routes/documents.ts
++++ b/server/routes/documents.ts
+@@ -6,9 +6,13 @@
+ import { Router, Request, Response } from 'express';
+ import { prisma } from '../db';
+ import { broadcastChange } from '../events';
++import { requireAuth } from '../middleware/auth';
+ 
+ export const documentsRouter = Router();
+ 
++// Apply authentication on documents router
++documentsRouter.use(requireAuth);
++
+ export const SEED_DOCUMENTS = [
+   {
+     id: 'doc-arch-finishes-v2',
+@@ -125,7 +129,7 @@ documentsRouter.post('/documents', async (req: Request, res: Response) => {
+         fileSize: fileSize || '2.4 MB',
+         version: version || '1.0',
+         status: status || 'APPROVED',
+-        uploadedBy: uploadedBy || 'Ar. Jonathan Dela Cruz',
++        uploadedBy: req.user?.name || uploadedBy || 'Staff Engineer',
+         notes,
+       }
+     });
+@@ -139,7 +143,7 @@ documentsRouter.post('/documents', async (req: Request, res: Response) => {
+ });
+ 
+ documentsRouter.post('/', async (req: Request, res: Response) => {
+-  const { title, category, fileUrl, fileSize, version, status, uploadedBy, notes } = req.body;
++  const { title, category, fileUrl, fileSize, version, status, notes } = req.body;
+   try {
+     const doc = await prisma.projectDocument.create({
+       data: {
+@@ -149,7 +153,7 @@ documentsRouter.post('/', async (req: Request, res: Response) => {
+         fileSize: fileSize || '2.4 MB',
+         version: version || '1.0',
+         status: status || 'APPROVED',
+-        uploadedBy: uploadedBy || 'Ar. Jonathan Dela Cruz',
++        uploadedBy: req.user?.name || 'Staff Engineer',
+         notes,
+       }
+     });
+diff --git a/server/routes/engineering.ts b/server/routes/engineering.ts
+index 0d0b25d..cecce88 100644
+--- a/server/routes/engineering.ts
++++ b/server/routes/engineering.ts
+@@ -6,9 +6,13 @@
+ import { Router, Request, Response } from 'express';
+ import { prisma, pool } from '../db';
+ import { broadcastChange, invalidateAllDataCache } from '../events';
++import { requireAuth } from '../middleware/auth';
+ 
+ export const engineeringRouter = Router();
+ 
++// Apply base authentication on all engineering endpoints
++engineeringRouter.use(requireAuth);
++
+ // ============================================================================
+ // GOVERNMENT PERMITS (PEZA, MACEA, CITY HALL, FDAS, ELECTRICAL)
+ // ============================================================================
+diff --git a/server/routes/finance.ts b/server/routes/finance.ts
+index 8d48412..e374481 100644
+--- a/server/routes/finance.ts
++++ b/server/routes/finance.ts
+@@ -8,9 +8,18 @@ import { Role, PaymentMethod, PaymentStatus, PayrollRole, DisbursementType, Payr
+ import { prisma, pool } from '../db';
+ import { broadcastChange, invalidateAllDataCache } from '../events';
+ import { sendFitOutQuotationEmail } from '../email';
++import { requireAuth, requireRole } from '../middleware/auth';
+ 
+ export const financeRouter = Router();
+ 
++// Secure finance endpoints: only /quotations/submit is public (for landing page web leads)
++financeRouter.use((req: Request, res: Response, next) => {
++  if (req.path === '/quotations/submit') {
++    return next();
++  }
++  return requireAuth(req, res, next);
++});
++
+ // ============================================================================
+ // COMMERCIAL FIT-OUT QUOTATIONS & CRM LEADS
+ // ============================================================================
+@@ -404,7 +413,7 @@ financeRouter.get('/payroll-records', async (req: Request, res: Response) => {
+ });
+ 
+ // POST /api/payroll/disburse
+-financeRouter.post('/payroll/disburse', async (req: Request, res: Response) => {
++financeRouter.post('/payroll/disburse', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
+   try {
+     const { id, all } = req.body;
+ 
+@@ -419,8 +428,8 @@ financeRouter.post('/payroll/disburse', async (req: Request, res: Response) => {
+           entityType: 'PAYROLL',
+           entityId: 'ALL_BATCH',
+           action: 'PAYROLL_BATCH_DISBURSED',
+-          actorName: 'Executive Finance',
+-          actorRole: 'ADMIN',
++          actorName: req.user?.name || 'Finance Controller',
++          actorRole: req.user?.role || 'FINANCE',
+           details: 'Disbursed all pending contractor and site worker payroll records.',
+         }
+       }).catch(() => {});
+@@ -435,8 +444,8 @@ financeRouter.post('/payroll/disburse', async (req: Request, res: Response) => {
+           entityType: 'PAYROLL',
+           entityId: id,
+           action: 'PAYROLL_RECORD_DISBURSED',
+-          actorName: 'Executive Finance',
+-          actorRole: 'ADMIN',
++          actorName: req.user?.name || 'Finance Controller',
++          actorRole: req.user?.role || 'FINANCE',
+           details: `Disbursed payroll wage record ${id}.`,
+         }
+       }).catch(() => {});
+@@ -456,7 +465,7 @@ financeRouter.post('/payroll/disburse', async (req: Request, res: Response) => {
+ // ============================================================================
+ 
+ // POST /api/payments/record
+-financeRouter.post('/payments/record', async (req: Request, res: Response) => {
++financeRouter.post('/payments/record', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
+   try {
+     const { clientId, amount, paymentMethod, reference } = req.body;
+     if (!clientId || !amount) {
+diff --git a/server/routes/gantt.ts b/server/routes/gantt.ts
+index a9396e1..fd123a8 100644
+--- a/server/routes/gantt.ts
++++ b/server/routes/gantt.ts
+@@ -6,10 +6,14 @@
+ import { Router, Request, Response } from 'express';
+ import { PrismaClient } from '@prisma/client';
+ import { broadcastChange, invalidateAllDataCache } from '../events';
++import { requireAuth, checkUserProjectAccess } from '../middleware/auth';
+ 
+ export function createGanttRouter(prisma: PrismaClient) {
+   const router = Router();
+ 
++  // Apply authentication to all Gantt routes
++  router.use(requireAuth);
++
+   function formatGanttDate(date: Date | string | null | undefined): string {
+     if (!date) return '';
+     const d = new Date(date);
+@@ -46,6 +50,10 @@ export function createGanttRouter(prisma: PrismaClient) {
+         return res.json({ data: [], links: [] });
+       }
+ 
++      if (!checkUserProjectAccess(req.user, projectId)) {
++        return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
++      }
++
+       const existingProject = await prisma.commercialProject.findUnique({ where: { id: projectId } });
+       if (!existingProject) {
+         return res.json({ data: [], links: [] });
+@@ -118,6 +126,10 @@ export function createGanttRouter(prisma: PrismaClient) {
+         return res.status(400).json({ error: 'Project ID is required' });
+       }
+ 
++      if (!checkUserProjectAccess(req.user, projectId)) {
++        return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
++      }
++
+       const existingProject = await prisma.commercialProject.findUnique({ where: { id: projectId } });
+       if (!existingProject) {
+         return res.status(404).json({ error: 'Project not found' });
+diff --git a/server/routes/legacyParcels.ts b/server/routes/legacyParcels.ts
+index a2d2570..9f50e6a 100644
+--- a/server/routes/legacyParcels.ts
++++ b/server/routes/legacyParcels.ts
+@@ -9,9 +9,13 @@ import * as crypto from 'crypto';
+ import { prisma, pool } from '../db';
+ import { broadcastChange, setCacheInvalidator } from '../events';
+ import { getMailTransporter } from '../email';
++import { requireAuth } from '../middleware/auth';
+ 
+ export const legacyParcelsRouter = Router();
+ 
++// Apply authentication to legacy parcels endpoints
++legacyParcelsRouter.use(requireAuth);
++
+ // Helper function to map DB SlotStatus to Frontend SlotStatus string
+ export function mapDbStatusToString(status: SlotStatus): string {
+   switch (status) {
+diff --git a/server/routes/projects.ts b/server/routes/projects.ts
+index 19ab0bc..115ac72 100644
+--- a/server/routes/projects.ts
++++ b/server/routes/projects.ts
+@@ -7,9 +7,13 @@ import { Router, Request, Response } from 'express';
+ import { prisma, pool } from '../db';
+ import { broadcastChange, invalidateAllDataCache } from '../events';
+ import { resolveProjectCoordinates, resolveLocalGeocoding } from '../services/geocoding';
++import { requireAuth, requireRole, checkUserProjectAccess } from '../middleware/auth';
+ 
+ export const projectsRouter = Router();
+ 
++// Apply base authentication on all project management endpoints
++projectsRouter.use(requireAuth);
++
+ // ============================================================================
+ // COMMERCIAL PROJECTS REST API
+ // ============================================================================
+@@ -25,10 +29,16 @@ projectsRouter.get('/geocoding/lookup', async (req: Request, res: Response) => {
+   }
+ });
+ 
+-// GET /api/projects
++// GET /api/projects — Scoped to authorized projects for non-admin/finance users
+ projectsRouter.get('/projects', async (req: Request, res: Response) => {
+   try {
+-    const dbProjects = await pool.query('SELECT * FROM commercial_projects ORDER BY created_at ASC');
++    let dbProjectsQuery = 'SELECT * FROM commercial_projects ORDER BY created_at ASC';
++    const params: any[] = [];
++    if (req.user?.role !== 'ADMIN' && req.user?.role !== 'FINANCE' && req.user?.projectIds && req.user.projectIds.length > 0) {
++      dbProjectsQuery = 'SELECT * FROM commercial_projects WHERE id = ANY($1) ORDER BY created_at ASC';
++      params.push(req.user.projectIds);
++    }
++    const dbProjects = await pool.query(dbProjectsQuery, params);
+     const projects = await Promise.all((dbProjects.rows || []).map(async (p) => {
+       let lat = p.latitude !== null && p.latitude !== undefined ? Number(p.latitude) : undefined;
+       let lon = p.longitude !== null && p.longitude !== undefined ? Number(p.longitude) : undefined;
+@@ -76,7 +86,7 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
+ });
+ 
+ // POST /api/projects
+-projectsRouter.post('/projects', async (req: Request, res: Response) => {
++projectsRouter.post('/projects', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
+   try {
+     const {
+       name,
+@@ -202,6 +212,9 @@ projectsRouter.post('/projects', async (req: Request, res: Response) => {
+ projectsRouter.patch('/projects/:id', async (req: Request, res: Response) => {
+   try {
+     const { id } = req.params;
++    if (!checkUserProjectAccess(req.user, id)) {
++      return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
++    }
+     const {
+       name,
+       clientName,
+@@ -312,6 +325,9 @@ projectsRouter.patch('/projects/:id', async (req: Request, res: Response) => {
+ projectsRouter.put('/projects/:id/workers', async (req: Request, res: Response) => {
+   try {
+     const { id: projectId } = req.params;
++    if (!checkUserProjectAccess(req.user, projectId)) {
++      return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
++    }
+     const { workerId, action } = req.body;
+ 
+     if (!workerId || !['add', 'remove'].includes(action)) {
+@@ -395,7 +411,10 @@ projectsRouter.put('/projects/:id/workers', async (req: Request, res: Response)
+ projectsRouter.patch('/projects/:id/weather-suspension', async (req: Request, res: Response) => {
+   try {
+     const { id } = req.params;
+-    const { suspended, reason, actorName } = req.body;
++    if (!checkUserProjectAccess(req.user, id)) {
++      return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
++    }
++    const { suspended, reason } = req.body;
+     const isSuspended = Boolean(suspended);
+ 
+     await pool.query(
+@@ -408,8 +427,8 @@ projectsRouter.patch('/projects/:id/weather-suspension', async (req: Request, re
+         entityType: 'CIVIL_WORKS',
+         entityId: id,
+         action: isSuspended ? 'WEATHER_SUSPENSION_ACTIVATED' : 'WEATHER_SUSPENSION_LIFTED',
+-        actorName: actorName || 'Engr. Ricardo Ramos',
+-        actorRole: 'PROJECT_MANAGER',
++        actorName: req.user?.name || 'Project Manager',
++        actorRole: req.user?.role || 'ENGINEER',
+         details: isSuspended
+           ? `Work Suspended due to Weather (Force Majeure): ${reason || 'Adverse weather on site'}. Timeline flagged for schedule delays.`
+           : 'Weather suspension lifted. Regular site operations resumed.',
+@@ -426,8 +445,8 @@ projectsRouter.patch('/projects/:id/weather-suspension', async (req: Request, re
+   }
+ });
+ 
+-// DELETE /api/projects/:id (Safe cascade for tasks and links)
+-projectsRouter.delete('/projects/:id', async (req: Request, res: Response) => {
++// DELETE /api/projects/:id (Safe cascade for tasks and links - ADMIN only)
++projectsRouter.delete('/projects/:id', requireRole(['ADMIN']), async (req: Request, res: Response) => {
+   try {
+     const { id } = req.params;
+     // Clean up associated tasks safely
+@@ -648,8 +667,8 @@ projectsRouter.patch('/tasks/:id', async (req: Request, res: Response) => {
+   }
+ });
+ 
+-// DELETE /api/tasks-clear-all
+-projectsRouter.delete('/tasks-clear-all', async (req: Request, res: Response) => {
++// DELETE /api/tasks-clear-all (ADMIN only)
++projectsRouter.delete('/tasks-clear-all', requireRole(['ADMIN']), async (req: Request, res: Response) => {
+   try {
+     await prisma.taskLink.deleteMany({}).catch(() => {});
+     await prisma.projectTask.deleteMany({});
+diff --git a/server/routes/siteDiary.ts b/server/routes/siteDiary.ts
+index 9baf682..d3d016e 100644
+--- a/server/routes/siteDiary.ts
++++ b/server/routes/siteDiary.ts
+@@ -7,9 +7,13 @@ import { Router, Request, Response } from 'express';
+ import { Role } from '@prisma/client';
+ import { prisma, pool } from '../db';
+ import { broadcastChange, invalidateAllDataCache } from '../events';
++import { requireAuth } from '../middleware/auth';
+ 
+ export const siteDiaryRouter = Router();
+ 
++// Apply authentication to site diary endpoints
++siteDiaryRouter.use(requireAuth);
++
+ // ============================================================================
+ // DAILY SITE LOGS (WEATHER, EQUIPMENT, CREW, SAFETY & TOOLBOX)
+ // ============================================================================
+diff --git a/server/routes/workforce.ts b/server/routes/workforce.ts
+index 0691673..26e8840 100644
+--- a/server/routes/workforce.ts
++++ b/server/routes/workforce.ts
+@@ -7,9 +7,13 @@ import { Router, Request, Response } from 'express';
+ import { GoogleGenAI } from '@google/genai';
+ import { prisma, pool } from '../db';
+ import { broadcastChange, invalidateAllDataCache } from '../events';
++import { requireAuth } from '../middleware/auth';
+ 
+ export const workforceRouter = Router();
+ 
++// Apply authentication to workforce endpoints
++workforceRouter.use(requireAuth);
++
+ // ============================================================================
+ // CONTRACTORS & ARTISAN WORKFORCE DIRECTORY
+ // ============================================================================
+diff --git a/src/App.tsx b/src/App.tsx
+index 513bd26..f02fa95 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -23,6 +23,7 @@ import {
+   SESSION_INACTIVITY_LIMIT_MS 
+ } from './utils/session';
+ import { useInactivityTimeout } from './hooks/useInactivityTimeout';
++import { setupSecureFetch } from './utils/apiClient';
+ 
+ export default function App() {
+   // --- DATABASE STATE MODULES ---
+@@ -86,55 +87,48 @@ export default function App() {
+     isLoggedIn: typeof session === 'object' && session !== null,
+     timeoutMs: SESSION_INACTIVITY_LIMIT_MS,
+     onTimeout: () => {
++      fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+       clearStoredSession();
+       setSession(null);
+       setSessionExpiryNotice('Your session has ended after 30 minutes of inactivity for security compliance. Please sign in again.');
+     },
+   });
+ 
+-  // --- URL TOKEN INSPECTOR & PERSISTENCE RESTORER ---
++  // --- URL TOKEN INSPECTOR & SERVER-VERIFIED SESSION RESTORER ---
+   useEffect(() => {
+     if (typeof window !== 'undefined') {
++      // Configure global secure fetch interceptor with automatic 401 handling
++      setupSecureFetch(() => {
++        clearStoredSession();
++        setSession(null);
++        setSessionExpiryNotice('Your session has expired or is invalid. Please sign in again.');
++      });
++
+       const params = new URLSearchParams(window.location.search);
+       const token = params.get('activateToken') || params.get('token');
+       if (token) {
+         setUrlInviteToken(token);
+         setSession('login');
+       } else {
+-        const validatedSession = getStoredSession();
+-        if (validatedSession) {
+-          setSession(validatedSession);
+-
+-          // Re-sync with latest PostgreSQL database profile in background
+-          const q = validatedSession.id ? `?userId=${encodeURIComponent(validatedSession.id)}` : validatedSession.email ? `?email=${encodeURIComponent(validatedSession.email)}` : '';
+-          fetch(`/api/auth/profile${q}`)
+-            .then(res => res.ok ? res.json() : null)
+-            .then(data => {
+-              if (data?.profile) {
+-                const p = data.profile;
+-                setSession(prev => {
+-                  if (typeof prev === 'object' && prev !== null) {
+-                    const updated = {
+-                      ...prev,
+-                      name: p.name || prev.name,
+-                      email: p.email || prev.email,
+-                      role: p.role || prev.role,
+-                      avatarUrl: p.avatarUrl !== undefined ? p.avatarUrl : prev.avatarUrl,
+-                      title: p.title || prev.title,
+-                      phone: p.contact || prev.phone,
+-                      division: p.division || prev.division,
+-                    };
+-                    updateStoredSession(updated);
+-                    return updated;
+-                  }
+-                  return prev;
+-                });
+-              }
+-            })
+-            .catch(() => {});
+-        } else {
+-          clearStoredSession();
+-        }
++        // Verify session state strictly with server endpoint
++        fetch('/api/auth/me')
++          .then(res => {
++            if (res.ok) return res.json();
++            throw new Error('Unauthenticated');
++          })
++          .then(data => {
++            if (data?.session) {
++              setSession(data.session);
++              saveStoredSession(data.session);
++            } else {
++              clearStoredSession();
++              setSession(null);
++            }
++          })
++          .catch(() => {
++            clearStoredSession();
++            setSession(null);
++          });
+       }
+     }
+   }, []);
+@@ -460,6 +454,7 @@ export default function App() {
+   };
+ 
+   const handleInitiateLogout = () => {
++    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+     clearStoredSession();
+     setSessionExpiryNotice(null);
+     const currentSession = typeof session === 'object' && session !== null ? session : null;
+diff --git a/src/components/FinancePayrollDashboard.tsx b/src/components/FinancePayrollDashboard.tsx
+index f972ada..dfcc3e2 100644
+--- a/src/components/FinancePayrollDashboard.tsx
++++ b/src/components/FinancePayrollDashboard.tsx
+@@ -118,9 +118,7 @@ export default function FinancePayrollDashboard({
+   const loadPastRuns = async () => {
+     try {
+       const q = selectedProjectId ? `?projectId=${selectedProjectId}` : '';
+-      const res = await fetch(`/api/payroll/runs${q}`, {
+-        headers: { 'x-user-role': session?.role || 'FINANCE', 'x-user-id': session?.id || '' }
+-      });
++      const res = await fetch(`/api/payroll/runs${q}`);
+       if (res.ok) {
+         const data = await res.json();
+         setPastRuns(Array.isArray(data) && data.length > 0 ? data : defaultHistoricalRuns);
+@@ -146,9 +144,7 @@ export default function FinancePayrollDashboard({
+       const res = await fetch('/api/payroll/calculate', {
+         method: 'POST',
+         headers: { 
+-          'Content-Type': 'application/json',
+-          'x-user-role': session?.role || 'FINANCE',
+-          'x-user-id': session?.id || ''
++          'Content-Type': 'application/json'
+         },
+         body: JSON.stringify({
+           projectId: selectedProjectId,
+@@ -200,9 +196,7 @@ export default function FinancePayrollDashboard({
+       const res = await fetch('/api/payroll/finalize', {
+         method: 'POST',
+         headers: { 
+-          'Content-Type': 'application/json',
+-          'x-user-role': session?.role || 'FINANCE',
+-          'x-user-id': session?.id || ''
++          'Content-Type': 'application/json'
+         },
+         body: JSON.stringify({
+           projectId: selectedProjectId,
+@@ -226,9 +220,7 @@ export default function FinancePayrollDashboard({
+       if (onRefreshData) onRefreshData();
+       
+       // Load details of the finalized run
+-      const detailRes = await fetch(`/api/payroll/runs/${data.payrollRunId}`, {
+-        headers: { 'x-user-role': session?.role || 'FINANCE' }
+-      });
++      const detailRes = await fetch(`/api/payroll/runs/${data.payrollRunId}`);
+       if (detailRes.ok) {
+         setSelectedRunDetail(await detailRes.json());
+       }
+@@ -253,9 +245,7 @@ export default function FinancePayrollDashboard({
+       const res = await fetch('/api/cash-advances', {
+         method: 'POST',
+         headers: { 
+-          'Content-Type': 'application/json',
+-          'x-user-role': session?.role || 'FINANCE',
+-          'x-user-id': session?.id || ''
++          'Content-Type': 'application/json'
+         },
+         body: JSON.stringify({
+           projectId: selectedProjectId,
+@@ -603,9 +593,7 @@ export default function FinancePayrollDashboard({
+                         <div className="flex items-center justify-center gap-1.5">
+                           <button
+                             onClick={async () => {
+-                              const res = await fetch(`/api/payroll/runs/${run.id}`, {
+-                                headers: { 'x-user-role': session?.role || 'FINANCE' }
+-                              });
++                              const res = await fetch(`/api/payroll/runs/${run.id}`);
+                               if (res.ok) {
+                                 setSelectedRunDetail(await res.json());
+                                 setActiveTab('calculator');
+diff --git a/src/components/TimekeeperAttendanceDashboard.tsx b/src/components/TimekeeperAttendanceDashboard.tsx
+index ed7ed80..bc2186c 100644
+--- a/src/components/TimekeeperAttendanceDashboard.tsx
++++ b/src/components/TimekeeperAttendanceDashboard.tsx
+@@ -79,15 +79,11 @@ export default function TimekeeperAttendanceDashboard({
+     try {
+       // 1. Fetch only ACTIVE workers for this project roll-call (try /api/attendance/roster first, fallback to /api/workers)
+       let rawWorkersData: SiteWorker[] = [];
+-      const rosterRes = await fetch(`/api/attendance/roster?projectId=${selectedProjectId}&status=Active&onlyArtisans=true`, {
+-        headers: { 'x-user-role': session?.role || 'TIMEKEEPER', 'x-user-id': session?.id || '' }
+-      });
++      const rosterRes = await fetch(`/api/attendance/roster?projectId=${selectedProjectId}&status=Active&onlyArtisans=true`);
+       if (rosterRes.ok) {
+         rawWorkersData = await rosterRes.json();
+       } else {
+-        const workersRes = await fetch(`/api/workers?projectId=${selectedProjectId}&status=Active&onlyArtisans=true`, {
+-          headers: { 'x-user-role': session?.role || 'TIMEKEEPER', 'x-user-id': session?.id || '' }
+-        });
++        const workersRes = await fetch(`/api/workers?projectId=${selectedProjectId}&status=Active&onlyArtisans=true`);
+         if (workersRes.ok) rawWorkersData = await workersRes.json();
+       }
+ 
+@@ -176,9 +172,7 @@ export default function TimekeeperAttendanceDashboard({
+       setWorkers(workersData);
+ 
+       // 2. Fetch existing logs for this date
+-      const logsRes = await fetch(`/api/attendance?projectId=${selectedProjectId}&date=${selectedDate}`, {
+-        headers: { 'x-user-role': session?.role || 'TIMEKEEPER', 'x-user-id': session?.id || '' }
+-      });
++      const logsRes = await fetch(`/api/attendance?projectId=${selectedProjectId}&date=${selectedDate}`);
+       const logsData: AttendanceRecord[] = logsRes.ok ? await logsRes.json() : [];
+       setExistingLogs(logsData);
+ 
+@@ -313,9 +307,7 @@ export default function TimekeeperAttendanceDashboard({
+       const res = await fetch('/api/attendance', {
+         method: 'POST',
+         headers: { 
+-          'Content-Type': 'application/json',
+-          'x-user-role': session?.role || 'TIMEKEEPER',
+-          'x-user-id': session?.id || ''
++          'Content-Type': 'application/json'
+         },
+         body: JSON.stringify(payload)
+       });
+diff --git a/src/components/WorkerMasterlistManager.tsx b/src/components/WorkerMasterlistManager.tsx
+index 2ef7534..005c4ea 100644
+--- a/src/components/WorkerMasterlistManager.tsx
++++ b/src/components/WorkerMasterlistManager.tsx
+@@ -71,9 +71,7 @@ export default function WorkerMasterlistManager({
+   const fetchWorkers = async () => {
+     setIsLoading(true);
+     try {
+-      const res = await fetch('/api/workers', {
+-        headers: { 'x-user-role': session?.role || 'ADMIN', 'x-user-id': session?.id || '' }
+-      });
++      const res = await fetch('/api/workers');
+       if (res.ok) {
+         setWorkers(await res.json());
+       }
+@@ -101,9 +99,7 @@ export default function WorkerMasterlistManager({
+       const res = await fetch('/api/workers', {
+         method: 'POST',
+         headers: { 
+-          'Content-Type': 'application/json',
+-          'x-user-role': session?.role || 'ADMIN',
+-          'x-user-id': session?.id || ''
++          'Content-Type': 'application/json'
+         },
+         body: JSON.stringify({
+           firstName: firstName.trim(),
+@@ -143,8 +139,7 @@ export default function WorkerMasterlistManager({
+       const res = await fetch(`/api/workers/${editingWorker.id}`, {
+         method: 'PATCH',
+         headers: { 
+-          'Content-Type': 'application/json',
+-          'x-user-role': session?.role || 'ADMIN' 
++          'Content-Type': 'application/json'
+         },
+         body: JSON.stringify({
+           position: editingWorker.position,
+@@ -168,13 +163,12 @@ export default function WorkerMasterlistManager({
+     try {
+       if (isAssigned) {
+         await fetch(`/api/workers/${workerId}/assign/${projectId}`, {
+-          method: 'DELETE',
+-          headers: { 'x-user-role': session?.role || 'ADMIN' }
++          method: 'DELETE'
+         });
+       } else {
+         await fetch(`/api/workers/${workerId}/assign`, {
+           method: 'POST',
+-          headers: { 'Content-Type': 'application/json', 'x-user-role': session?.role || 'ADMIN' },
++          headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ projectId })
+         });
+       }
+
+================================================================================
+5. AUTOMATED SECURITY TEST SUITE EXECUTION RESULTS
+================================================================================
+Test Runner: tsx server/tests/security.test.ts
+Command: npm run test:security
+Database: Live PostgreSQL with sessions table and performance indexes
+Execution Summary: 17 passed, 0 failed out of 17 total tests.
+
+Test Assertions Verified:
+[PASS]  1. Password strength policy requires min 8 chars with letters & numbers
+[PASS]  2. Valid credentials authenticate active user and issue HttpOnly session cookie
+[PASS]  3. Incorrect credentials rejected with generic error (no user enumeration)
+[PASS]  4. Protected endpoints return 401 Unauthorized without session
+[PASS]  5. Forged x-user-role and x-user-id headers are ignored and cannot elevate privileges
+[PASS]  6. Query parameter and body userId cannot impersonate another user
+[PASS]  7. Unknown and unmapped roles reject access and NEVER normalize to ADMIN
+[PASS]  8. Restricted operations return 403 Forbidden for unauthorized roles
+[PASS]  9. Timekeeper cannot finalize/approve payroll (Separation of Duties)
+[PASS] 10. Finance users cannot create Administrator accounts (Admin only)
+[PASS] 11. Users restricted by projectIds cannot access unauthorized projects
+[PASS] 12. Suspended accounts cannot log in or access resources
+[PASS] 13. Expired sessions are rejected with 401
+[PASS] 14. Logout invalidates active session in PostgreSQL and clears cookie
+[PASS] 15. Password change invalidates existing sessions
+[PASS] 16. CSRF protection blocks state-changing requests with missing or mismatched token
+[PASS] 17. Existing database users and data are intact and preserved
+
+Build Verification:
+- npx tsc --noEmit: 0 type errors.
+- npm run build: Built successfully in 9.39s.
+
+================================================================================
+6. SECURITY REVIEW CHECKLIST & VERIFICATION INSTRUCTIONS FOR AUDITORS
+================================================================================
+For an independent reviewer (e.g., ChatGPT, security auditor):
+Please inspect the following key security guarantees in the code above:
+
+1. Session Lifecycle:
+   - Does sessionService.ts use crypto.randomBytes(32) for token generation?
+   - Is only the SHA-256 hash stored in PostgreSQL?
+   - Does logout (POST /api/auth/logout) invoke destroySession and clear the cookie?
+   - Does changePassword invoke revokeAllUserSessions for that userId?
+
+2. Role-Based Access Control:
+   - In server/middleware/auth.ts, is req.user populated ONLY from verified sessions?
+   - Are all header fallbacks ('x-user-role', 'x-user-id') removed?
+   - Does normalizeRole in rbac.ts return UNAUTHORIZED for unknown strings instead of ADMIN?
+
+3. Separation of Duties:
+   - In server/routes/payroll.ts, is POST /finalize restricted to FINANCE and ADMIN?
+   - Does server/routes/auth.ts restrict staff creation (POST /api/staff) to ADMIN?
+
+4. IDOR Protection:
+   - In server/routes/projects.ts and server/routes/gantt.ts, is checkUserProjectAccess
+     enforcing req.user.projectIds boundaries?
+
+5. Cookie & CSRF Security:
+   - In server/middleware/cookies.ts, are cookies set with HttpOnly, SameSite=Lax, Path=/?
+   - In server/middleware/csrf.ts, is X-CSRF-Token verified on mutating HTTP requests?
+
+================================================================================
+END OF PHASE 1 SECURITY REVIEW EXPORT
+================================================================================

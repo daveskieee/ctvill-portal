@@ -71,9 +71,7 @@ export default function WorkerMasterlistManager({
   const fetchWorkers = async () => {
     setIsLoading(true);
     try {
-      const res = await fetch('/api/workers', {
-        headers: { 'x-user-role': session?.role || 'ADMIN', 'x-user-id': session?.id || '' }
-      });
+      const res = await fetch('/api/workers');
       if (res.ok) {
         setWorkers(await res.json());
       }
@@ -101,9 +99,7 @@ export default function WorkerMasterlistManager({
       const res = await fetch('/api/workers', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': session?.role || 'ADMIN',
-          'x-user-id': session?.id || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           firstName: firstName.trim(),
@@ -143,8 +139,7 @@ export default function WorkerMasterlistManager({
       const res = await fetch(`/api/workers/${editingWorker.id}`, {
         method: 'PATCH',
         headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': session?.role || 'ADMIN' 
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           position: editingWorker.position,
@@ -168,13 +163,12 @@ export default function WorkerMasterlistManager({
     try {
       if (isAssigned) {
         await fetch(`/api/workers/${workerId}/assign/${projectId}`, {
-          method: 'DELETE',
-          headers: { 'x-user-role': session?.role || 'ADMIN' }
+          method: 'DELETE'
         });
       } else {
         await fetch(`/api/workers/${workerId}/assign`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-user-role': session?.role || 'ADMIN' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ projectId })
         });
       }

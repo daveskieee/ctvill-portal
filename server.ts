@@ -8,6 +8,16 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { prisma, initializeDatabaseTables } from './server/db';
+import { cleanupExpiredSessions } from './server/services/sessionService';
+import { cookieParserMiddleware } from './server/middleware/cookies';
+import { 
+  corsMiddleware, 
+  securityHeadersMiddleware, 
+  preventSensitiveFileExposure 
+} from './server/middleware/security';
+import { ensureCsrfCookieMiddleware, verifyCsrfMiddleware } from './server/middleware/csrf';
+import { authenticateRequest } from './server/middleware/auth';
+
 import { createEventsRouter } from './server/events';
 import { createGanttRouter } from './server/routes/gantt';
 import { authRouter } from './server/routes/auth';
@@ -30,22 +40,39 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Enable CORS for frontend development servers
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-user-role, x-user-id, x-project-id');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
-  next();
-});
+// 1. Security Headers (OWASP recommendations)
+app.use(securityHeadersMiddleware);
 
-// Support up to 50MB payloads for base64 encoded photo uploads and CAD document assets
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// 2. Controlled Cross-Origin Resource Sharing (CORS) with Credentials
+app.use(corsMiddleware);
 
-// Health Check Endpoint
+// 3. Block unauthorized access to sensitive internal files (.env, .git, etc.)
+app.use(preventSensitiveFileExposure);
+
+// 4. Zero-dependency Cookie Parser
+app.use(cookieParserMiddleware);
+
+// 5. Body Parsers with Appropriate Limits
+// Large payloads (50mb) specifically for CAD drawings & site photos
+app.use('/api/engineering', express.json({ limit: '50mb' }));
+app.use('/api/engineering', express.urlencoded({ limit: '50mb', extended: true }));
+app.use('/api/documents', express.json({ limit: '50mb' }));
+app.use('/api/documents', express.urlencoded({ limit: '50mb', extended: true }));
+
+// Standard payload limit for all other API endpoints
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ limit: '5mb', extended: true }));
+
+// 6. Ensure CSRF Cookie on all incoming requests
+app.use(ensureCsrfCookieMiddleware);
+
+// 7. Base Session Authentication: Resolves and verifies PostgreSQL session
+app.use(authenticateRequest);
+
+// 8. Cross-Site Request Forgery (CSRF) protection for state-changing API operations
+app.use('/api', verifyCsrfMiddleware);
+
+// Minimal public health check endpoint
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', server: 'CTVill ERP', time: new Date().toISOString() });
 });
@@ -55,14 +82,19 @@ initializeDatabaseTables().catch(err => {
   console.error('Database initialization warning:', err);
 });
 
+// Periodic session cleanup (every 1 hour)
+setInterval(() => {
+  cleanupExpiredSessions().catch(() => {});
+}, 60 * 60 * 1000);
+
 // ============================================================================
 // MOUNT MODULAR DOMAIN ROUTERS
 // ============================================================================
 
-// Real-time Server-Sent Events (SSE) stream
+// Real-time Server-Sent Events (SSE) stream (Authenticated)
 app.use('/api', createEventsRouter());
 
-// Enterprise Interactive Gantt Engine
+// Enterprise Interactive Gantt Engine (Protected)
 app.use('/api/projects', createGanttRouter(prisma));
 
 // Core Domain Routers
@@ -83,6 +115,7 @@ app.use('/api', workersRouter);
 // Serve static frontend build in production
 const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));
+
 app.get('*', (req, res, next) => {
   if (req.path.startsWith('/api') || req.path.startsWith('/events')) {
     return next();
@@ -92,6 +125,13 @@ app.get('*', (req, res, next) => {
       next();
     }
   });
+});
+
+// Generic centralized error handler (prevents leaking internal stack traces)
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error('Unhandled server error:', err?.message || err);
+  if (res.headersSent) return;
+  res.status(500).json({ error: 'An unexpected internal server error occurred.' });
 });
 
 app.listen(Number(PORT), '0.0.0.0', () => {

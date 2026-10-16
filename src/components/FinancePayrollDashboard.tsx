@@ -118,9 +118,7 @@ export default function FinancePayrollDashboard({
   const loadPastRuns = async () => {
     try {
       const q = selectedProjectId ? `?projectId=${selectedProjectId}` : '';
-      const res = await fetch(`/api/payroll/runs${q}`, {
-        headers: { 'x-user-role': session?.role || 'FINANCE', 'x-user-id': session?.id || '' }
-      });
+      const res = await fetch(`/api/payroll/runs${q}`);
       if (res.ok) {
         const data = await res.json();
         setPastRuns(Array.isArray(data) && data.length > 0 ? data : defaultHistoricalRuns);
@@ -146,9 +144,7 @@ export default function FinancePayrollDashboard({
       const res = await fetch('/api/payroll/calculate', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': session?.role || 'FINANCE',
-          'x-user-id': session?.id || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           projectId: selectedProjectId,
@@ -200,9 +196,7 @@ export default function FinancePayrollDashboard({
       const res = await fetch('/api/payroll/finalize', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': session?.role || 'FINANCE',
-          'x-user-id': session?.id || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           projectId: selectedProjectId,
@@ -226,9 +220,7 @@ export default function FinancePayrollDashboard({
       if (onRefreshData) onRefreshData();
       
       // Load details of the finalized run
-      const detailRes = await fetch(`/api/payroll/runs/${data.payrollRunId}`, {
-        headers: { 'x-user-role': session?.role || 'FINANCE' }
-      });
+      const detailRes = await fetch(`/api/payroll/runs/${data.payrollRunId}`);
       if (detailRes.ok) {
         setSelectedRunDetail(await detailRes.json());
       }
@@ -253,9 +245,7 @@ export default function FinancePayrollDashboard({
       const res = await fetch('/api/cash-advances', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': session?.role || 'FINANCE',
-          'x-user-id': session?.id || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
           projectId: selectedProjectId,
@@ -603,9 +593,7 @@ export default function FinancePayrollDashboard({
                         <div className="flex items-center justify-center gap-1.5">
                           <button
                             onClick={async () => {
-                              const res = await fetch(`/api/payroll/runs/${run.id}`, {
-                                headers: { 'x-user-role': session?.role || 'FINANCE' }
-                              });
+                              const res = await fetch(`/api/payroll/runs/${run.id}`);
                               if (res.ok) {
                                 setSelectedRunDetail(await res.json());
                                 setActiveTab('calculator');

@@ -43,10 +43,14 @@ export function createEventsRouter(): Router {
   const router = Router();
 
   router.get('/events', (req: Request, res: Response) => {
+    // Require authenticated session for real-time ERP event stream
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: Valid session required for real-time events.' });
+    }
+
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('Access-Control-Allow-Origin', '*');
     res.flushHeaders();
 
     // Send initial connection heartbeat

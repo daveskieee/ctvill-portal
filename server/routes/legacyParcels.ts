@@ -9,8 +9,12 @@ import * as crypto from 'crypto';
 import { prisma, pool } from '../db';
 import { broadcastChange, setCacheInvalidator } from '../events';
 import { getMailTransporter } from '../email';
+import { requireAuth } from '../middleware/auth';
 
 export const legacyParcelsRouter = Router();
+
+// Apply authentication to legacy parcels endpoints
+legacyParcelsRouter.use(requireAuth);
 
 // Helper function to map DB SlotStatus to Frontend SlotStatus string
 export function mapDbStatusToString(status: SlotStatus): string {

@@ -6,8 +6,12 @@
 import { Router, Request, Response } from 'express';
 import { prisma } from '../db';
 import { broadcastChange } from '../events';
+import { requireAuth } from '../middleware/auth';
 
 export const documentsRouter = Router();
+
+// Apply authentication on documents router
+documentsRouter.use(requireAuth);
 
 export const SEED_DOCUMENTS = [
   {
@@ -125,7 +129,7 @@ documentsRouter.post('/documents', async (req: Request, res: Response) => {
         fileSize: fileSize || '2.4 MB',
         version: version || '1.0',
         status: status || 'APPROVED',
-        uploadedBy: uploadedBy || 'Ar. Jonathan Dela Cruz',
+        uploadedBy: req.user?.name || uploadedBy || 'Staff Engineer',
         notes,
       }
     });
@@ -139,7 +143,7 @@ documentsRouter.post('/documents', async (req: Request, res: Response) => {
 });
 
 documentsRouter.post('/', async (req: Request, res: Response) => {
-  const { title, category, fileUrl, fileSize, version, status, uploadedBy, notes } = req.body;
+  const { title, category, fileUrl, fileSize, version, status, notes } = req.body;
   try {
     const doc = await prisma.projectDocument.create({
       data: {
@@ -149,7 +153,7 @@ documentsRouter.post('/', async (req: Request, res: Response) => {
         fileSize: fileSize || '2.4 MB',
         version: version || '1.0',
         status: status || 'APPROVED',
-        uploadedBy: uploadedBy || 'Ar. Jonathan Dela Cruz',
+        uploadedBy: req.user?.name || 'Staff Engineer',
         notes,
       }
     });

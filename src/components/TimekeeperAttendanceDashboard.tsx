@@ -79,15 +79,11 @@ export default function TimekeeperAttendanceDashboard({
     try {
       // 1. Fetch only ACTIVE workers for this project roll-call (try /api/attendance/roster first, fallback to /api/workers)
       let rawWorkersData: SiteWorker[] = [];
-      const rosterRes = await fetch(`/api/attendance/roster?projectId=${selectedProjectId}&status=Active&onlyArtisans=true`, {
-        headers: { 'x-user-role': session?.role || 'TIMEKEEPER', 'x-user-id': session?.id || '' }
-      });
+      const rosterRes = await fetch(`/api/attendance/roster?projectId=${selectedProjectId}&status=Active&onlyArtisans=true`);
       if (rosterRes.ok) {
         rawWorkersData = await rosterRes.json();
       } else {
-        const workersRes = await fetch(`/api/workers?projectId=${selectedProjectId}&status=Active&onlyArtisans=true`, {
-          headers: { 'x-user-role': session?.role || 'TIMEKEEPER', 'x-user-id': session?.id || '' }
-        });
+        const workersRes = await fetch(`/api/workers?projectId=${selectedProjectId}&status=Active&onlyArtisans=true`);
         if (workersRes.ok) rawWorkersData = await workersRes.json();
       }
 
@@ -176,9 +172,7 @@ export default function TimekeeperAttendanceDashboard({
       setWorkers(workersData);
 
       // 2. Fetch existing logs for this date
-      const logsRes = await fetch(`/api/attendance?projectId=${selectedProjectId}&date=${selectedDate}`, {
-        headers: { 'x-user-role': session?.role || 'TIMEKEEPER', 'x-user-id': session?.id || '' }
-      });
+      const logsRes = await fetch(`/api/attendance?projectId=${selectedProjectId}&date=${selectedDate}`);
       const logsData: AttendanceRecord[] = logsRes.ok ? await logsRes.json() : [];
       setExistingLogs(logsData);
 
@@ -313,9 +307,7 @@ export default function TimekeeperAttendanceDashboard({
       const res = await fetch('/api/attendance', {
         method: 'POST',
         headers: { 
-          'Content-Type': 'application/json',
-          'x-user-role': session?.role || 'TIMEKEEPER',
-          'x-user-id': session?.id || ''
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify(payload)
       });

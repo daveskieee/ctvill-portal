@@ -29,6 +29,17 @@ export const prisma = new PrismaClient({ adapter });
 export async function initializeDatabaseTables() {
   try {
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+        created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        last_activity_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+        user_agent TEXT,
+        ip_address TEXT
+      );
+
       CREATE TABLE IF NOT EXISTS system_settings (
         key TEXT PRIMARY KEY,
         value JSONB NOT NULL,
@@ -161,7 +172,7 @@ export async function initializeDatabaseTables() {
 
       -- Synchronize real database contractors into workers masterlist
       INSERT INTO workers (id, name, first_name, last_name, trade, position, daily_rate, hourly_ot_rate, assigned_project_id, status, created_at, updated_at)
-      SELECT 
+      SELECT DISTINCT ON (c.id)
         c.id,
         c.name,
         split_part(c.name, ' ', 1) as first_name,
@@ -282,6 +293,9 @@ export async function initializeDatabaseTables() {
       'CREATE INDEX IF NOT EXISTS idx_commercial_projects_created_at ON commercial_projects(created_at)',
       'CREATE INDEX IF NOT EXISTS idx_contractors_status ON contractors(status)',
       'CREATE INDEX IF NOT EXISTS idx_slots_parcel_id ON slots("parcelId")',
+      'CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash)',
+      'CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)',
+      'CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)',
       'CREATE INDEX IF NOT EXISTS idx_slots_status ON slots(status)',
       'CREATE INDEX IF NOT EXISTS idx_daily_site_logs_date ON daily_site_logs(date DESC)',
       'CREATE INDEX IF NOT EXISTS idx_government_permits_project_id ON government_permits(project_id)',

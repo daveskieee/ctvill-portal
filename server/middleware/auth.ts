@@ -4,10 +4,10 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { prisma } from '../db';
 import { Role } from '@prisma/client';
+import { SESSION_COOKIE_NAME, verifySession } from '../services/sessionService';
 
-export type AllowedAppRole = 'ADMIN' | 'ENGINEER' | 'TIMEKEEPER' | 'FINANCE' | 'PROJECT_MANAGER';
+export type AllowedAppRole = 'ADMIN' | 'ENGINEER' | 'TIMEKEEPER' | 'FINANCE' | 'PROJECT_MANAGER' | 'CLIENT';
 
 export interface AuthenticatedUser {
   id: string;
@@ -21,125 +21,134 @@ declare global {
   namespace Express {
     interface Request {
       user?: AuthenticatedUser;
+      sessionToken?: string;
     }
   }
 }
 
 /**
- * Normalizes any legacy or case-variant role into the canonical 4-role system:
- * ADMIN, ENGINEER, TIMEKEEPER, FINANCE
+ * Normalizes any database or app role into the canonical role system.
+ * Returns null for unknown, empty, or unmapped roles (NEVER defaults to ADMIN).
  */
-export function normalizeAppRole(rawRole: string | undefined | null): AllowedAppRole {
-  if (!rawRole) return 'ADMIN';
+export function normalizeAppRole(rawRole: string | undefined | null): AllowedAppRole | null {
+  if (!rawRole || typeof rawRole !== 'string') return null;
   const upper = rawRole.toUpperCase().trim();
-  if (upper.includes('TIME')) return 'TIMEKEEPER';
-  if (upper.includes('FINANCE') || upper.includes('TREASURY') || upper === 'ACCOUNTANT') return 'FINANCE';
-  if (upper.includes('ENG') || upper.includes('PROJECT') || upper.includes('PM')) return 'ENGINEER';
-  if (upper === 'ADMIN' || upper.includes('OPERAT') || upper.includes('DIRECTOR') || upper === 'SUPERADMIN') return 'ADMIN';
-  return (upper as AllowedAppRole);
+  if (upper === 'TIMEKEEPER' || upper.includes('TIME')) return 'TIMEKEEPER';
+  if (upper === 'FINANCE' || upper.includes('TREASURY') || upper === 'ACCOUNTANT') return 'FINANCE';
+  if (upper === 'PROJECT_MANAGER' || upper === 'PM') return 'ENGINEER';
+  if (upper === 'ENGINEER' || upper.includes('ENG') || upper.includes('SITE_ENG')) return 'ENGINEER';
+  if (upper === 'ADMIN' || upper === 'SUPERADMIN' || upper.includes('OPERAT') || upper.includes('DIRECTOR')) return 'ADMIN';
+  if (upper === 'CLIENT') return 'CLIENT';
+  return null;
 }
 
 /**
- * Authenticate incoming request and attach user profile
+ * Extracts session token strictly from HttpOnly cookie or Authorization Bearer header.
+ * NEVER accepts user IDs, role headers, query parameters, or request body fields.
  */
-export async function authenticateRequest(req: Request, res: Response, next: NextFunction) {
+export function extractSessionToken(req: Request): string | null {
+  // 1. Primary: HttpOnly session cookie
+  if (req.cookies && req.cookies[SESSION_COOKIE_NAME]) {
+    const cookieToken = req.cookies[SESSION_COOKIE_NAME];
+    if (typeof cookieToken === 'string' && cookieToken.trim().length >= 16) {
+      return cookieToken.trim();
+    }
+  }
+
+  // 2. Secondary: Authorization: Bearer <sessionToken>
+  const authHeader = req.headers['authorization'];
+  if (authHeader && typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
+    const bearerToken = authHeader.substring(7).trim();
+    if (bearerToken.length >= 16) {
+      return bearerToken;
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Authenticate incoming request by resolving and verifying the server-side session.
+ * Does NOT accept forged headers (x-user-id, x-user-role) or query/body user IDs.
+ * Does NOT automatically grant Administrator access when unauthenticated.
+ */
+export async function authenticateRequest(req: Request, _res: Response, next: NextFunction) {
   try {
-    // 1. Check headers for user ID or Authorization bearer
-    const headerUserId = (req.headers['x-user-id'] || req.headers['user-id']) as string | undefined;
-    const headerRole = (req.headers['x-user-role'] || req.headers['user-role']) as string | undefined;
-    const authHeader = req.headers['authorization'];
-    
-    let resolvedUserId: string | null = null;
-    if (headerUserId) {
-      resolvedUserId = headerUserId;
-    } else if (authHeader && authHeader.startsWith('Bearer ')) {
-      resolvedUserId = authHeader.substring(7).trim();
-    } else if (req.query.userId && typeof req.query.userId === 'string') {
-      resolvedUserId = req.query.userId;
-    } else if (req.body?.logged_by_user_id || req.body?.approved_by_user_id || req.body?.userId) {
-      resolvedUserId = req.body.logged_by_user_id || req.body.approved_by_user_id || req.body.userId;
-    }
-
-    if (resolvedUserId) {
-      const dbUser = await prisma.user.findUnique({
-        where: { id: resolvedUserId },
-        select: { id: true, email: true, name: true, role: true, projectIds: true }
-      });
-
-      if (dbUser) {
-        req.user = {
-          id: dbUser.id,
-          email: dbUser.email,
-          name: dbUser.name,
-          role: normalizeAppRole(dbUser.role),
-          projectIds: dbUser.projectIds || []
-        };
-        return next();
-      }
-    }
-
-    // Fallback: If header role is provided directly (e.g. from frontend dev session)
-    if (headerRole) {
-      const normRole = normalizeAppRole(headerRole);
-      // Attempt to find any active user with that role
-      const roleMatch = await prisma.user.findFirst({
-        where: { role: (normRole as Role) },
-        select: { id: true, email: true, name: true, role: true, projectIds: true }
-      });
-
-      req.user = {
-        id: roleMatch?.id || `session-${normRole.toLowerCase()}`,
-        email: roleMatch?.email || `${normRole.toLowerCase()}@ctvill.com`,
-        name: roleMatch?.name || `${normRole} Officer`,
-        role: normRole,
-        projectIds: roleMatch?.projectIds || []
-      };
+    const rawToken = extractSessionToken(req);
+    if (!rawToken) {
+      req.user = undefined;
       return next();
     }
 
-    // Default to ADMIN for open internal requests if no auth provided
-    const defaultAdmin = await prisma.user.findFirst({
-      where: { role: Role.ADMIN },
-      select: { id: true, email: true, name: true, role: true, projectIds: true }
-    });
+    const sessionResult = await verifySession(rawToken);
+    if (!sessionResult) {
+      req.user = undefined;
+      return next();
+    }
 
+    const normRole = normalizeAppRole(sessionResult.user.role);
+    if (!normRole) {
+      req.user = undefined;
+      return next();
+    }
+
+    req.sessionToken = rawToken;
     req.user = {
-      id: defaultAdmin?.id || 'admin-system-default',
-      email: defaultAdmin?.email || 'admin@ctvill.com',
-      name: defaultAdmin?.name || 'Operations Manager',
-      role: 'ADMIN',
-      projectIds: defaultAdmin?.projectIds || []
+      id: sessionResult.user.id,
+      email: sessionResult.user.email,
+      name: sessionResult.user.name,
+      role: normRole,
+      projectIds: sessionResult.user.projectIds || [],
     };
 
     next();
   } catch (error) {
-    console.error('Authentication middleware error:', error);
+    console.error('Authentication verification error:', error);
+    req.user = undefined;
     next();
   }
 }
 
 /**
- * Strict Role-Based Access Control Middleware
- * @param allowedRoles Array of roles permitted to access this endpoint
+ * Strict requirement that a valid, active authenticated session exists.
+ * Returns HTTP 401 if unauthenticated.
  */
-export function requireRole(allowedRoles: (AllowedAppRole | Role)[]) {
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (!req.user) {
+    return res.status(401).json({
+      error: 'Unauthorized: Valid authenticated session required.',
+      code: 'UNAUTHORIZED'
+    });
+  }
+  next();
+}
+
+/**
+ * Strict Role-Based Access Control Middleware.
+ * Allows specified roles plus ADMIN for general administration.
+ */
+export function requireRole(allowedRoles: (AllowedAppRole | Role | string)[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({
-        error: 'Unauthorized: Authentication credentials required.'
+        error: 'Unauthorized: Authentication required.',
+        code: 'UNAUTHORIZED'
       });
     }
 
     const currentRole = req.user.role;
-    const normalizedAllowed = allowedRoles.map(r => normalizeAppRole(String(r)));
+    const normalizedAllowed = allowedRoles
+      .map(r => normalizeAppRole(String(r)))
+      .filter((r): r is AllowedAppRole => r !== null);
 
-    // ADMIN has full system access across all endpoints
+    // ADMIN has authorized administrative oversight
     if (currentRole === 'ADMIN' || normalizedAllowed.includes(currentRole)) {
       return next();
     }
 
     return res.status(403).json({
-      error: `Forbidden: Access restricted. Required role(s): [${normalizedAllowed.join(', ')}]. Your current role is [${currentRole}].`
+      error: `Forbidden: Access restricted. Required role: [${normalizedAllowed.join(', ')}]. Your role: [${currentRole}].`,
+      code: 'FORBIDDEN'
     });
   };
 }
@@ -148,24 +157,67 @@ export function requireRole(allowedRoles: (AllowedAppRole | Role)[]) {
  * Strict Role-Based Access Control Middleware enforcing Separation of Duties (SoD).
  * Does NOT permit ADMIN or any other unlisted role to bypass operational restrictions.
  */
-export function requireExactRole(allowedRoles: (AllowedAppRole | Role)[]) {
+export function requireExactRole(allowedRoles: (AllowedAppRole | Role | string)[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).json({
-        error: 'Unauthorized: Authentication credentials required.'
+        error: 'Unauthorized: Authentication required.',
+        code: 'UNAUTHORIZED'
       });
     }
 
     const currentRole = req.user.role;
-    const normalizedAllowed = allowedRoles.map(r => normalizeAppRole(String(r)));
+    const normalizedAllowed = allowedRoles
+      .map(r => normalizeAppRole(String(r)))
+      .filter((r): r is AllowedAppRole => r !== null);
 
     if (normalizedAllowed.includes(currentRole)) {
       return next();
     }
 
     return res.status(403).json({
-      error: `Forbidden: Separation of Duties (SoD) violation. This operational action is strictly restricted to [${normalizedAllowed.join(', ')}]. Your current role is [${currentRole}].`
+      error: `Forbidden: Separation of Duties (SoD) violation. This operational action is strictly restricted to [${normalizedAllowed.join(', ')}]. Your current role is [${currentRole}].`,
+      code: 'FORBIDDEN_SOD'
     });
   };
 }
 
+/**
+ * Checks whether the authenticated user has access to a specific project ID.
+ * - ADMIN and FINANCE have global access for oversight, auditing, and corporate payroll.
+ * - If user has restricted projectIds list (length > 0), they may only access projects in that list.
+ */
+export function checkUserProjectAccess(user: AuthenticatedUser | undefined, projectId: string | undefined): boolean {
+  if (!user || !projectId) return false;
+  if (user.role === 'ADMIN' || user.role === 'FINANCE') return true;
+  if (!user.projectIds || user.projectIds.length === 0) return true;
+  return user.projectIds.includes(projectId);
+}
+
+/**
+ * Middleware ensuring the authenticated user has access to the requested project.
+ */
+export function requireProjectAccess(projectIdExtractor?: (req: Request) => string | undefined) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!req.user) {
+      return res.status(401).json({ error: 'Unauthorized: Authentication required.' });
+    }
+
+    const projectId = projectIdExtractor 
+      ? projectIdExtractor(req)
+      : (req.params.projectId || req.params.id || (req.query.projectId as string) || (req.query.project_id as string) || req.body?.projectId || req.body?.project_id);
+
+    if (!projectId) {
+      return next();
+    }
+
+    if (!checkUserProjectAccess(req.user, projectId)) {
+      return res.status(403).json({
+        error: `Forbidden: You do not have assigned access to project [${projectId}].`,
+        code: 'FORBIDDEN_PROJECT_ACCESS'
+      });
+    }
+
+    next();
+  };
+}

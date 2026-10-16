@@ -23,6 +23,7 @@ import {
   SESSION_INACTIVITY_LIMIT_MS 
 } from './utils/session';
 import { useInactivityTimeout } from './hooks/useInactivityTimeout';
+import { setupSecureFetch } from './utils/apiClient';
 
 export default function App() {
   // --- DATABASE STATE MODULES ---
@@ -86,55 +87,48 @@ export default function App() {
     isLoggedIn: typeof session === 'object' && session !== null,
     timeoutMs: SESSION_INACTIVITY_LIMIT_MS,
     onTimeout: () => {
+      fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
       clearStoredSession();
       setSession(null);
       setSessionExpiryNotice('Your session has ended after 30 minutes of inactivity for security compliance. Please sign in again.');
     },
   });
 
-  // --- URL TOKEN INSPECTOR & PERSISTENCE RESTORER ---
+  // --- URL TOKEN INSPECTOR & SERVER-VERIFIED SESSION RESTORER ---
   useEffect(() => {
     if (typeof window !== 'undefined') {
+      // Configure global secure fetch interceptor with automatic 401 handling
+      setupSecureFetch(() => {
+        clearStoredSession();
+        setSession(null);
+        setSessionExpiryNotice('Your session has expired or is invalid. Please sign in again.');
+      });
+
       const params = new URLSearchParams(window.location.search);
       const token = params.get('activateToken') || params.get('token');
       if (token) {
         setUrlInviteToken(token);
         setSession('login');
       } else {
-        const validatedSession = getStoredSession();
-        if (validatedSession) {
-          setSession(validatedSession);
-
-          // Re-sync with latest PostgreSQL database profile in background
-          const q = validatedSession.id ? `?userId=${encodeURIComponent(validatedSession.id)}` : validatedSession.email ? `?email=${encodeURIComponent(validatedSession.email)}` : '';
-          fetch(`/api/auth/profile${q}`)
-            .then(res => res.ok ? res.json() : null)
-            .then(data => {
-              if (data?.profile) {
-                const p = data.profile;
-                setSession(prev => {
-                  if (typeof prev === 'object' && prev !== null) {
-                    const updated = {
-                      ...prev,
-                      name: p.name || prev.name,
-                      email: p.email || prev.email,
-                      role: p.role || prev.role,
-                      avatarUrl: p.avatarUrl !== undefined ? p.avatarUrl : prev.avatarUrl,
-                      title: p.title || prev.title,
-                      phone: p.contact || prev.phone,
-                      division: p.division || prev.division,
-                    };
-                    updateStoredSession(updated);
-                    return updated;
-                  }
-                  return prev;
-                });
-              }
-            })
-            .catch(() => {});
-        } else {
-          clearStoredSession();
-        }
+        // Verify session state strictly with server endpoint
+        fetch('/api/auth/me')
+          .then(res => {
+            if (res.ok) return res.json();
+            throw new Error('Unauthenticated');
+          })
+          .then(data => {
+            if (data?.session) {
+              setSession(data.session);
+              saveStoredSession(data.session);
+            } else {
+              clearStoredSession();
+              setSession(null);
+            }
+          })
+          .catch(() => {
+            clearStoredSession();
+            setSession(null);
+          });
       }
     }
   }, []);
@@ -460,6 +454,7 @@ export default function App() {
   };
 
   const handleInitiateLogout = () => {
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     clearStoredSession();
     setSessionExpiryNotice(null);
     const currentSession = typeof session === 'object' && session !== null ? session : null;

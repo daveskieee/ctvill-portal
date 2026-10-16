@@ -7,8 +7,12 @@ import { Router, Request, Response } from 'express';
 import { Role } from '@prisma/client';
 import { prisma, pool } from '../db';
 import { broadcastChange, invalidateAllDataCache } from '../events';
+import { requireAuth } from '../middleware/auth';
 
 export const siteDiaryRouter = Router();
+
+// Apply authentication to site diary endpoints
+siteDiaryRouter.use(requireAuth);
 
 // ============================================================================
 // DAILY SITE LOGS (WEATHER, EQUIPMENT, CREW, SAFETY & TOOLBOX)
