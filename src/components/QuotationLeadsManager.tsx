@@ -4,13 +4,14 @@
  */
 
 import React, { useState } from 'react';
-import { 
-  Briefcase, CheckCircle2, Clock, DollarSign, Mail, 
-  Phone, Building2, User, Search, Filter, Sparkles, 
+import {
+  Briefcase, CheckCircle2, Clock, DollarSign, Mail,
+  Phone, Building2, User, Search, Filter, Sparkles,
   ArrowRight, Check, X, Tag, Calculator, Award, Download, Printer
 } from 'lucide-react';
 import { FitoutQuotationItem } from '../types';
 import { exportToCsv, printRegisterTable } from '../utils/exportUtils';
+import { useTheme } from '../context/ThemeContext';
 
 interface QuotationLeadsManagerProps {
   quotations: FitoutQuotationItem[];
@@ -27,6 +28,8 @@ export default function QuotationLeadsManager({
   onConvertToProject,
   navigateToProject: propNavigateToProject
 }: QuotationLeadsManagerProps) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const navigateToProject = (projectId?: string) => {
     if (propNavigateToProject) {
       propNavigateToProject(projectId);
@@ -141,7 +144,7 @@ export default function QuotationLeadsManager({
 
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>TOTAL ONLINE INQUIRIES</span>
             <Mail className="w-4 h-4 text-cyan-400" />
@@ -150,33 +153,33 @@ export default function QuotationLeadsManager({
           <span className="text-[10px] text-slate-400 block font-mono">Web Estimator Leads</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>NEW INQUIRIES</span>
             <Clock className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-amber-300">{newCount}</div>
-          <span className="text-[10px] text-amber-400 block font-mono">Awaiting Response</span>
+          <div className="text-xl font-bold font-mono text-white">{newCount}</div>
+          <span className="text-[10px] text-slate-400 block font-mono">Awaiting Response</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>CONVERTED TO PROJECT</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-emerald-300">{convertedCount}</div>
-          <span className="text-[10px] text-emerald-400 block font-mono">Signed CTVill Commercial Sites</span>
+          <div className="text-xl font-bold font-mono text-white">{convertedCount}</div>
+          <span className="text-[10px] text-slate-400 block font-mono">Signed CTVill Commercial Sites</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>CONVERSION RATE</span>
             <Award className="w-4 h-4 text-purple-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-purple-300">
+          <div className="text-xl font-bold font-mono text-white">
             {totalQuotes > 0 ? Math.round((convertedCount / totalQuotes) * 100) : 0}%
           </div>
-          <span className="text-[10px] text-purple-400 block font-mono">Inquiry to Contract Pace</span>
+          <span className="text-[10px] text-slate-400 block font-mono">Inquiry to Contract Pace</span>
         </div>
       </div>
 
@@ -188,11 +191,10 @@ export default function QuotationLeadsManager({
             <button
               key={st}
               onClick={() => setStatusFilter(st)}
-              className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer shrink-0 ${
-                statusFilter === st
+              className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer shrink-0 ${statusFilter === st
                   ? 'bg-amber-500 text-slate-950 font-black'
                   : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-              }`}
+                }`}
             >
               {st === 'NEW_INQUIRY' ? 'NEW' : st.replace('_', ' ')}
             </button>
@@ -232,10 +234,10 @@ export default function QuotationLeadsManager({
       </div>
 
       {/* Table */}
-      <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
+      <div className={`${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200/80 shadow-xs'} border rounded-xl overflow-hidden`}>
         <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-900/90 text-slate-400 font-mono text-[11px] uppercase border-b border-slate-800">
+          <table className={`w-full text-left text-xs ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>
+            <thead className={`${isDark ? 'bg-slate-900/90 text-slate-400 border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'} font-mono text-[11px] uppercase border-b`}>
               <tr>
                 <th className="py-3.5 px-4">Client Contact</th>
                 <th className="py-3.5 px-4">Space & Scope</th>
@@ -246,7 +248,7 @@ export default function QuotationLeadsManager({
                 <th className="py-3.5 px-4 text-right">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60 font-sans">
+            <tbody className={`divide-y ${isDark ? 'divide-slate-800/60' : 'divide-slate-200'} font-sans`}>
               {filteredQuotes.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center py-12 text-slate-500">
@@ -257,15 +259,15 @@ export default function QuotationLeadsManager({
                 </tr>
               ) : (
                 filteredQuotes.map((quote) => (
-                  <tr key={quote.id} className="hover:bg-slate-900/50 transition-colors">
+                  <tr key={quote.id} className={`${isDark ? 'hover:bg-slate-900/50' : 'hover:bg-slate-50/80'} transition-colors`}>
                     <td className="py-3.5 px-4">
-                      <div className="font-bold text-white text-sm">{quote.clientName}</div>
-                      <div className="text-[11px] text-cyan-400 font-mono mt-0.5 flex items-center gap-1">
+                      <div className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-sm`}>{quote.clientName}</div>
+                      <div className={`text-[11px] ${isDark ? 'text-cyan-400' : 'text-cyan-700'} font-mono mt-0.5 flex items-center gap-1`}>
                         <Mail className="w-3 h-3 shrink-0" />
                         <span>{quote.clientEmail}</span>
                       </div>
                       {quote.clientPhone && (
-                        <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center gap-1">
+                        <div className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'} font-mono mt-0.5 flex items-center gap-1`}>
                           <Phone className="w-3 h-3 shrink-0" />
                           <span>{quote.clientPhone}</span>
                         </div>
@@ -273,23 +275,23 @@ export default function QuotationLeadsManager({
                     </td>
 
                     <td className="py-3.5 px-4">
-                      <div className="font-medium text-white max-w-xs truncate">{quote.projectScope}</div>
-                      <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5 font-mono">
+                      <div className={`font-medium ${isDark ? 'text-white' : 'text-slate-800'} max-w-xs truncate`}>{quote.projectScope}</div>
+                      <div className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'} flex items-center gap-2 mt-0.5 font-mono`}>
                         <span>{quote.spaceType || 'Commercial'}</span>
                         <span>•</span>
-                        <span className="text-amber-400">{quote.finishTier || 'Standard Executive'}</span>
+                        <span className={isDark ? 'text-amber-400' : 'text-amber-700 font-semibold'}>{quote.finishTier || 'Standard Executive'}</span>
                       </div>
                     </td>
 
-                    <td className="py-3.5 px-4 text-center font-mono font-bold text-slate-200">
+                    <td className={`py-3.5 px-4 text-center font-mono font-bold ${isDark ? 'text-slate-200' : 'text-slate-700'}`}>
                       {Number(quote.estimatorArea || 0).toLocaleString()} sqm
                     </td>
 
-                    <td className="py-3.5 px-4 text-right font-mono font-bold text-emerald-400 text-sm">
+                    <td className={`py-3.5 px-4 text-right font-mono font-bold ${isDark ? 'text-emerald-400' : 'text-emerald-700'} text-sm`}>
                       ₱{Number(quote.estimatedCost || 0).toLocaleString()}
                     </td>
 
-                    <td className="py-3.5 px-4 text-center font-mono text-slate-300">
+                    <td className={`py-3.5 px-4 text-center font-mono ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                       {quote.estimatedWeeks || 8} weeks
                     </td>
 
@@ -301,15 +303,22 @@ export default function QuotationLeadsManager({
                             onUpdateStatus(quote.id, e.target.value as any);
                           }
                         }}
-                        className={`text-[10px] font-mono font-bold rounded-lg px-2 py-1 border cursor-pointer focus:outline-none ${
-                          quote.status === 'CONVERTED'
-                            ? 'bg-emerald-950/90 text-emerald-300 border-emerald-700'
+                        className={`text-[10px] font-mono font-bold rounded-lg px-2 py-1 border cursor-pointer focus:outline-none ${quote.status === 'CONVERTED'
+                            ? isDark
+                              ? 'bg-emerald-950/90 text-emerald-300 border-emerald-700'
+                              : 'bg-emerald-50 text-emerald-800 border-emerald-300'
                             : quote.status === 'PROPOSAL_SENT'
-                            ? 'bg-blue-950/90 text-blue-300 border-blue-700'
-                            : quote.status === 'CONTACTED'
-                            ? 'bg-purple-950/90 text-purple-300 border-purple-700'
-                            : 'bg-amber-950/90 text-amber-300 border-amber-700'
-                        }`}
+                              ? isDark
+                                ? 'bg-blue-950/90 text-blue-300 border-blue-700'
+                                : 'bg-blue-50 text-blue-800 border-blue-300'
+                              : quote.status === 'CONTACTED'
+                                ? isDark
+                                  ? 'bg-purple-950/90 text-purple-300 border-purple-700'
+                                  : 'bg-purple-50 text-purple-800 border-purple-300'
+                                : isDark
+                                  ? 'bg-amber-950/90 text-amber-300 border-amber-700'
+                                  : 'bg-amber-50 text-amber-800 border-amber-300'
+                          }`}
                       >
                         <option value="NEW_INQUIRY">NEW INQUIRY</option>
                         <option value="CONTACTED">CONTACTED</option>
@@ -322,7 +331,11 @@ export default function QuotationLeadsManager({
                       <div className="flex items-center justify-end gap-1.5">
                         <button
                           onClick={() => setSelectedQuote(quote)}
-                          className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-lg text-xs font-medium transition cursor-pointer border border-slate-800"
+                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition cursor-pointer border ${
+                            isDark
+                              ? 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-800'
+                              : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300'
+                          }`}
                         >
                           Notes
                         </button>
@@ -331,9 +344,13 @@ export default function QuotationLeadsManager({
                           if (!isAdmin) return null;
                           if (lead.status === 'CONVERTED') {
                             return (
-                              <button 
+                              <button
                                 onClick={() => navigateToProject(lead.convertedProjectId)}
-                                className="px-3 py-1.5 text-xs font-semibold rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/20 flex items-center gap-1"
+                                className={`px-3 py-1.5 text-xs font-semibold rounded-lg flex items-center gap-1 cursor-pointer transition-colors border ${
+                                  isDark
+                                    ? 'bg-cyan-500/10 text-cyan-400 border-cyan-500/30 hover:bg-cyan-500/20'
+                                    : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                                }`}
                               >
                                 View Project →
                               </button>
@@ -343,9 +360,13 @@ export default function QuotationLeadsManager({
                             <button
                               onClick={() => handleConvert(lead)}
                               disabled={isConvertingId === lead.id}
-                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 shadow-xs"
+                              className={`text-xs px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 ${
+                                isDark
+                                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white font-bold shadow-xs'
+                                  : 'bg-white border border-slate-300 text-slate-700 hover:border-emerald-600 hover:text-emerald-700 font-medium'
+                              }`}
                             >
-                              <Sparkles className="w-3 h-3 text-emerald-200" />
+                              <Sparkles className={`w-3.5 h-3.5 ${isDark ? 'text-emerald-200' : 'text-emerald-600'}`} />
                               <span>{isConvertingId === lead.id ? 'Converting...' : 'Convert to Project'}</span>
                             </button>
                           );

@@ -8,8 +8,9 @@ import {
   Building2, Users, CheckCircle2, TrendingUp, DollarSign, Calendar, 
   Layers, Plus, ExternalLink, ShieldCheck, Clock, FileText, ArrowRight, 
   X, AlertCircle, Edit3, Trash2, Check, Sliders, HardHat, Search, Download, HelpCircle, FileSpreadsheet, Lock,
-  MapPin, CloudSun, RefreshCw, LayoutGrid, Table, Eye
+  MapPin, CloudSun, RefreshCw, LayoutGrid, Table, Eye, PieChart as PieChartIcon
 } from 'lucide-react';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip as ReTooltip, Legend } from 'recharts';
 import { ProjectProfile, ProjectTask, Contractor, WorkforceReallocationRecommendation, ProjectRFI, ChangeOrder } from '../types';
 import { generateReallocationRecommendations } from '../services/WorkforceReallocationService';
 import { exportToCsv } from '../utils/exportUtils';
@@ -31,19 +32,19 @@ export function calculateProjectProgress(
   if (!projectTasks || projectTasks.length === 0) {
     return Math.round(fallbackProgress);
   }
-  // Milestone actual completion deliverables
-  const milestones = projectTasks.filter(
-    t => (t as any).type === 'milestone' || t.category === 'MILESTONE' || ((t as any).duration !== undefined && (t as any).duration === 0)
-  );
-  const items = milestones.length > 0 ? milestones : projectTasks;
-  const sumProgress = items.reduce((sum, item) => {
-    let p = item.progress ?? 0;
-    if (p > 0 && p <= 1) {
-      p = p * 100;
+  // Standard CPM Duration-Weighted Physical Progress
+  const totalDuration = projectTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
+  const weightedProgress = projectTasks.reduce((acc, curr) => {
+    let p = 0;
+    if (curr.status === 'COMPLETED' || (typeof curr.progress === 'number' && curr.progress >= 1.0)) {
+      p = 100;
+    } else {
+      const raw = typeof curr.progress === 'number' ? curr.progress : 0;
+      p = raw > 1.0 ? raw : raw * 100;
     }
-    return sum + p;
+    return acc + (p * Math.max(1, curr.duration || 1));
   }, 0);
-  return Math.round(sumProgress / items.length);
+  return totalDuration > 0 ? Math.round(weightedProgress / totalDuration) : 0;
 }
 
 export function getEffectiveProjectStatus(
@@ -64,6 +65,7 @@ interface ProjectProfileHubProps {
   changeOrders?: ChangeOrder[];
   userRole?: string;
   isAdmin?: boolean;
+  loading?: boolean;
   onSelectProject?: (project: ProjectProfile) => void;
   onUpdateProjectProgress?: (projectId: string, progress: number) => void;
   onCreateProject?: (project: Partial<ProjectProfile>) => Promise<void> | void;
@@ -79,10 +81,14 @@ export default function ProjectProfileHub({
   changeOrders = [],
   userRole = 'Admin',
   isAdmin = true,
+  loading = false,
   onCreateProject,
   onUpdateProject,
   onDeleteProject
 }: ProjectProfileHubProps) {
+  // Only show loading if there is zero data AND it's an initial cold boot
+  const isInitialColdLoad = Boolean(loading && projects.length === 0);
+
   // Local state initialized strictly from live database projects
   const [localProjects, setLocalProjects] = useState<ProjectProfile[]>(projects || []);
 
@@ -195,10 +201,19 @@ export default function ProjectProfileHub({
 
   const synchronizedProjects = React.useMemo(() => {
     return localProjects.map(p => {
-      const computedProg = calculateProjectProgress(p.id, tasks, p.progressPercentage);
+      const rawFallback = 
+        p.cpmProgress !== undefined && p.cpmProgress !== null ? p.cpmProgress :
+        p.overallProgress !== undefined && p.overallProgress !== null ? p.overallProgress :
+        p.progress !== undefined && p.progress !== null ? p.progress :
+        p.progressPercentage;
+
+      const computedProg = calculateProjectProgress(p.id, tasks, Number(rawFallback || 0));
       const computedStatus = getEffectiveProjectStatus(p.status, computedProg);
       return {
         ...p,
+        cpmProgress: computedProg,
+        overallProgress: computedProg,
+        progress: computedProg,
         progressPercentage: computedProg,
         status: computedStatus
       };
@@ -301,7 +316,12 @@ export default function ProjectProfileHub({
     }
     setFormBudget(p.budget);
     setFormCollected(p.fundsCollected);
-    const computedProg = calculateProjectProgress(p.id, tasks, p.progressPercentage);
+    const rawFallback = 
+      p.cpmProgress !== undefined && p.cpmProgress !== null ? p.cpmProgress :
+      p.overallProgress !== undefined && p.overallProgress !== null ? p.overallProgress :
+      p.progress !== undefined && p.progress !== null ? p.progress :
+      p.progressPercentage;
+    const computedProg = calculateProjectProgress(p.id, tasks, Number(rawFallback || 0));
     setFormProgress(computedProg);
     setFormStatus(getEffectiveProjectStatus(p.status, computedProg));
     setFormStartDate(p.startDate);
@@ -386,7 +406,7 @@ export default function ProjectProfileHub({
       longitude: finalLon,
       budget: Number(formBudget) || 0,
       fundsCollected: 0,
-      progressPercentage: Number(formProgress) || 0,
+      progressPercentage: 0,
       status: (formStatus || 'PLANNING') as ProjectProfile['status'],
       targetHandoverDate: formEndDate,
       startDate: formStartDate,
@@ -445,11 +465,12 @@ export default function ProjectProfileHub({
       longitude: finalLon,
       budget: Number(formBudget),
       fundsCollected: selectedProject.fundsCollected ?? Number(formCollected) ?? 0,
-      progressPercentage: Number(formProgress),
+      progressPercentage: calculateProjectProgress(selectedProject.id, tasks, selectedProject.progressPercentage),
       // Auto-advance status: if progress > 0 and status is still PLANNING, bump to IN_PROGRESS
       status: (() => {
+        const currentCpmProg = calculateProjectProgress(selectedProject.id, tasks, selectedProject.progressPercentage);
         const rawStatus = (formStatus || selectedProject.status || 'PLANNING') as ProjectProfile['status'];
-        if (Number(formProgress) > 0 && rawStatus === 'PLANNING') return 'IN_PROGRESS' as ProjectProfile['status'];
+        if (currentCpmProg > 0 && rawStatus === 'PLANNING') return 'IN_PROGRESS' as ProjectProfile['status'];
         return rawStatus;
       })(),
       targetHandoverDate: formEndDate,
@@ -489,20 +510,6 @@ export default function ProjectProfileHub({
     } else {
       fetch(`/api/projects/${id}`, { method: 'DELETE' }).catch(console.error);
     }
-  };
-
-  const handleQuickProgressUpdate = async (id: string, newProgress: number) => {
-    const clamped = Math.max(0, Math.min(100, newProgress));
-    setLocalProjects(prev => prev.map(p => p.id === id ? { ...p, progressPercentage: clamped } : p));
-    if (selectedProject?.id === id) {
-      setSelectedProject(prev => prev ? { ...prev, progressPercentage: clamped } : null);
-    }
-
-    fetch(`/api/projects/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ progressPercentage: clamped })
-    }).catch(console.error);
   };
 
   return (
@@ -622,7 +629,7 @@ export default function ProjectProfileHub({
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Collected</span>
             <TrendingUp className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-xl font-bold text-emerald-400 mt-1 font-mono">
+          <div className="text-xl font-bold text-white mt-1 font-mono">
             ₱{totalFundsCollected.toLocaleString()}
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
@@ -633,20 +640,20 @@ export default function ProjectProfileHub({
         <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Avg Progress</span>
-            <CheckCircle2 className="w-4 h-4 text-blue-400" />
+            <CheckCircle2 className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-xl font-bold text-blue-400 mt-1 font-mono">
+          <div className="text-xl font-bold text-white mt-1 font-mono">
             {avgPortfolioProgress}%
           </div>
           <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2 overflow-hidden">
-            <div className="bg-blue-500 h-full rounded-full" style={{ width: `${avgPortfolioProgress}%` }} />
+            <div className="bg-amber-500 h-full rounded-full" style={{ width: `${avgPortfolioProgress}%` }} />
           </div>
         </div>
 
         <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Field Labor</span>
-            <Users className="w-4 h-4 text-purple-400" />
+            <Users className="w-4 h-4 text-teal-400" />
           </div>
           <div className="text-xl font-bold text-white mt-1 font-mono">
             {totalSiteManpower} Artisans
@@ -661,7 +668,7 @@ export default function ProjectProfileHub({
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Open RFIs</span>
             <HelpCircle className="w-4 h-4 text-cyan-400" />
           </div>
-          <div className="text-xl font-bold text-cyan-400 mt-1 font-mono">
+          <div className="text-xl font-bold text-white mt-1 font-mono">
             {totalOpenRfis} Inquiries
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
@@ -672,19 +679,50 @@ export default function ProjectProfileHub({
         <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Pending COs</span>
-            <FileSpreadsheet className="w-4 h-4 text-amber-400" />
+            <FileSpreadsheet className="w-4 h-4 text-indigo-400" />
           </div>
-          <div className="text-xl font-bold text-amber-300 mt-1 font-mono">
+          <div className="text-xl font-bold text-white mt-1 font-mono">
             {pendingChangeOrders.length} Orders
           </div>
-          <div className="text-[11px] text-amber-400/80 mt-1 font-mono">
+          <div className="text-[11px] text-slate-400 mt-1 font-mono">
             ₱{totalPendingCOValue.toLocaleString()} Under Review
           </div>
         </div>
       </div>
 
-      {/* Projects Table, Cards, or Empty State */}
-      {filteredProjects.length === 0 ? (
+      {/* Projects Table, Cards, Cold Load Inline Spinner, or Empty State */}
+      {isInitialColdLoad ? (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-xs">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="border-b border-slate-800 bg-slate-950/70 text-slate-400 font-mono text-[11px] uppercase tracking-wider">
+                  <th className="py-3 px-4">Code / Project</th>
+                  <th className="py-3 px-3">Location & Lead PM</th>
+                  <th className="py-3 px-3">Status</th>
+                  <th className="py-3 px-3">Progress</th>
+                  <th className="py-3 px-3">Budget & Collected</th>
+                  <th className="py-3 px-3">Target Handover</th>
+                  <th className="py-3 px-3">Signals & Crew</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td colSpan={8} className="py-16 text-center text-slate-400">
+                    <div className="flex flex-col items-center justify-center gap-2.5">
+                      <div className="w-5 h-5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+                      <span className="text-xs font-mono text-slate-400 tracking-wide">
+                        Synchronizing commercial sites & fit-out projects...
+                      </span>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : filteredProjects.length === 0 ? (
         <div className="bg-slate-900/40 border border-slate-800/80 rounded-2xl p-12 text-center">
           <Building2 className="w-12 h-12 text-slate-600 mx-auto mb-3" />
           <h3 className="text-lg font-bold text-white mb-1">No Projects Found</h3>
@@ -725,6 +763,21 @@ export default function ProjectProfileHub({
                   const pCOs = changeOrders.filter(co => co.projectId === project.id || (co.projectName && co.projectName.toLowerCase() === project.name.toLowerCase()));
                   const pendingCOs = pCOs.filter(co => co.status === 'PENDING');
 
+                  // 1. Resolve true progress: check cpmProgress, overallProgress, and progress
+                  const rawProgress = 
+                    project.cpmProgress !== undefined && project.cpmProgress !== null ? project.cpmProgress :
+                    project.overallProgress !== undefined && project.overallProgress !== null ? project.overallProgress :
+                    project.progress !== undefined && project.progress !== null ? project.progress :
+                    project.progressPercentage || 0;
+
+                  const displayProgress = Math.round(Number(rawProgress));
+
+                  // 2. Resolve status: if progress > 0 and status is PLANNING, display active execution
+                  const displayStatus: string = 
+                    displayProgress > 0 && (project.status === 'PLANNING' || !project.status)
+                      ? 'IN_PROGRESS'
+                      : project.status || 'PLANNING';
+
                   return (
                     <tr 
                       key={project.id}
@@ -756,27 +809,48 @@ export default function ProjectProfileHub({
                           <span className="truncate">{project.assignedProjectManagerName ? project.assignedProjectManagerName.split('(')[0].trim() : 'Unassigned'}</span>
                         </div>
                       </td>
-                      <td className="py-3 px-3">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold border inline-block whitespace-nowrap ${
-                          project.status === 'COMPLETED' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800' :
-                          project.status === 'PUNCHLIST_QA' ? 'bg-purple-950/80 text-purple-300 border-purple-800' :
-                          project.status === 'PLANNING' ? 'bg-blue-950/80 text-blue-300 border-blue-800' :
-                          'bg-amber-950/80 text-amber-300 border-amber-800'
-                        }`}>
-                          {project.status.replace('_', ' ')}
+
+                      {/* STATUS BADGE */}
+                      <td className="px-4 py-3">
+                        <span
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide uppercase ${
+                            displayStatus === 'IN_PROGRESS' || displayStatus === 'EXECUTION'
+                              ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                              : displayStatus === 'COMPLETED'
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-slate-800 text-slate-400 border border-slate-700'
+                          }`}
+                        >
+                          {displayStatus === 'IN_PROGRESS' ? 'IN PROGRESS' : displayStatus.replace('_', ' ')}
                         </span>
                       </td>
-                      <td className="py-3 px-3 min-w-[110px]">
-                        <div className="flex items-center justify-between text-[11px] font-mono mb-1">
-                          <span className="text-white font-bold">{project.progressPercentage}%</span>
-                        </div>
-                        <div className="w-full bg-slate-950 rounded-full h-1.5 overflow-hidden border border-slate-800">
-                          <div
-                            className="bg-gradient-to-r from-amber-500 to-amber-400 h-full rounded-full transition-all"
-                            style={{ width: `${project.progressPercentage}%` }}
-                          />
+
+                      {/* PROGRESS COLUMN */}
+                      <td className="px-4 py-3 min-w-[120px]">
+                        <div className="flex flex-col gap-1 min-w-[120px]">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="font-semibold text-slate-200">{displayProgress}%</span>
+                            {displayProgress > 0 && (
+                              <span className="text-[10px] text-cyan-400 font-mono flex items-center gap-0.5">
+                                ⚡ CPM Auto
+                              </span>
+                            )}
+                          </div>
+                          <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                            <div
+                              className={`h-full rounded-full transition-all duration-300 ${
+                                displayProgress >= 100
+                                  ? 'bg-emerald-500'
+                                  : displayProgress > 0
+                                  ? 'bg-gradient-to-r from-cyan-500 to-blue-500'
+                                  : 'bg-slate-700'
+                              }`}
+                              style={{ width: `${Math.min(Math.max(displayProgress, 0), 100)}%` }}
+                            />
+                          </div>
                         </div>
                       </td>
+
                       <td className="py-3 px-3">
                         <div className="font-mono text-white font-bold text-[11px]">
                           ₱{project.budget.toLocaleString()}
@@ -809,7 +883,7 @@ export default function ProjectProfileHub({
                               Private
                             </span>
                           )}
-                          {(project.progressPercentage >= 90 || project.status === 'HANDED_OVER' || project.status === 'COMPLETED') && (
+                          {(displayProgress >= 90 || displayStatus === 'HANDED_OVER' || displayStatus === 'COMPLETED') && (
                             <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-indigo-950/80 text-indigo-300 border border-indigo-800">
                               Surplus
                             </span>
@@ -818,7 +892,7 @@ export default function ProjectProfileHub({
                       </td>
                       <td className="py-3 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center justify-end gap-1">
-                          {(project.progressPercentage >= 90 || project.status === 'HANDED_OVER' || project.status === 'COMPLETED') && (
+                          {(displayProgress >= 90 || displayStatus === 'HANDED_OVER' || displayStatus === 'COMPLETED') && (
                             <button
                               onClick={() => openReallocationModal(project)}
                               className="p-1.5 bg-indigo-950/90 hover:bg-indigo-900 border border-indigo-700 text-indigo-300 rounded-lg transition cursor-pointer"
@@ -873,6 +947,21 @@ export default function ProjectProfileHub({
             const pCOs = changeOrders.filter(co => co.projectId === project.id || (co.projectName && co.projectName.toLowerCase() === project.name.toLowerCase()));
             const pendingCOs = pCOs.filter(co => co.status === 'PENDING');
 
+            // 1. Resolve true progress: check cpmProgress, overallProgress, and progress
+            const rawProgress = 
+              project.cpmProgress !== undefined && project.cpmProgress !== null ? project.cpmProgress :
+              project.overallProgress !== undefined && project.overallProgress !== null ? project.overallProgress :
+              project.progress !== undefined && project.progress !== null ? project.progress :
+              project.progressPercentage || 0;
+
+            const displayProgress = Math.round(Number(rawProgress));
+
+            // 2. Resolve status: if progress > 0 and status is PLANNING, display active execution
+            const displayStatus: string = 
+              displayProgress > 0 && (project.status === 'PLANNING' || !project.status)
+                ? 'IN_PROGRESS'
+                : project.status || 'PLANNING';
+
             return (
               <div
                 key={project.id}
@@ -885,12 +974,13 @@ export default function ProjectProfileHub({
                         {project.id}
                       </span>
                       <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${
-                        project.status === 'COMPLETED' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800' :
-                        project.status === 'PUNCHLIST_QA' ? 'bg-purple-950/80 text-purple-300 border-purple-800' :
-                        project.status === 'PLANNING' ? 'bg-blue-950/80 text-blue-300 border-blue-800' :
+                        displayStatus === 'COMPLETED' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800' :
+                        displayStatus === 'PUNCHLIST_QA' ? 'bg-purple-950/80 text-purple-300 border-purple-800' :
+                        displayStatus === 'IN_PROGRESS' || displayStatus === 'EXECUTION' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' :
+                        displayStatus === 'PLANNING' ? 'bg-blue-950/80 text-blue-300 border-blue-800' :
                         'bg-amber-950/80 text-amber-300 border-amber-800'
                       }`}>
-                        {project.status.replace('_', ' ')}
+                        {displayStatus === 'IN_PROGRESS' ? 'IN PROGRESS' : displayStatus.replace('_', ' ')}
                       </span>
                       {openRfis.length > 0 && (
                         <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800 font-semibold flex items-center gap-1">
@@ -907,7 +997,7 @@ export default function ProjectProfileHub({
                     </div>
 
                     <div className="flex items-center gap-1">
-                      {(project.progressPercentage >= 90 || project.status === 'HANDED_OVER' || project.status === 'COMPLETED') && (
+                      {(displayProgress >= 90 || displayStatus === 'HANDED_OVER' || displayStatus === 'COMPLETED') && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -964,12 +1054,25 @@ export default function ProjectProfileHub({
                   <div className="mt-4 space-y-1">
                     <div className="flex justify-between items-center text-xs font-mono">
                       <span className="text-slate-400">Progress</span>
-                      <span className="text-amber-400 font-bold">{project.progressPercentage}%</span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-slate-200 font-bold">{displayProgress}%</span>
+                        {displayProgress > 0 && (
+                          <span className="text-[10px] text-cyan-400 font-mono flex items-center gap-0.5">
+                            ⚡ CPM Auto
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
                       <div
-                        className="bg-amber-500 h-full rounded-full transition-all"
-                        style={{ width: `${project.progressPercentage}%` }}
+                        className={`h-full rounded-full transition-all duration-300 ${
+                          displayProgress >= 100
+                            ? 'bg-emerald-500'
+                            : displayProgress > 0
+                            ? 'bg-gradient-to-r from-cyan-500 to-blue-500'
+                            : 'bg-slate-700'
+                        }`}
+                        style={{ width: `${Math.min(Math.max(displayProgress, 0), 100)}%` }}
                       />
                     </div>
                   </div>
@@ -1228,10 +1331,10 @@ export default function ProjectProfileHub({
                         <div className="bg-slate-950 p-4 rounded-xl border border-slate-800">
                           <span className="text-xs text-slate-400 font-mono uppercase">Disbursed (Paid)</span>
                           <div className="text-xl font-bold text-sky-400 font-mono mt-1">
-                            ₱{(selectedProject.paidExpenses ?? selectedProject.totalExpenses ?? 0).toLocaleString()}
+                            ₱{(selectedProject.paidExpenses ?? (Number(selectedProject.paidLaborExpenses || 0) + Number(selectedProject.paidSubcontractorExpenses || 0))).toLocaleString()}
                           </div>
                           <span className="text-[10px] text-sky-500/80">
-                            Labor: ₱{(selectedProject.paidLaborExpenses ?? selectedProject.laborExpenses ?? 0).toLocaleString()} | AP: ₱{(selectedProject.paidSubcontractorExpenses ?? selectedProject.subcontractorExpenses ?? 0).toLocaleString()}
+                            Labor: ₱{(selectedProject.paidLaborExpenses ?? 0).toLocaleString()} | AP: ₱{(selectedProject.paidSubcontractorExpenses ?? 0).toLocaleString()}
                           </span>
                           {(selectedProject.approvedExpenses ?? 0) > 0 && (
                             <span className="text-[10px] text-amber-400/80 block mt-0.5 font-mono">
@@ -1240,6 +1343,116 @@ export default function ProjectProfileHub({
                           )}
                         </div>
                       </div>
+
+                      {/* Visual Cost Structure: In-House Labor vs Subcontractor Payables */}
+                      {(() => {
+                        const laborCost = Number(selectedProject.paidLaborExpenses ?? 0);
+                        const subconCost = Number(selectedProject.paidSubcontractorExpenses ?? 0);
+                        const totalPaidDisbursements = Number(selectedProject.paidExpenses ?? (laborCost + subconCost));
+                        const otherOrMaterialsCost = Math.max(0, totalPaidDisbursements - (laborCost + subconCost));
+                        const remainingBalance = Math.max(0, (selectedProject.budget || 0) - totalPaidDisbursements);
+
+                        const costChartData = totalPaidDisbursements > 0 ? [
+                          ...(laborCost > 0 ? [{ name: 'In-House Labor (Payroll)', value: laborCost, color: '#38bdf8' }] : []),
+                          ...(subconCost > 0 ? [{ name: 'Subcontractor (AP)', value: subconCost, color: '#a855f7' }] : []),
+                          ...(otherOrMaterialsCost > 0 ? [{ name: 'Materials & Procurement', value: otherOrMaterialsCost, color: '#f59e0b' }] : [])
+                        ] : [
+                          { name: 'Uncommitted Budget', value: Math.max(1, selectedProject.budget || 1), color: '#334155' }
+                        ];
+
+                        return (
+                          <div className="mt-4 bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-4">
+                            <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
+                              <div className="flex items-center gap-2">
+                                <PieChartIcon className="w-4 h-4 text-sky-400" />
+                                <h4 className="text-xs font-semibold text-white tracking-tight">Project Cost Composition: Labor Payroll vs. Subcontractor Payables</h4>
+                              </div>
+                              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                                Real-Time Disbursal Flow
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                              {/* Recharts Donut Pie */}
+                              <div className="md:col-span-5 h-48 flex items-center justify-center">
+                                <ResponsiveContainer width="100%" height="100%">
+                                  <PieChart>
+                                    <Pie
+                                      data={costChartData}
+                                      dataKey="value"
+                                      nameKey="name"
+                                      cx="50%"
+                                      cy="50%"
+                                      innerRadius={45}
+                                      outerRadius={70}
+                                      paddingAngle={4}
+                                    >
+                                      {costChartData.map((entry, index) => (
+                                        <Cell key={`cell-${index}`} fill={entry.color} stroke="#0f172a" strokeWidth={2} />
+                                      ))}
+                                    </Pie>
+                                    <ReTooltip
+                                      formatter={(val: any) => [`₱${Number(val).toLocaleString()}`, 'Cost']}
+                                      contentStyle={{ backgroundColor: '#020617', borderColor: '#334155', borderRadius: '8px', fontSize: '11px' }}
+                                    />
+                                    <Legend
+                                      verticalAlign="bottom"
+                                      iconType="circle"
+                                      wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }}
+                                    />
+                                  </PieChart>
+                                </ResponsiveContainer>
+                              </div>
+
+                              {/* Breakdown Cards & Separation of Duties Explainers */}
+                              <div className="md:col-span-7 space-y-2.5">
+                                <div className="p-3 bg-sky-950/20 border border-sky-800/40 rounded-lg flex items-center justify-between">
+                                  <div className="space-y-0.5">
+                                    <div className="text-xs font-semibold text-sky-300 flex items-center gap-1.5">
+                                      <span className="w-2 h-2 rounded-full bg-sky-400"></span>
+                                      In-House Labor (Direct Payroll)
+                                    </div>
+                                    <p className="text-[10px] text-slate-400">Timekeeper verified muster roll • Daily rate &amp; OT wages</p>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-sm font-bold font-mono text-sky-400">
+                                      ₱{laborCost.toLocaleString()}
+                                    </div>
+                                    <span className="text-[10px] text-slate-500">
+                                      {totalPaidDisbursements > 0 ? `${Math.round((laborCost / totalPaidDisbursements) * 100)}% of spend` : '0%'}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="p-3 bg-purple-950/20 border border-purple-800/40 rounded-lg flex items-center justify-between">
+                                  <div className="space-y-0.5">
+                                    <div className="text-xs font-semibold text-purple-300 flex items-center gap-1.5">
+                                      <span className="w-2 h-2 rounded-full bg-purple-400"></span>
+                                      Subcontractor Trade Payables (AP)
+                                    </div>
+                                    <p className="text-[10px] text-slate-400">Outsourced specialty crews • Manpower audit &amp; milestone billings</p>
+                                  </div>
+                                  <div className="text-right">
+                                    <div className="text-sm font-bold font-mono text-purple-400">
+                                      ₱{subconCost.toLocaleString()}
+                                    </div>
+                                    <span className="text-[10px] text-slate-500">
+                                      {totalPaidDisbursements > 0 ? `${Math.round((subconCost / totalPaidDisbursements) * 100)}% of spend` : '0%'}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="p-2.5 bg-slate-900/60 border border-slate-800 rounded-lg flex items-center justify-between text-xs">
+                                  <span className="text-slate-400 font-mono text-[11px]">Uncommitted Budget Margin</span>
+                                  <span className="font-mono font-bold text-emerald-400">
+                                    ₱{remainingBalance.toLocaleString()} ({selectedProject.budget > 0 ? `${((remainingBalance / selectedProject.budget) * 100).toFixed(1)}%` : '100%'})
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>
@@ -1539,15 +1752,13 @@ export default function ProjectProfileHub({
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Initial Progress %</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={formProgress}
-                          onChange={(e) => setFormProgress(Number(e.target.value))}
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
-                        />
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Physical Progress</label>
+                        <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs flex items-center justify-between text-slate-300 font-mono">
+                          <span className="font-bold text-amber-400">0%</span>
+                          <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                            ⚡ Auto-Synced from Master CPM Gantt
+                          </span>
+                        </div>
                       </div>
                     </div>
 
@@ -1879,15 +2090,16 @@ export default function ProjectProfileHub({
                       </div>
 
                       <div>
-                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Progress %</label>
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={formProgress}
-                          onChange={(e) => setFormProgress(Number(e.target.value))}
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
-                        />
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-xs font-mono text-slate-400 uppercase">Physical Progress</label>
+                          <span className="text-[10px] text-amber-400/90 font-mono bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                            ⚡ Auto-Synced from Master CPM Gantt
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs flex items-center justify-between text-slate-300 font-mono">
+                          <span className="font-bold text-amber-400">{formProgress}% Complete</span>
+                          <span className="text-[10px] text-slate-500">Read-Only</span>
+                        </div>
                       </div>
                     </div>
 

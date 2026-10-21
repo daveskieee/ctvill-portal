@@ -142,7 +142,7 @@ financeRouter.post('/quotations/submit', async (req: Request, res: Response) => 
         actorRole: 'CLIENT',
         details: `Commercial fit-out quotation inquiry submitted: ${projectScope}. Inquirer: ${clientName} (${clientEmail}). Cost: ₱${Number(estimatedCost || 0).toLocaleString()}. Ref: ${quoteId}.`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
     broadcastChange('auditLogs');
     broadcastChange('quotations');
@@ -251,10 +251,10 @@ financeRouter.post('/quotations/:id/convert-to-project', requireRole(['ADMIN', '
     broadcastChange('projects');
     invalidateAllDataCache();
 
-    res.json({ 
-      success: true, 
-      projectId: newProjId, 
-      message: `Quotation converted to Commercial Project ${newProjId}!` 
+    res.json({
+      success: true,
+      projectId: newProjId,
+      message: `Quotation converted to Commercial Project ${newProjId}!`
     });
   } catch (error) {
     console.error('Error converting quotation to project:', error);
@@ -562,7 +562,7 @@ financeRouter.post('/payroll/disburse', requireRole(['FINANCE', 'ADMIN']), async
     broadcastChange('auditLogs');
     res.json({ success: true, message: 'Payroll disbursed successfully.' });
   } catch (error: any) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch(() => { });
     console.error('Error disbursing payroll:', error);
     res.status(500).json({ error: error?.message || 'Failed to disburse payroll' });
   } finally {
@@ -707,7 +707,7 @@ financeRouter.post('/payments/record', requireRole(['FINANCE', 'ADMIN']), async 
         actorRole: 'ADMIN',
         details: `Recorded payment of ₱${paymentAmount.toLocaleString()} via ${paymentMethod || 'Bank Transfer'} for ${clientUser.name}. ${reference ? `Ref: ${reference}` : ''}`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
     broadcastChange('clients');
     broadcastChange('auditLogs');
@@ -794,7 +794,7 @@ financeRouter.post('/payments/installment', requireRole(['FINANCE', 'ADMIN']), a
         actorRole: (req as any).user?.role || 'FINANCE',
         details: `Created invoice / progress installment of ₱${Number(amount).toLocaleString()} for ${user!.name} (Due: ${due.toISOString().split('T')[0]}).`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
     broadcastChange('clients');
     broadcastChange('auditLogs');
@@ -911,7 +911,7 @@ const formatToISODateString = (val: any): string | null => {
 };
 
 // GET /api/subcontractor-payables
-financeRouter.get('/subcontractor-payables', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
+financeRouter.get('/subcontractor-payables', requireRole(['FINANCE', 'ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     await ensureSubcontractorPayablesTable();
     const result = await pool.query(
@@ -1037,6 +1037,39 @@ financeRouter.patch('/subcontractor-payables/:id', requireRole(['FINANCE', 'ADMI
       paymentMethod, referenceNo, remarks
     } = req.body;
 
+    // Fetch current record to validate headcount and gating rules
+    const curRes = await pool.query('SELECT * FROM subcontractor_payables WHERE id = $1', [id]);
+    if (!curRes.rows || curRes.rows.length === 0) {
+      return res.status(404).json({ error: 'Subcontractor payable record not found' });
+    }
+    const cur = curRes.rows[0];
+
+    // Pipeline B Enforce: Cannot advance payable status to APPROVED or execute disbursement unless headcount audit status is MATCH ✓
+    if (status === 'APPROVED' || status === 'PAID') {
+      let isHeadcountMatch = false;
+      if (cur.audit_id) {
+        const auditRes = await pool.query('SELECT * FROM daily_manpower_audits WHERE id = $1 LIMIT 1', [cur.audit_id]);
+        if (auditRes.rows.length > 0) {
+          const audit = auditRes.rows[0];
+          const auditStatus = audit.verification_status || audit.verificationStatus;
+          if (auditStatus === 'VERIFIED_MATCH' || auditStatus === 'RESOLVED') {
+            isHeadcountMatch = true;
+          } else if (Number(audit.verified_headcount ?? audit.verifiedHeadcount) >= Number(audit.claimed_headcount ?? audit.claimedHeadcount)) {
+            isHeadcountMatch = true;
+          }
+        }
+      }
+      if (!isHeadcountMatch && Number(cur.verified_headcount || 0) >= Number(cur.claimed_headcount || 0) && Number(cur.claimed_headcount || 0) > 0) {
+        isHeadcountMatch = true;
+      }
+
+      if (!isHeadcountMatch) {
+        return res.status(400).json({
+          error: `Cannot advance payable to ${status}: Headcount audit status is not MATCH ✓ (Claimed: ${cur.claimed_headcount}, Verified: ${cur.verified_headcount}). Linked roll-call audit must be verified first.`
+        });
+      }
+    }
+
     const updates: string[] = [];
     const values: any[] = [];
     let idx = 1;
@@ -1055,10 +1088,13 @@ financeRouter.patch('/subcontractor-payables/:id', requireRole(['FINANCE', 'ADMI
 
       // Record in Process Audit Log on status transition
       try {
-        const curRes = await pool.query('SELECT * FROM subcontractor_payables WHERE id = $1', [id]);
-        const cur = curRes.rows[0];
         const payeeName = cur?.payee_contractor_name || 'Subcontractor';
         const project = cur?.project_site || 'Project Site';
+        const actorId = (req as any).user?.id || 'usr-finance';
+        const actorRole = (req as any).user?.role || 'FINANCE';
+        const actorName = (req as any).user?.name || 'Finance Officer';
+        const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
+        const nowIso = new Date().toISOString();
 
         if (status === 'PAID') {
           const finalAmount = disbursedAmount ?? cur?.disbursed_amount ?? cur?.approved_amount ?? cur?.billed_amount ?? 0;
@@ -1070,9 +1106,9 @@ financeRouter.patch('/subcontractor-payables/:id', requireRole(['FINANCE', 'ADMI
               entityType: 'SUBCONTRACTOR_PAYABLE',
               entityId: id,
               action: 'DISBURSEMENT_RELEASED',
-              actorName: (req as any).user?.name || 'Finance Officer',
-              actorRole: 'FINANCE',
-              details: `Subcontractor disbursement released to ${payeeName} (${project}). Amount: ₱${Number(finalAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} via ${method} (Ref: #${finalRef}). Linked Audit: ${cur?.audit_id || 'N/A'}.`,
+              actorName,
+              actorRole,
+              details: `Subcontractor disbursement released to ${payeeName} (${project}). Amount: ₱${Number(finalAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} via ${method} (Ref: #${finalRef}). Linked Audit: ${cur?.audit_id || 'N/A'}. [User: ${actorId}, Role: ${actorRole}, IP: ${clientIp}, Timestamp: ${nowIso}]`,
             }
           });
           broadcastChange('auditLogs');
@@ -1083,9 +1119,9 @@ financeRouter.patch('/subcontractor-payables/:id', requireRole(['FINANCE', 'ADMI
               entityType: 'SUBCONTRACTOR_PAYABLE',
               entityId: id,
               action: 'PAYABLE_APPROVED',
-              actorName: (req as any).user?.name || 'Finance Officer',
-              actorRole: 'FINANCE',
-              details: `Subcontractor payable invoice approved for ${payeeName} (${project}). Approved payout amount: ₱${Number(appAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Linked Audit: ${cur?.audit_id || 'N/A'}.`,
+              actorName,
+              actorRole,
+              details: `Subcontractor payable invoice approved for ${payeeName} (${project}). Approved payout amount: ₱${Number(appAmount).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}. Linked Audit: ${cur?.audit_id || 'N/A'}. Headcount verification: MATCH ✓. [User: ${actorId}, Role: ${actorRole}, IP: ${clientIp}, Timestamp: ${nowIso}]`,
             }
           });
           broadcastChange('auditLogs');
@@ -1095,15 +1131,15 @@ financeRouter.patch('/subcontractor-payables/:id', requireRole(['FINANCE', 'ADMI
               entityType: 'SUBCONTRACTOR_PAYABLE',
               entityId: id,
               action: 'PAYABLE_DISPUTED',
-              actorName: (req as any).user?.name || 'Finance Officer',
-              actorRole: 'FINANCE',
-              details: `Subcontractor payable invoice for ${payeeName} (${project}) flagged as DISPUTED. Audit verification discrepancy detected.`,
+              actorName,
+              actorRole,
+              details: `Subcontractor invoice for ${payeeName} flagged as DISPUTED. Reason: Headcount or invoice discrepancy. [User: ${actorId}, Role: ${actorRole}, IP: ${clientIp}, Timestamp: ${nowIso}]`,
             }
           });
           broadcastChange('auditLogs');
         }
-      } catch (auditErr: any) {
-        console.warn('Process audit log error for payable patch:', auditErr?.message);
+      } catch (logErr: any) {
+        console.warn('Process audit log error on payable status update:', logErr?.message);
       }
     }
 

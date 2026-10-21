@@ -6,6 +6,7 @@
 import { UserSession } from '../types';
 
 export const SESSION_STORAGE_KEY = 'xyz_pm_user_session';
+export const CTWLL_USER_SESSION_KEY = 'ctwll_user_session';
 export const LEGACY_SESSION_STORAGE_KEY = 'xyz_erp_user_session';
 
 // Security Timers
@@ -25,7 +26,7 @@ const CURRENT_ENVELOPE_VERSION = 2;
 
 /**
  * Retrieve validated session from sessionStorage or localStorage.
- * Automatically purges expired sessions, inactive sessions, or legacy untracked sessions.
+ * Synchronously restores session on initial mount to prevent guest flashing.
  */
 export function getStoredSession(): UserSession | null {
   if (typeof window === 'undefined') return null;
@@ -44,48 +45,50 @@ export function getStoredSession(): UserSession | null {
     if (rawSession) {
       const parsed = JSON.parse(rawSession);
       if (isValidEnvelope(parsed)) {
-        if (isExpired(parsed, now)) {
-          clearStoredSession();
-          return null;
+        if (!isExpired(parsed, now)) {
+          touchSessionActivity(parsed, false);
+          return parsed.session;
         }
-        // Update activity pulse
-        touchSessionActivity(parsed, false);
-        return parsed.session;
-      } else {
-        // Fallback for direct session in sessionStorage
-        const envelope = wrapSession(parsed, false);
-        sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(envelope));
-        return envelope.session;
+      } else if (parsed && typeof parsed === 'object') {
+        const sessionObj = parsed.session || parsed;
+        if (sessionObj.id || sessionObj.role) return sessionObj;
       }
     }
-  } catch (err) {
-    sessionStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    /* silent */
   }
 
-  // 2. Check persistent storage (localStorage) — ONLY valid if explicitly opted-in to rememberMe
+  // 2. Check ctwll_user_session in localStorage for instant sync hydration
+  try {
+    const rawCtwll = localStorage.getItem(CTWLL_USER_SESSION_KEY);
+    if (rawCtwll) {
+      const parsed = JSON.parse(rawCtwll);
+      const sessionObj = parsed?.session || parsed;
+      if (sessionObj && (sessionObj.id || sessionObj.role || sessionObj.username)) {
+        return sessionObj;
+      }
+    }
+  } catch {
+    /* silent */
+  }
+
+  // 3. Check persistent storage (localStorage)
   try {
     const rawLocal = localStorage.getItem(SESSION_STORAGE_KEY);
     if (rawLocal) {
       const parsed = JSON.parse(rawLocal);
-      
-      // If this was an old legacy un-enveloped session, purge it immediately
-      // This eliminates the vulnerability where old test logins persist indefinitely.
-      if (!isValidEnvelope(parsed) || !parsed.rememberMe) {
-        localStorage.removeItem(SESSION_STORAGE_KEY);
-        return null;
+      if (isValidEnvelope(parsed)) {
+        if (!isExpired(parsed, now)) {
+          touchSessionActivity(parsed, true);
+          return parsed.session;
+        }
+      } else if (parsed && typeof parsed === 'object') {
+        const sessionObj = parsed.session || parsed;
+        if (sessionObj.id || sessionObj.role) return sessionObj;
       }
-
-      if (isExpired(parsed, now)) {
-        localStorage.removeItem(SESSION_STORAGE_KEY);
-        return null;
-      }
-
-      // Valid Remember Me session: refresh lastActivity pulse
-      touchSessionActivity(parsed, true);
-      return parsed.session;
     }
-  } catch (err) {
-    localStorage.removeItem(SESSION_STORAGE_KEY);
+  } catch {
+    /* silent */
   }
 
   return null;
@@ -93,6 +96,7 @@ export function getStoredSession(): UserSession | null {
 
 /**
  * Persist user session with cryptographic-like envelope metadata (TTL + Inactivity pulse).
+ * Persists to both localStorage and sessionStorage to eliminate refresh race conditions.
  */
 export function saveStoredSession(session: UserSession): void {
   if (typeof window === 'undefined') return;
@@ -100,14 +104,13 @@ export function saveStoredSession(session: UserSession): void {
   const rememberMe = Boolean(session.rememberMe);
   const envelope = wrapSession(session, rememberMe);
   const serialized = JSON.stringify(envelope);
+  const rawSessionJson = JSON.stringify(session);
 
-  if (rememberMe) {
+  try {
+    localStorage.setItem(CTWLL_USER_SESSION_KEY, rawSessionJson);
     localStorage.setItem(SESSION_STORAGE_KEY, serialized);
-    sessionStorage.removeItem(SESSION_STORAGE_KEY);
-  } else {
     sessionStorage.setItem(SESSION_STORAGE_KEY, serialized);
-    localStorage.removeItem(SESSION_STORAGE_KEY);
-  }
+  } catch { /* silent */ }
 }
 
 /**
@@ -154,6 +157,7 @@ export function clearStoredSession(): void {
   if (typeof window === 'undefined') return;
   try {
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
+    sessionStorage.removeItem('ctvill_active_tab');
     localStorage.removeItem(SESSION_STORAGE_KEY);
     localStorage.removeItem(LEGACY_SESSION_STORAGE_KEY);
   } catch { /* silent */ }

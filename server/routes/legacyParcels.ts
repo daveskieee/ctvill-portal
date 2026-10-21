@@ -244,7 +244,48 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       prisma.changeOrder.findMany({ orderBy: { createdAt: 'desc' } }),
       pool.query('SELECT * FROM government_permits ORDER BY expiry_date ASC NULLS LAST, created_at DESC').catch(() => ({ rows: [] })),
       pool.query('SELECT * FROM schedule_events ORDER BY event_date ASC, start_time ASC').catch(() => ({ rows: [] })),
-      pool.query('SELECT * FROM commercial_projects ORDER BY created_at ASC').catch(() => ({ rows: [] })),
+      pool.query(`
+        SELECT 
+          p.*,
+          COALESCE(
+            (
+              SELECT ROUND(
+                SUM(
+                  (CASE 
+                    WHEN t.status = 'COMPLETED' OR t.progress >= 1.0 THEN 100.0 
+                    WHEN t.progress > 0 AND t.progress <= 1.0 THEN t.progress * 100.0 
+                    ELSE COALESCE(t.progress, 0.0) 
+                  END) * GREATEST(COALESCE(t.duration, 1), 1)
+                ) 
+                / NULLIF(SUM(GREATEST(COALESCE(t.duration, 1), 1)), 0)
+              )
+              FROM project_tasks t 
+              WHERE t."projectId" = p.id
+            ), 
+            p.progress_percentage, 
+            0
+          ) AS progress,
+          COALESCE(
+            (
+              SELECT ROUND(
+                SUM(
+                  (CASE 
+                    WHEN t.status = 'COMPLETED' OR t.progress >= 1.0 THEN 100.0 
+                    WHEN t.progress > 0 AND t.progress <= 1.0 THEN t.progress * 100.0 
+                    ELSE COALESCE(t.progress, 0.0) 
+                  END) * GREATEST(COALESCE(t.duration, 1), 1)
+                ) 
+                / NULLIF(SUM(GREATEST(COALESCE(t.duration, 1), 1)), 0)
+              )
+              FROM project_tasks t 
+              WHERE t."projectId" = p.id
+            ), 
+            p.progress_percentage, 
+            0
+          ) AS "cpmProgress"
+        FROM commercial_projects p 
+        ORDER BY p.created_at ASC
+      `).catch(() => ({ rows: [] })),
       pool.query('SELECT * FROM extended_payroll ORDER BY created_at DESC').catch(() => ({ rows: [] })),
       pool.query('SELECT * FROM labor_allocations ORDER BY sector_name ASC').catch(() => ({ rows: [] })),
       pool.query('SELECT * FROM ai_manpower_recommendations WHERE dismissed = false ORDER BY created_at DESC').catch(() => ({ rows: [] })),
@@ -323,30 +364,37 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
     });
 
     // Project Authorization & Scoping
-    const allProjects = (dbProjectsRes.rows || []).map((p: any) => ({
-      id: p.id,
-      name: p.name,
-      clientName: p.client_name || '',
-      description: p.description || '',
-      location: p.location || '',
-      budget: Number(p.budget || 0),
-      fundsCollected: Number(p.funds_collected || 0),
-      progressPercentage: Number(p.progress_percentage || 0),
-      status: p.status || 'IN_PROGRESS',
-      targetHandoverDate: p.target_handover_date ? (p.target_handover_date instanceof Date ? p.target_handover_date.toISOString().split('T')[0] : String(p.target_handover_date).split('T')[0]) : '2026-12-31',
-      startDate: p.start_date ? (p.start_date instanceof Date ? p.start_date.toISOString().split('T')[0] : String(p.start_date).split('T')[0]) : '2026-01-01',
-      assignedWorkersCount: Number(p.assigned_workers_count || 0),
-      assignedContractorIds: Array.isArray(p.assigned_contractor_ids) ? p.assigned_contractor_ids : [],
-      tasksCount: Number(p.tasks_count || 0),
-      milestonesCount: Number(p.milestones_count || 0),
-      isPrivateAccounting: Boolean(p.is_private_accounting),
-      assignedProjectManagerId: p.assigned_project_manager_id || '',
-      assignedProjectManagerName: p.assigned_project_manager_name || '',
-      latitude: p.latitude !== null && p.latitude !== undefined ? Number(p.latitude) : undefined,
-      longitude: p.longitude !== null && p.longitude !== undefined ? Number(p.longitude) : undefined,
-      weatherSuspended: Boolean(p.weather_suspended),
-      createdAt: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at)) : new Date().toISOString()
-    }));
+    const allProjects = (dbProjectsRes.rows || []).map((p: any) => {
+      const computedProg = Number(p.cpmProgress ?? p.progress ?? p.progress_percentage ?? 0);
+      const computedStatus = (computedProg > 0 && (p.status === 'PLANNING' || !p.status)) ? 'IN_PROGRESS' : (p.status || 'IN_PROGRESS');
+      return {
+        id: p.id,
+        name: p.name,
+        clientName: p.client_name || '',
+        description: p.description || '',
+        location: p.location || '',
+        budget: Number(p.budget || 0),
+        fundsCollected: Number(p.funds_collected || 0),
+        progressPercentage: computedProg,
+        cpmProgress: computedProg,
+        overallProgress: computedProg,
+        progress: computedProg,
+        status: computedStatus,
+        targetHandoverDate: p.target_handover_date ? (p.target_handover_date instanceof Date ? p.target_handover_date.toISOString().split('T')[0] : String(p.target_handover_date).split('T')[0]) : '2026-12-31',
+        startDate: p.start_date ? (p.start_date instanceof Date ? p.start_date.toISOString().split('T')[0] : String(p.start_date).split('T')[0]) : '2026-01-01',
+        assignedWorkersCount: Number(p.assigned_workers_count || 0),
+        assignedContractorIds: Array.isArray(p.assigned_contractor_ids) ? p.assigned_contractor_ids : [],
+        tasksCount: Number(p.tasks_count || 0),
+        milestonesCount: Number(p.milestones_count || 0),
+        isPrivateAccounting: Boolean(p.is_private_accounting),
+        assignedProjectManagerId: p.assigned_project_manager_id || '',
+        assignedProjectManagerName: p.assigned_project_manager_name || '',
+        latitude: p.latitude !== null && p.latitude !== undefined ? Number(p.latitude) : undefined,
+        longitude: p.longitude !== null && p.longitude !== undefined ? Number(p.longitude) : undefined,
+        weatherSuspended: Boolean(p.weather_suspended),
+        createdAt: p.created_at ? (p.created_at instanceof Date ? p.created_at.toISOString() : String(p.created_at)) : new Date().toISOString()
+      };
+    });
 
     const isAdmin = userRole === 'ADMIN';
     const isFinance = userRole === 'FINANCE';
@@ -413,6 +461,8 @@ legacyParcelsRouter.get('/all-data', async (req: Request, res: Response) => {
       assigneeRole: t.assigneeRole || t.assignedContractor?.roleTitle || '',
       priority: t.priority || 'MEDIUM',
       status: t.status || ((t.progress || 0) >= 1 ? 'COMPLETED' : (t.progress || 0) > 0 ? 'IN_PROGRESS' : 'TODO'),
+      progress: typeof t.progress === 'number' ? t.progress : 0,
+      duration: typeof t.duration === 'number' ? t.duration : (Number(t.duration) || 0),
       dueDate: t.dueDate ? t.dueDate.toISOString().split('T')[0] : (t.endDate ? t.endDate.toISOString().split('T')[0] : ''),
       startDate: t.startDate ? t.startDate.toISOString().split('T')[0] : '',
       estimatedHours: (t.duration || 1) * 8,

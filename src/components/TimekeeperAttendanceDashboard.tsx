@@ -77,18 +77,18 @@ export default function TimekeeperAttendanceDashboard({
     setIsLoading(true);
     setHasLoadedArtisans(false);
     try {
-      // 1. Fetch only ACTIVE workers for this project roll-call (try /api/attendance/roster first, fallback to /api/workers)
+      // 1. Fetch ACTIVE workers for this project roll-call (try /api/attendance/roster first, fallback to /api/workers)
       let rawWorkersData: SiteWorker[] = [];
-      const rosterRes = await fetch(`/api/attendance/roster?projectId=${selectedProjectId}&status=Active&onlyArtisans=true`);
+      const rosterRes = await fetch(`/api/attendance/roster?projectId=${selectedProjectId}&status=Active`);
       if (rosterRes.ok) {
         rawWorkersData = await rosterRes.json();
       } else {
-        const workersRes = await fetch(`/api/workers?projectId=${selectedProjectId}&status=Active&onlyArtisans=true`);
+        const workersRes = await fetch(`/api/workers?projectId=${selectedProjectId}&status=Active`);
         if (workersRes.ok) rawWorkersData = await workersRes.json();
       }
 
-      // Filter strictly to individual field artisans (Artisan / In-House Labor / Direct Hire)
-      // Exclude Executive/Office staff, Trade Crews, Manpower Supply Agencies, and Outsourced Subcontractors
+      // Filter to assigned direct workers (Artisans, Field Engineers, Site Staff)
+      // Exclude only external outsourced subcontractor entities / manpower supply agencies
       const seenIds = new Set<string>();
       const seenNames = new Set<string>();
       const workersData: SiteWorker[] = [];
@@ -96,19 +96,9 @@ export default function TimekeeperAttendanceDashboard({
         if (!w || !w.id) continue;
         if (w.status && w.status.toLowerCase() !== 'active') continue;
 
-        // Exclude Executive/Office/Corporate personnel from daily labor roll-call
+        // Exclude external Subcontractor agencies and multi-headcount outsourced vendors
+        // (These entities bill through Contractor Progress Invoices based on audit headcounts, NOT internal payroll)
         if (
-          w.workforceClass === 'Corporate' ||
-          (w as any).workforce_class === 'Corporate'
-        ) {
-          continue;
-        }
-
-        // Exclude Subcontractor Trade Crews, Manpower Supply agencies, and Outsourced Partners
-        // These entities bill through Contractor Progress Invoices based on verified audit headcounts, NOT internal payroll
-        if (
-          w.workforceClass === 'Trade Crew' ||
-          (w as any).workforce_class === 'Trade Crew' ||
           w.workforceClass === 'Subcontractor' ||
           (w as any).workforce_class === 'Subcontractor' ||
           (w as any).employmentType === 'OUTSOURCED' ||
@@ -121,41 +111,11 @@ export default function TimekeeperAttendanceDashboard({
         const pos = (w.position || w.trade || '').toLowerCase();
         const comp = ((w as any).company || '').toLowerCase();
 
-        // Additional guard against crew providers or agency titles
+        // Guard against external agency suppliers
         if (
           normName.includes('manpower supply') ||
-          normName.includes('trade crew') ||
-          normName.includes('facilities maintenance') ||
-          normName.includes('subcontractor') ||
-          pos.includes('manpower supply') ||
-          pos.includes('trade crew') ||
-          pos.includes('subcontractor') ||
           comp.includes('manpower supply') ||
-          comp.includes('facilities maintenance')
-        ) {
-          continue;
-        }
-
-        if (
-          pos.includes('corporate') ||
-          pos.includes('office') ||
-          pos.includes('coo') ||
-          pos.includes('chief operating officer') ||
-          pos.includes('ceo') ||
-          pos.includes('chief executive') ||
-          pos.includes('director') ||
-          pos.includes('general manager') ||
-          pos.includes('president') ||
-          pos.includes('vice president') ||
-          pos.includes('vp') ||
-          pos.includes('admin') ||
-          pos.includes('administration') ||
-          pos.includes('finance') ||
-          pos.includes('human resource') ||
-          pos.includes('hr') ||
-          pos.includes('procurement') ||
-          pos.includes('accountant') ||
-          pos.includes('project manager')
+          (pos.includes('subcontractor') && !pos.includes('coordinator'))
         ) {
           continue;
         }
@@ -165,7 +125,7 @@ export default function TimekeeperAttendanceDashboard({
           if (normName) seenNames.add(normName);
           workersData.push({
             ...w,
-            workforceClass: 'Artisan' // Guaranteed individual in-house artisan
+            workforceClass: w.workforceClass || 'Artisan'
           });
         }
       }
@@ -323,6 +283,8 @@ export default function TimekeeperAttendanceDashboard({
       setToastMessage({ 
         text: isOM 
           ? `Administrative attendance override logged successfully!`
+          : hasExistingLogs
+          ? `Daily attendance updated successfully for ${data.count} workers!`
           : `Daily attendance logged successfully for ${data.count} workers!`, 
         type: 'success' 
       });
@@ -370,6 +332,19 @@ export default function TimekeeperAttendanceDashboard({
     };
   }, [localAttendance, workers]);
 
+  const hasExistingLogs = existingLogs.length > 0;
+
+  const latestSubmissionTime = useMemo(() => {
+    if (!existingLogs || existingLogs.length === 0) return null;
+    let latestMs = 0;
+    for (const log of existingLogs) {
+      const ms = new Date((log as any).updatedAt || (log as any).updated_at || log.createdAt || (log as any).created_at || 0).getTime();
+      if (ms > latestMs) latestMs = ms;
+    }
+    if (!latestMs) return null;
+    return new Date(latestMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+  }, [existingLogs]);
+
   const activeProject = projects.find(p => p.id === selectedProjectId);
 
   return (
@@ -415,7 +390,7 @@ export default function TimekeeperAttendanceDashboard({
                     : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
                 }`}>
                   {isFinance
-                    ? 'AUDIT & READ-ONLY'
+                    ? 'AUDIT & READ-ONLY (FINANCE)'
                     : isDateLocked
                     ? 'LOCKED & FINALIZED'
                     : isTimekeeper
@@ -561,25 +536,37 @@ export default function TimekeeperAttendanceDashboard({
 
       {/* Summary KPI Cards for the Date */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-1">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
           <div className="text-[10px] text-slate-400 uppercase font-mono tracking-wider font-semibold">Total Assigned</div>
-          <div className="text-xl font-bold font-mono text-white">{stats.total} <span className="text-xs font-normal text-slate-500">workers</span></div>
+          <div className="text-xl font-bold font-mono text-white">{stats.total} <span className="text-xs font-normal text-slate-400">workers</span></div>
         </div>
-        <div className="bg-slate-900 border border-emerald-900/40 rounded-xl p-3 space-y-1">
-          <div className="text-[10px] text-emerald-400 uppercase font-mono tracking-wider font-semibold">Present (1.0 Day)</div>
-          <div className="text-xl font-bold font-mono text-emerald-300">{stats.present}</div>
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 uppercase font-mono tracking-wider font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+            <span>Present (1.0 Day)</span>
+          </div>
+          <div className="text-xl font-bold font-mono text-white">{stats.present}</div>
         </div>
-        <div className="bg-slate-900 border border-amber-900/40 rounded-xl p-3 space-y-1">
-          <div className="text-[10px] text-amber-400 uppercase font-mono tracking-wider font-semibold">Half-Day (0.5 Day)</div>
-          <div className="text-xl font-bold font-mono text-amber-300">{stats.halfDay}</div>
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 uppercase font-mono tracking-wider font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            <span>Half-Day (0.5 Day)</span>
+          </div>
+          <div className="text-xl font-bold font-mono text-white">{stats.halfDay}</div>
         </div>
-        <div className="bg-slate-900 border border-rose-900/40 rounded-xl p-3 space-y-1">
-          <div className="text-[10px] text-rose-400 uppercase font-mono tracking-wider font-semibold">Absent (0.0 Day)</div>
-          <div className="text-xl font-bold font-mono text-rose-300">{stats.absent}</div>
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 uppercase font-mono tracking-wider font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+            <span>Absent (0.0 Day)</span>
+          </div>
+          <div className="text-xl font-bold font-mono text-white">{stats.absent}</div>
         </div>
-        <div className="bg-slate-900 border border-blue-900/40 rounded-xl p-3 space-y-1">
-          <div className="text-[10px] text-blue-400 uppercase font-mono tracking-wider font-semibold">Total Overtime</div>
-          <div className="text-xl font-bold font-mono text-blue-300">{stats.totalOt.toFixed(1)} <span className="text-xs font-normal text-slate-500">hrs</span></div>
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 uppercase font-mono tracking-wider font-semibold">
+            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+            <span>Total Overtime</span>
+          </div>
+          <div className="text-xl font-bold font-mono text-white">{stats.totalOt.toFixed(1)} <span className="text-xs font-normal text-slate-400">hrs</span></div>
         </div>
       </div>
 
@@ -812,23 +799,35 @@ export default function TimekeeperAttendanceDashboard({
           </div>
 
           {!isDateLocked && !isFinance && (
-            <button
-              onClick={handleInitiateSubmit}
-              disabled={isSubmitting || workers.length === 0}
-              className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg shadow-xs flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
-            >
-              {isSubmitting ? (
-                <>
-                  <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
-                  <span>{isOM ? 'Processing Override...' : 'Saving Daily Roll-Call...'}</span>
-                </>
-              ) : (
-                <>
-                  <Check className="w-4 h-4" />
-                  <span>{isOM ? 'Save & Override Logs' : `Submit Daily Log for ${selectedDate}`}</span>
-                </>
+            <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+              {hasExistingLogs && latestSubmissionTime && (
+                <div className="flex items-center gap-1.5 text-[11px] text-amber-400 font-mono bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-lg shadow-xs">
+                  <Clock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <span>Last submitted at {latestSubmissionTime}</span>
+                </div>
               )}
-            </button>
+              <button
+                onClick={handleInitiateSubmit}
+                disabled={isSubmitting || workers.length === 0}
+                className="w-full sm:w-auto px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg shadow-xs flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:opacity-50"
+              >
+                {isSubmitting ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
+                    <span>{isOM ? 'Processing Override...' : (hasExistingLogs ? 'Updating Daily Roll-Call...' : 'Saving Daily Roll-Call...')}</span>
+                  </>
+                ) : (
+                  <>
+                    <Check className="w-4 h-4" />
+                    <span>
+                      {isOM
+                        ? (hasExistingLogs ? 'Update & Override Logs' : 'Save & Override Logs')
+                        : (hasExistingLogs ? `Update Log for ${selectedDate}` : `Submit Daily Log for ${selectedDate}`)}
+                    </span>
+                  </>
+                )}
+              </button>
+            </div>
           )}
         </div>
       </div>

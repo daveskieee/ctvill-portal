@@ -3,17 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Calendar as CalendarIcon, Clock, Users, MapPin, Plus, 
   ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, 
   Video, ShieldAlert, Tag, Filter, X, CalendarDays, Download,
-  Edit3, Trash2, Check
+  Edit3, Trash2, Check, RefreshCw, Layers
 } from 'lucide-react';
 import { ScheduleEvent, ScheduleEventType, ProjectProfile } from '../types';
 
 interface ProjectScheduleCalendarProps {
-  events: ScheduleEvent[];
+  events?: ScheduleEvent[];
   projects?: ProjectProfile[];
   onAddEvent?: (event: Partial<ScheduleEvent>) => Promise<void>;
   onUpdateEvent?: (eventId: string, updates: Partial<ScheduleEvent>) => Promise<void>;
@@ -31,6 +31,8 @@ export default function ProjectScheduleCalendar({
   const [selectedDateStr, setSelectedDateStr] = useState<string>(new Date().toISOString().split('T')[0]);
   const [filterType, setFilterType] = useState<string>('ALL');
   const [projectFilter, setProjectFilter] = useState<string>('ALL');
+  const [calendarEvents, setCalendarEvents] = useState<ScheduleEvent[]>(events);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   
   // Modals
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -60,6 +62,39 @@ export default function ProjectScheduleCalendar({
   const [editNotes, setEditNotes] = useState('');
   const [editStatus, setEditStatus] = useState<'SCHEDULED' | 'COMPLETED' | 'CANCELLED'>('SCHEDULED');
 
+  // Unified calendar events fetcher from backend
+  const fetchCalendarEvents = useCallback(async (selectedProject: string) => {
+    setIsLoading(true);
+    try {
+      const url = selectedProject && selectedProject !== 'ALL'
+        ? `/api/calendar/events?projectId=${encodeURIComponent(selectedProject)}`
+        : '/api/calendar/events';
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data)) {
+          setCalendarEvents(data);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch calendar events:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  // Fetch when projectFilter changes
+  useEffect(() => {
+    fetchCalendarEvents(projectFilter);
+  }, [projectFilter, fetchCalendarEvents]);
+
+  // Sync if parent events change and calendarEvents is empty
+  useEffect(() => {
+    if (events && events.length > 0 && calendarEvents.length === 0) {
+      setCalendarEvents(events);
+    }
+  }, [events]);
+
   // Month navigation
   const prevMonth = () => {
     setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1));
@@ -75,15 +110,33 @@ export default function ProjectScheduleCalendar({
   const firstDayIndex = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
 
+  const getEventDate = (e: ScheduleEvent): string => {
+    const d = e.date || e.eventDate || '';
+    return typeof d === 'string' ? d.split('T')[0] : '';
+  };
+
   // Filter events
-  const filteredEvents = events.filter(e => {
-    if (filterType !== 'ALL' && e.eventType !== filterType) return false;
-    if (projectFilter !== 'ALL' && !(e.projectName || '').toLowerCase().includes(projectFilter.toLowerCase())) return false;
+  const filteredEvents = calendarEvents.filter(e => {
+    const rawType = (e.type || e.eventType || '').toUpperCase();
+    if (filterType !== 'ALL') {
+      if (filterType === 'MEETING' && !rawType.includes('MEET')) return false;
+      if (filterType === 'INSPECTION' && !rawType.includes('INSPECT')) return false;
+      if (filterType === 'MILESTONE' && !rawType.includes('MILESTONE')) return false;
+      if (filterType === 'DEADLINE' && !rawType.includes('DEADLINE')) return false;
+    }
+    if (projectFilter !== 'ALL') {
+      const pName = (e.projectName || '').toLowerCase();
+      const pId = (e.projectId || '').toLowerCase();
+      const target = projectFilter.toLowerCase();
+      if (!pName.includes(target) && !target.includes(pName) && pId !== target) {
+        return false;
+      }
+    }
     return true;
   });
 
   // Events on selected date
-  const eventsOnSelectedDate = filteredEvents.filter(e => e.eventDate === selectedDateStr);
+  const eventsOnSelectedDate = filteredEvents.filter(e => getEventDate(e) === selectedDateStr);
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -96,6 +149,7 @@ export default function ProjectScheduleCalendar({
         projectName: newProject,
         eventType: newType,
         eventDate: newEventDate,
+        date: newEventDate,
         startTime: newStartTime,
         endTime: newEndTime,
         location: newLocation,
@@ -114,6 +168,7 @@ export default function ProjectScheduleCalendar({
         });
       }
 
+      await fetchCalendarEvents(projectFilter);
       setShowAddModal(false);
       resetAddForm();
     } catch (err) {
@@ -144,8 +199,10 @@ export default function ProjectScheduleCalendar({
     setEditingEvent(evt);
     setEditTitle(evt.title);
     setEditProject(evt.projectName || (projects && projects.length > 0 ? projects[0].name : ''));
-    setEditType(evt.eventType);
-    setEditEventDate(evt.eventDate);
+    const rawType = (evt.type || evt.eventType || 'MEETING').toUpperCase();
+    const resolvedType: ScheduleEventType = rawType.includes('INSPECT') ? 'INSPECTION' : rawType.includes('MILESTONE') ? 'MILESTONE' : rawType.includes('DEADLINE') ? 'DEADLINE' : 'MEETING';
+    setEditType(resolvedType);
+    setEditEventDate(getEventDate(evt));
     setEditStartTime(evt.startTime || '');
     setEditEndTime(evt.endTime || '');
     setEditLocation(evt.location || '');
@@ -165,6 +222,7 @@ export default function ProjectScheduleCalendar({
         projectName: editProject,
         eventType: editType,
         eventDate: editEventDate,
+        date: editEventDate,
         startTime: editStartTime,
         endTime: editEndTime,
         location: editLocation,
@@ -183,6 +241,7 @@ export default function ProjectScheduleCalendar({
         });
       }
 
+      await fetchCalendarEvents(projectFilter);
       setEditingEvent(null);
     } catch (err) {
       console.error('Failed to update schedule event:', err);
@@ -203,6 +262,7 @@ export default function ProjectScheduleCalendar({
           body: JSON.stringify({ status: newStatus })
         });
       }
+      await fetchCalendarEvents(projectFilter);
     } catch (err) {
       console.error('Failed to toggle status:', err);
     }
@@ -210,24 +270,30 @@ export default function ProjectScheduleCalendar({
 
   const handleDelete = async (id: string) => {
     if (!confirm('Are you sure you want to remove this scheduled event?')) return;
-    if (onDeleteEvent) {
-      await onDeleteEvent(id);
-    } else {
-      await fetch(`/api/schedule/${id}`, { method: 'DELETE' });
+    try {
+      if (onDeleteEvent) {
+        await onDeleteEvent(id);
+      } else {
+        await fetch(`/api/schedule/${id}`, { method: 'DELETE' });
+      }
+      await fetchCalendarEvents(projectFilter);
+    } catch (err) {
+      console.error('Failed to delete schedule event:', err);
     }
   };
 
   // Export Calendar Events to CSV
   const handleExportCSV = () => {
-    const headers = ['ID', 'Date', 'Start Time', 'End Time', 'Project', 'Title', 'Event Type', 'Location', 'Attendees', 'Status', 'Notes'];
+    const headers = ['ID', 'Date', 'Start Time', 'End Time', 'Project', 'Title', 'Type', 'Source', 'Location', 'Attendees', 'Status', 'Notes'];
     const rows = filteredEvents.map(e => [
       e.id,
-      e.eventDate,
+      getEventDate(e),
       e.startTime || '',
       e.endTime || '',
       `"${(e.projectName || '').replace(/"/g, '""')}"`,
       `"${e.title.replace(/"/g, '""')}"`,
-      e.eventType,
+      e.type || e.eventType || '',
+      `"${(e.source || 'Manual / Coordination').replace(/"/g, '""')}"`,
       `"${(e.location || '').replace(/"/g, '""')}"`,
       `"${(e.attendees || '').replace(/"/g, '""')}"`,
       e.status || 'SCHEDULED',
@@ -244,19 +310,43 @@ export default function ProjectScheduleCalendar({
     document.body.removeChild(link);
   };
 
-  const getBadgeStyle = (type: ScheduleEventType) => {
-    switch (type) {
-      case 'MEETING':
-        return 'bg-blue-950/80 text-blue-300 border-blue-800';
-      case 'DEADLINE':
-        return 'bg-rose-950/80 text-rose-300 border-rose-800';
-      case 'MILESTONE':
-        return 'bg-amber-950/80 text-amber-300 border-amber-800';
-      case 'INSPECTION':
-        return 'bg-purple-950/80 text-purple-300 border-purple-800';
-      default:
-        return 'bg-slate-800 text-slate-300 border-slate-700';
+  const getBadgeStyle = (typeStr: string) => {
+    const t = (typeStr || '').toUpperCase();
+    if (t.includes('INSPECT')) {
+      return 'bg-purple-950/80 text-purple-300 border-purple-800';
     }
+    if (t.includes('MILESTONE')) {
+      return 'bg-amber-950/80 text-amber-300 border-amber-800';
+    }
+    if (t.includes('DEADLINE')) {
+      return 'bg-rose-950/80 text-rose-300 border-rose-800';
+    }
+    return 'bg-blue-950/80 text-blue-300 border-blue-800';
+  };
+
+  const getEventDotColor = (rawType: string): string => {
+    const t = (rawType || '').toUpperCase();
+    if (t.includes('INSPECT')) return 'bg-purple-400';
+    if (t.includes('MILESTONE')) return 'bg-amber-400';
+    if (t.includes('DEADLINE')) return 'bg-rose-400';
+    return 'bg-blue-400';
+  };
+
+  const getEventPillStyle = (rawType: string, isCompleted: boolean): string => {
+    if (isCompleted) {
+      return 'bg-emerald-950/50 border-emerald-800 text-emerald-300 line-through opacity-75';
+    }
+    const t = (rawType || '').toUpperCase();
+    if (t.includes('INSPECT')) {
+      return 'bg-purple-950/80 border-purple-800/90 text-purple-300';
+    }
+    if (t.includes('MILESTONE')) {
+      return 'bg-amber-950/80 border-amber-800/90 text-amber-300';
+    }
+    if (t.includes('DEADLINE')) {
+      return 'bg-rose-950/80 border-rose-800/90 text-rose-300';
+    }
+    return 'bg-blue-950/80 border-blue-800/90 text-blue-300';
   };
 
   return (
@@ -386,7 +476,7 @@ export default function ProjectScheduleCalendar({
                 const isSelected = selectedDateStr === dateKey;
                 const isToday = dateKey === new Date().toISOString().split('T')[0];
 
-                const dayEvents = filteredEvents.filter(e => e.eventDate === dateKey);
+                const dayEvents = filteredEvents.filter(e => getEventDate(e) === dateKey);
 
                 return (
                   <div
@@ -394,7 +484,7 @@ export default function ProjectScheduleCalendar({
                     onClick={() => setSelectedDateStr(dateKey)}
                     className={`min-h-[76px] p-2 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
                       isSelected
-                        ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-500/10'
+                        ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-500/10 ring-1 ring-blue-500/50'
                         : isToday
                         ? 'bg-slate-900 border-amber-500/50'
                         : 'bg-slate-950/50 border-slate-800/80 hover:border-slate-700'
@@ -407,7 +497,17 @@ export default function ProjectScheduleCalendar({
                         {day}
                       </span>
                       {dayEvents.length > 0 && (
-                        <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+                        <div className="flex items-center gap-1">
+                          {dayEvents.slice(0, 3).map((evt, idx) => (
+                            <span
+                              key={idx}
+                              className={`w-1.5 h-1.5 rounded-full ${getEventDotColor(evt.type || evt.eventType)}`}
+                            />
+                          ))}
+                          {dayEvents.length > 3 && (
+                            <span className="w-1 h-1 rounded-full bg-slate-500" />
+                          )}
+                        </div>
                       )}
                     </div>
 
@@ -415,17 +515,17 @@ export default function ProjectScheduleCalendar({
                       {dayEvents.slice(0, 2).map((evt, idx) => (
                         <div
                           key={idx}
-                          className={`text-[9px] truncate px-1.5 py-0.5 rounded border ${
-                            evt.status === 'COMPLETED' 
-                              ? 'bg-emerald-950/50 border-emerald-800 text-emerald-300 line-through opacity-75' 
-                              : 'bg-slate-900 border-slate-800 text-slate-300'
-                          }`}
+                          className={`text-[9px] truncate px-1.5 py-0.5 rounded border transition-colors ${getEventPillStyle(
+                            evt.type || evt.eventType,
+                            evt.status === 'COMPLETED'
+                          )}`}
+                          title={`${evt.title} (${evt.projectName || 'General'})`}
                         >
                           {evt.title}
                         </div>
                       ))}
                       {dayEvents.length > 2 && (
-                        <span className="text-[9px] text-slate-500 block">
+                        <span className="text-[9px] text-slate-400 font-mono block pl-0.5">
                           +{dayEvents.length - 2} more
                         </span>
                       )}
@@ -436,7 +536,7 @@ export default function ProjectScheduleCalendar({
             </div>
           </div>
 
-          <div className="flex items-center gap-4 text-xs text-slate-400 mt-6 pt-4 border-t border-slate-800">
+          <div className="flex items-center gap-4 text-xs text-slate-400 mt-6 pt-4 border-t border-slate-800 flex-wrap">
             <span className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-blue-400" /> Meeting
             </span>
@@ -460,9 +560,16 @@ export default function ProjectScheduleCalendar({
                 <span className="text-[10px] font-mono text-slate-400 uppercase tracking-wider block">Selected Date Agenda</span>
                 <h3 className="text-base font-bold text-white font-mono">{selectedDateStr}</h3>
               </div>
-              <span className="text-xs font-mono px-2.5 py-1 rounded bg-slate-800 text-slate-300">
-                {eventsOnSelectedDate.length} {eventsOnSelectedDate.length === 1 ? 'Event' : 'Events'}
-              </span>
+              <div className="flex items-center gap-2">
+                {isLoading && (
+                  <span className="flex items-center gap-1 text-[10px] text-blue-400 font-mono animate-pulse">
+                    <RefreshCw className="w-3 h-3 animate-spin" /> Syncing...
+                  </span>
+                )}
+                <span className="text-xs font-mono px-2.5 py-1 rounded bg-slate-800 text-slate-300">
+                  {eventsOnSelectedDate.length} {eventsOnSelectedDate.length === 1 ? 'Event' : 'Events'}
+                </span>
+              </div>
             </div>
 
             <div className="mt-4 space-y-3 max-h-[500px] overflow-y-auto pr-1">
@@ -471,91 +578,104 @@ export default function ProjectScheduleCalendar({
                   No scheduled activities on this date. Click &quot;Add Event&quot; to plan a meeting or milestone.
                 </div>
               ) : (
-                eventsOnSelectedDate.map((evt) => (
-                  <div
-                    key={evt.id}
-                    className={`p-4 rounded-xl border transition ${
-                      evt.status === 'COMPLETED'
-                        ? 'bg-slate-950/60 border-emerald-900/50'
-                        : 'bg-slate-950 border-slate-800/80 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <div className="flex items-center gap-1.5">
-                          <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getBadgeStyle(evt.eventType)}`}>
-                            {evt.eventType}
-                          </span>
-                          {evt.status === 'COMPLETED' && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
-                              ✓ Completed
+                eventsOnSelectedDate.map((evt) => {
+                  const rawType = (evt.type || evt.eventType || '').toUpperCase();
+                  const displayType = evt.type || (rawType.includes('INSPECT') ? 'Inspection' : rawType.includes('MILESTONE') ? 'Milestone' : rawType.includes('DEADLINE') ? 'Deadline' : 'Meeting');
+                  const sourceBadge = evt.source || (rawType === 'MEETING' ? 'Manual / Coordination' : 'System Event');
+
+                  return (
+                    <div
+                      key={evt.id}
+                      className={`p-4 rounded-xl border transition ${
+                        evt.status === 'COMPLETED'
+                          ? 'bg-slate-950/60 border-emerald-900/50'
+                          : 'bg-slate-950 border-slate-800/80 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="space-y-1 flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${getBadgeStyle(displayType)}`}>
+                              {displayType}
                             </span>
-                          )}
+                            {sourceBadge && (
+                              <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 flex items-center gap-1">
+                                <Layers className="w-2.5 h-2.5 text-blue-400" />
+                                {sourceBadge}
+                              </span>
+                            )}
+                            {evt.status === 'COMPLETED' && (
+                              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-950 text-emerald-300 border border-emerald-800">
+                                ✓ Completed
+                              </span>
+                            )}
+                          </div>
+                          <h4 className={`text-xs font-bold leading-snug break-words ${
+                            evt.status === 'COMPLETED' ? 'text-slate-400 line-through' : 'text-white'
+                          }`}>
+                            {evt.title}
+                          </h4>
+                          <div className="text-[11px] text-amber-400 font-medium truncate">
+                            {evt.projectName || 'General Coordination'}
+                          </div>
                         </div>
-                        <h4 className={`text-xs font-bold mt-1.5 leading-snug ${
-                          evt.status === 'COMPLETED' ? 'text-slate-400 line-through' : 'text-white'
-                        }`}>
-                          {evt.title}
-                        </h4>
+
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            onClick={() => handleToggleCompleted(evt)}
+                            className={`p-1 rounded transition cursor-pointer ${
+                              evt.status === 'COMPLETED' 
+                                ? 'text-emerald-400 hover:text-slate-400' 
+                                : 'text-slate-500 hover:text-emerald-400'
+                            }`}
+                            title={evt.status === 'COMPLETED' ? 'Mark Incomplete' : 'Mark Completed'}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => openEditModal(evt)}
+                            className="p-1 text-slate-400 hover:text-blue-400 transition cursor-pointer"
+                            title="Edit Event"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(evt.id)}
+                            className="text-slate-500 hover:text-rose-400 p-1 transition cursor-pointer"
+                            title="Delete Event"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
 
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleToggleCompleted(evt)}
-                          className={`p-1 rounded transition cursor-pointer ${
-                            evt.status === 'COMPLETED' 
-                              ? 'text-emerald-400 hover:text-slate-400' 
-                              : 'text-slate-500 hover:text-emerald-400'
-                          }`}
-                          title={evt.status === 'COMPLETED' ? 'Mark Incomplete' : 'Mark Completed'}
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => openEditModal(evt)}
-                          className="p-1 text-slate-400 hover:text-blue-400 transition cursor-pointer"
-                          title="Edit Event"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(evt.id)}
-                          className="text-slate-500 hover:text-rose-400 p-1 transition cursor-pointer"
-                          title="Delete Event"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="text-[11px] text-amber-400 font-medium">{evt.projectName}</div>
-
-                    <div className="space-y-1 text-[11px] text-slate-400 font-mono pt-1">
-                      <div className="flex items-center gap-1.5">
-                        <Clock className="w-3 h-3 text-blue-400" />
-                        {evt.startTime} - {evt.endTime}
-                      </div>
-                      {evt.location && (
+                      <div className="space-y-1 text-[11px] text-slate-400 font-mono pt-2 border-t border-slate-800/60 mt-2">
                         <div className="flex items-center gap-1.5">
-                          <MapPin className="w-3 h-3 text-slate-500" />
-                          <span className="truncate">{evt.location}</span>
+                          <Clock className="w-3 h-3 text-blue-400 shrink-0" />
+                          <span>{evt.startTime || '08:00'} - {evt.endTime || '17:00'}</span>
                         </div>
-                      )}
-                      {evt.attendees && (
-                        <div className="flex items-center gap-1.5">
-                          <Users className="w-3 h-3 text-purple-400" />
-                          <span className="truncate">{evt.attendees}</span>
-                        </div>
+                        {evt.location && (
+                          <div className="flex items-center gap-1.5">
+                            <MapPin className="w-3 h-3 text-slate-500 shrink-0" />
+                            <span className="truncate">{evt.location}</span>
+                          </div>
+                        )}
+                        {evt.attendees && (
+                          <div className="flex items-center gap-1.5">
+                            <Users className="w-3 h-3 text-purple-400 shrink-0" />
+                            <span className="truncate">{evt.attendees}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      {evt.notes && (
+                        <p className="text-[10px] text-slate-400 bg-slate-900/80 p-2 rounded border border-slate-800 mt-2 leading-relaxed">
+                          {evt.notes}
+                        </p>
                       )}
                     </div>
-
-                    {evt.notes && (
-                      <p className="text-[10px] text-slate-500 bg-slate-900/80 p-2 rounded border border-slate-800 mt-2">
-                        {evt.notes}
-                      </p>
-                    )}
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

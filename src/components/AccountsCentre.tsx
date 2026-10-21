@@ -53,6 +53,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
   notify,
   onUpdateSession,
 }) => {
+  const isDark = theme === 'dark';
   // Navigation Sub-Tabs
   const [activeSubTab, setActiveSubTab] = useState<'security' | 'profile' | 'preferences' | 'sessions'>('security');
 
@@ -290,26 +291,34 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 animate-in fade-in duration-200">
+    <div className="max-w-6xl w-full mx-auto py-6 space-y-6 animate-in fade-in duration-200">
       
       {/* ============================================================= */}
       {/* META ACCOUNTS CENTRE CONTAINER */}
       {/* ============================================================= */}
-      <div className="bg-slate-950 border border-slate-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col md:flex-row min-h-[620px]">
+      <div className={`${
+        isDark 
+          ? 'bg-slate-950 border-slate-800 shadow-2xl' 
+          : 'bg-white border-slate-200/90 shadow-xl'
+      } border rounded-3xl overflow-hidden flex flex-col md:flex-row min-h-[620px]`}>
         
         {/* Left Column: Accounts Centre Navigation */}
-        <div className="w-full md:w-80 border-b md:border-b-0 md:border-r border-slate-800/80 p-6 flex flex-col justify-between shrink-0 bg-slate-950/70">
+        <div className={`w-full md:w-80 border-b md:border-b-0 md:border-r ${
+          isDark 
+            ? 'border-slate-800/80 bg-slate-950/70' 
+            : 'border-slate-200 bg-slate-50/80'
+        } p-6 flex flex-col justify-between shrink-0`}>
           <div className="space-y-6">
             
             {/* Header Brand */}
             <div>
               <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
-                <span className="font-black text-amber-400 tracking-wider">CTVILL</span>
+                <span className={`font-black ${isDark ? 'text-amber-400' : 'text-amber-600'} tracking-wider`}>CTVILL</span>
                 <span className="text-slate-600">•</span>
                 <span>Security & Identity</span>
               </div>
-              <h2 className="text-2xl font-bold text-white tracking-tight mt-1">Accounts Centre</h2>
-              <p className="text-xs text-slate-400 mt-2 leading-relaxed">
+              <h2 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'} tracking-tight mt-1`}>Accounts Centre</h2>
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} mt-2 leading-relaxed`}>
                 Manage your connected credentials, security protocols and profile settings across CTVill technologies.
               </p>
             </div>
@@ -320,8 +329,12 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
               onClick={() => setActiveSubTab('profile')}
               className={`w-full flex items-center gap-3.5 p-3 rounded-2xl transition-all text-left cursor-pointer ${
                 activeSubTab === 'profile'
-                  ? 'bg-slate-800 text-white shadow-md'
-                  : 'text-slate-300 hover:bg-slate-900/80 hover:text-white'
+                  ? isDark
+                    ? 'bg-slate-800 text-white shadow-md'
+                    : 'bg-slate-900 text-white shadow-md'
+                  : isDark
+                    ? 'text-slate-300 hover:bg-slate-900/80 hover:text-white'
+                    : 'text-slate-700 hover:bg-slate-200/70 hover:text-slate-900'
               }`}
             >
               <div className="w-10 h-10 rounded-full bg-amber-500 text-slate-950 flex items-center justify-center font-bold text-sm shrink-0 overflow-hidden border border-amber-400/50">
@@ -332,8 +345,8 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                 )}
               </div>
               <div className="min-w-0 flex-1">
-                <div className="text-xs font-bold text-white truncate">{profileName}</div>
-                <div className="text-[11px] text-slate-400 truncate">Profiles and personal details</div>
+                <div className={`text-xs font-bold ${activeSubTab === 'profile' ? 'text-white' : (isDark ? 'text-white' : 'text-slate-900')} truncate`}>{profileName}</div>
+                <div className={`text-[11px] ${activeSubTab === 'profile' ? 'text-slate-300' : (isDark ? 'text-slate-400' : 'text-slate-500')} truncate`}>Profiles and personal details</div>
               </div>
               <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
             </button>
@@ -349,11 +362,15 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                 onClick={() => setActiveSubTab('security')}
                 className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-xs font-semibold transition-all text-left cursor-pointer ${
                   activeSubTab === 'security'
-                    ? 'bg-slate-800 text-white font-bold shadow-md'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+                    ? isDark
+                      ? 'bg-slate-800 text-white font-bold shadow-md'
+                      : 'bg-slate-900 text-white font-bold shadow-md'
+                    : isDark
+                      ? 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
                 }`}
               >
-                <Shield className={`w-4 h-4 shrink-0 ${activeSubTab === 'security' ? 'text-amber-400' : 'text-slate-400'}`} />
+                <Shield className={`w-4 h-4 shrink-0 ${activeSubTab === 'security' ? (isDark ? 'text-amber-400' : 'text-amber-300') : 'text-slate-400'}`} />
                 <span className="flex-1">Password and security</span>
                 {activeSubTab === 'security' && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
               </button>
@@ -363,11 +380,15 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                 onClick={() => setActiveSubTab('preferences')}
                 className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-xs font-semibold transition-all text-left cursor-pointer ${
                   activeSubTab === 'preferences'
-                    ? 'bg-slate-800 text-white font-bold shadow-md'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+                    ? isDark
+                      ? 'bg-slate-800 text-white font-bold shadow-md'
+                      : 'bg-slate-900 text-white font-bold shadow-md'
+                    : isDark
+                      ? 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
                 }`}
               >
-                <Sliders className={`w-4 h-4 shrink-0 ${activeSubTab === 'preferences' ? 'text-amber-400' : 'text-slate-400'}`} />
+                <Sliders className={`w-4 h-4 shrink-0 ${activeSubTab === 'preferences' ? (isDark ? 'text-amber-400' : 'text-amber-300') : 'text-slate-400'}`} />
                 <span className="flex-1">Display & preferences</span>
                 {activeSubTab === 'preferences' && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
               </button>
@@ -377,11 +398,15 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                 onClick={() => setActiveSubTab('sessions')}
                 className={`w-full flex items-center gap-3 px-3.5 py-3 rounded-2xl text-xs font-semibold transition-all text-left cursor-pointer ${
                   activeSubTab === 'sessions'
-                    ? 'bg-slate-800 text-white font-bold shadow-md'
-                    : 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+                    ? isDark
+                      ? 'bg-slate-800 text-white font-bold shadow-md'
+                      : 'bg-slate-900 text-white font-bold shadow-md'
+                    : isDark
+                      ? 'text-slate-400 hover:text-white hover:bg-slate-900/60'
+                      : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
                 }`}
               >
-                <Laptop className={`w-4 h-4 shrink-0 ${activeSubTab === 'sessions' ? 'text-amber-400' : 'text-slate-400'}`} />
+                <Laptop className={`w-4 h-4 shrink-0 ${activeSubTab === 'sessions' ? (isDark ? 'text-amber-400' : 'text-amber-300') : 'text-slate-400'}`} />
                 <span className="flex-1">Where you're logged in</span>
                 {activeSubTab === 'sessions' && <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />}
               </button>
@@ -389,7 +414,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
           </div>
 
           {/* Footer Protection Status */}
-          <div className="pt-6 border-t border-slate-800/80">
+          <div className={`pt-6 border-t ${isDark ? 'border-slate-800/80' : 'border-slate-200'}`}>
             <div className="flex items-center gap-2 text-[11px] text-slate-500 font-mono">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
               <span>ACTIVE SECURITY ENVELOPE</span>
@@ -398,21 +423,21 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
         </div>
 
         {/* Right Column: Dynamic Content Area */}
-        <div className="flex-1 p-6 sm:p-8 lg:p-10 overflow-y-auto">
+        <div className={`flex-1 p-6 sm:p-8 lg:p-10 overflow-y-auto ${isDark ? 'bg-slate-950' : 'bg-white'}`}>
 
           {/* 1. PASSWORD AND SECURITY (Directly mirrors Meta Accounts Centre reference!) */}
           {activeSubTab === 'security' && (
             <div className="max-w-xl space-y-8 animate-in fade-in duration-200">
               <div>
-                <h1 className="text-2xl font-bold text-white tracking-tight">Password and security</h1>
+                <h1 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'} tracking-tight`}>Password and security</h1>
               </div>
 
               {/* Group 1: Login & recovery */}
               <div className="space-y-2">
-                <div className="text-xs font-bold text-slate-300">Login & recovery</div>
-                <p className="text-[11px] text-slate-400">Manage your passwords, login preferences and recovery methods.</p>
+                <div className={`text-xs font-bold ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>Login & recovery</div>
+                <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Manage your passwords, login preferences and recovery methods.</p>
 
-                <div className="bg-slate-900/70 border border-slate-800 rounded-2xl overflow-hidden divide-y divide-slate-800/80 mt-2">
+                <div className={`${isDark ? 'bg-slate-900/70 border-slate-800 divide-slate-800/80' : 'bg-slate-50 border-slate-200 divide-slate-200'} border rounded-2xl overflow-hidden divide-y mt-2`}>
                   {/* Change password row */}
                   <button
                     type="button"

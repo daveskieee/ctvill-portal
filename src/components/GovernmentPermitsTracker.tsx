@@ -4,9 +4,9 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { 
-  FileCheck, AlertTriangle, Clock, ShieldCheck, Plus, 
-  Building2, Calendar, Search, Filter, ExternalLink, 
+import {
+  FileCheck, AlertTriangle, Clock, ShieldCheck, Plus,
+  Building2, Calendar, Search, Filter, ExternalLink,
   CheckCircle2, XCircle, RefreshCw, X, FileText, Download,
   Edit3, Trash2
 } from 'lucide-react';
@@ -21,6 +21,8 @@ interface GovernmentPermitsTrackerProps {
   onDeletePermit?: (permitId: string) => Promise<void>;
   /** Hide all mutation actions (Finance read-only audit mode) */
   readOnly?: boolean;
+  userRole?: string;
+  user?: { role?: string; [key: string]: any };
 }
 
 export default function GovernmentPermitsTracker({
@@ -31,7 +33,10 @@ export default function GovernmentPermitsTracker({
   onUpdatePermit,
   onDeletePermit,
   readOnly = false,
+  userRole,
+  user
 }: GovernmentPermitsTrackerProps) {
+  const isEffectiveReadOnly = Boolean(readOnly || userRole === 'FINANCE' || user?.role === 'FINANCE');
   const [projectFilter, setProjectFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -78,7 +83,7 @@ export default function GovernmentPermitsTracker({
           return Array.from(new Set([...parsed, ...defaultSuggestedNames]));
         }
       }
-    } catch {}
+    } catch { }
     return defaultSuggestedNames;
   });
 
@@ -88,7 +93,7 @@ export default function GovernmentPermitsTracker({
       const updated = Array.from(new Set([name.trim(), ...prev]));
       try {
         localStorage.setItem('ctvill_saved_permit_names', JSON.stringify(updated.slice(0, 50)));
-      } catch {}
+      } catch { }
       return updated;
     });
   };
@@ -376,14 +381,14 @@ export default function GovernmentPermitsTracker({
             <span>Export (CSV)</span>
           </button>
 
-          {!readOnly && (
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-lg transition-colors text-xs cursor-pointer"
-          >
-            <Plus className="w-4 h-4" />
-            <span>File Permit Application</span>
-          </button>
+          {!isEffectiveReadOnly && (
+            <button
+              onClick={() => setShowAddModal(true)}
+              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-lg transition-colors text-xs cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>File Permit Application</span>
+            </button>
           )}
         </div>
       </div>
@@ -408,10 +413,10 @@ export default function GovernmentPermitsTracker({
             <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Approved & Valid</span>
             <ShieldCheck className="w-5 h-5 text-emerald-400" />
           </div>
-          <div className="text-2xl font-bold text-emerald-400 mt-2 font-mono">
+          <div className="text-2xl font-bold text-white mt-2 font-mono">
             {approvedPermits} Permits
           </div>
-          <div className="text-xs text-emerald-500/80 mt-1">
+          <div className="text-xs text-slate-400 mt-1">
             {totalPermits > 0 ? Math.round((approvedPermits / totalPermits) * 100) : 0}% fully approved compliance
           </div>
         </div>
@@ -421,10 +426,10 @@ export default function GovernmentPermitsTracker({
             <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Pending Evaluation</span>
             <Clock className="w-5 h-5 text-amber-400" />
           </div>
-          <div className="text-2xl font-bold text-amber-400 mt-2 font-mono">
+          <div className="text-2xl font-bold text-white mt-2 font-mono">
             {pendingPermits} Pending
           </div>
-          <div className="text-xs text-amber-500/80 mt-1">
+          <div className="text-xs text-slate-400 mt-1">
             Under agency review & sign-off
           </div>
         </div>
@@ -434,10 +439,10 @@ export default function GovernmentPermitsTracker({
             <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Renewal Required</span>
             <AlertTriangle className="w-5 h-5 text-rose-400" />
           </div>
-          <div className="text-2xl font-bold text-rose-400 mt-2 font-mono">
+          <div className="text-2xl font-bold text-white mt-2 font-mono">
             {expiredOrRenewal} Urgent
           </div>
-          <div className="text-xs text-rose-500/80 mt-1">
+          <div className="text-xs text-slate-400 mt-1">
             Expiring within 30 days or lapsed
           </div>
         </div>
@@ -568,40 +573,44 @@ export default function GovernmentPermitsTracker({
                         )}
                       </td>
                       <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          {p.status !== 'APPROVED' && (
+                        {isEffectiveReadOnly ? (
+                          <span className="text-[10px] font-mono text-slate-500 italic">Read-Only</span>
+                        ) : (
+                          <div className="flex items-center justify-end gap-1.5">
+                            {p.status !== 'APPROVED' && (
+                              <button
+                                onClick={() => handleStatusChange(p.id, 'APPROVED')}
+                                className="px-2 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800 text-[10px] font-bold transition cursor-pointer"
+                                title="Mark Approved"
+                              >
+                                Approve
+                              </button>
+                            )}
+                            {p.status === 'APPROVED' && (
+                              <button
+                                onClick={() => handleStatusChange(p.id, 'UNDER_RENEWAL')}
+                                className="px-2 py-1 rounded bg-blue-950/60 hover:bg-blue-900/60 text-blue-300 border border-blue-800 text-[10px] font-bold transition cursor-pointer"
+                                title="File Renewal"
+                              >
+                                Renew
+                              </button>
+                            )}
                             <button
-                              onClick={() => handleStatusChange(p.id, 'APPROVED')}
-                              className="px-2 py-1 rounded bg-emerald-950/60 hover:bg-emerald-900/60 text-emerald-300 border border-emerald-800 text-[10px] font-bold transition cursor-pointer"
-                              title="Mark Approved"
+                              onClick={() => openEditModal(p)}
+                              className="p-1 text-slate-400 hover:text-amber-400 transition cursor-pointer"
+                              title="Edit Permit Details"
                             >
-                              Approve
+                              <Edit3 className="w-3.5 h-3.5" />
                             </button>
-                          )}
-                          {p.status === 'APPROVED' && (
                             <button
-                              onClick={() => handleStatusChange(p.id, 'UNDER_RENEWAL')}
-                              className="px-2 py-1 rounded bg-blue-950/60 hover:bg-blue-900/60 text-blue-300 border border-blue-800 text-[10px] font-bold transition cursor-pointer"
-                              title="File Renewal"
+                              onClick={() => handleDelete(p.id)}
+                              className="p-1 text-slate-500 hover:text-rose-400 transition cursor-pointer"
+                              title="Delete"
                             >
-                              Renew
+                              <Trash2 className="w-3.5 h-3.5" />
                             </button>
-                          )}
-                          <button
-                            onClick={() => openEditModal(p)}
-                            className="p-1 text-slate-400 hover:text-amber-400 transition cursor-pointer"
-                            title="Edit Permit Details"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(p.id)}
-                            className="p-1 text-slate-500 hover:text-rose-400 transition cursor-pointer"
-                            title="Delete"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
+                          </div>
+                        )}
                       </td>
                     </tr>
                   );

@@ -213,6 +213,10 @@ export async function initializeDatabaseTables() {
       ALTER TABLE workers ALTER COLUMN first_name DROP NOT NULL;
       ALTER TABLE workers ALTER COLUMN last_name DROP NOT NULL;
       ALTER TABLE workers ALTER COLUMN position DROP NOT NULL;
+      ALTER TABLE contractors ADD COLUMN IF NOT EXISTS "activeProjectSite" TEXT;
+      ALTER TABLE contractors ADD COLUMN IF NOT EXISTS active_project_site TEXT;
+      UPDATE contractors SET "activeProjectSite" = active_project_site WHERE "activeProjectSite" IS NULL AND active_project_site IS NOT NULL;
+      UPDATE contractors SET active_project_site = "activeProjectSite" WHERE active_project_site IS NULL AND "activeProjectSite" IS NOT NULL;
 
       -- Deprecate/remove static mock workers and test records
       DELETE FROM workers 
@@ -389,7 +393,7 @@ export async function initializeDatabaseTables() {
         SET status = 'IN_PROGRESS'
         WHERE progress > 0 AND progress < 1.0 AND status = 'TODO';
       `);
-    } catch {}
+    } catch { }
 
     console.log('✅ PostgreSQL commercial fit-out schema and performance indexes initialized.');
   } catch (err: any) {

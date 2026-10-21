@@ -15,6 +15,7 @@ import LandingPage from './components/LandingPage';
 import LoginPortal from './components/LoginPortal';
 import AdminPortal from './components/AdminPortal';
 import LoadingScreen from './components/LoadingScreen';
+import { ERPShellSkeleton } from './components/skeletons';
 import { 
   getStoredSession, 
   saveStoredSession, 
@@ -56,13 +57,23 @@ export default function App() {
   const [projects, setProjects] = useState<ProjectProfile[]>([]);
   const [extendedPayroll, setExtendedPayroll] = useState<ExtendedPayrollItem[]>([]);
 
-  // Active Session context: 
-  // null = Landing Page 
-  // 'login' = Portal Authenticator Screen
-  // UserSession = Active logged-in role Dashboard
-  const [session, setSession] = useState<UserSession | 'login' | null>(null);
+  // Explicit Authentication State Machine:
+  // 'checking': Strictly verifying session with backend /api/auth/me (renders lightweight neutral ERPShellSkeleton)
+  // 'authenticated': Valid session confirmed by server (renders AdminPortal)
+  // 'unauthenticated': No active session (renders LandingPage or LoginPortal)
+  type AuthStatus = 'checking' | 'authenticated' | 'unauthenticated';
+  const [authStatus, setAuthStatus] = useState<AuthStatus>(() => {
+    // If a valid session envelope exists in client storage, mount authenticated immediately
+    // to prevent any shell unmounting or skeleton flashing during initial verification
+    const stored = getStoredSession();
+    return stored ? 'authenticated' : 'checking';
+  });
+  const [session, setSession] = useState<UserSession | null>(() => getStoredSession());
+  const [unauthView, setUnauthView] = useState<'landing' | 'login'>('landing');
   const [urlInviteToken, setUrlInviteToken] = useState<string | null>(null);
   const [sessionExpiryNotice, setSessionExpiryNotice] = useState<string | null>(null);
+  const [dataReloadTrigger, setDataReloadTrigger] = useState<number>(0);
+  const authCheckStartedRef = useRef<boolean>(false);
 
   // Loading & Animation transition state
   const [loadingState, setLoadingState] = useState<{
@@ -84,53 +95,92 @@ export default function App() {
 
   // Enterprise Inactivity Auto-Logout (30 min idle threshold)
   useInactivityTimeout({
-    isLoggedIn: typeof session === 'object' && session !== null,
+    isLoggedIn: authStatus === 'authenticated' && session !== null,
     timeoutMs: SESSION_INACTIVITY_LIMIT_MS,
     onTimeout: () => {
       fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
       clearStoredSession();
       setSession(null);
+      setAuthStatus('unauthenticated');
+      setUnauthView('login');
       setSessionExpiryNotice('Your session has ended after 30 minutes of inactivity for security compliance. Please sign in again.');
     },
   });
 
   // --- URL TOKEN INSPECTOR & SERVER-VERIFIED SESSION RESTORER ---
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      // Configure global secure fetch interceptor with automatic 401 handling
-      setupSecureFetch(() => {
-        clearStoredSession();
-        setSession(null);
-        setSessionExpiryNotice('Your session has expired or is invalid. Please sign in again.');
-      });
+    if (typeof window === 'undefined') return;
+    if (authCheckStartedRef.current) return;
+    authCheckStartedRef.current = true;
 
-      const params = new URLSearchParams(window.location.search);
-      const token = params.get('activateToken') || params.get('token');
-      if (token) {
-        setUrlInviteToken(token);
-        setSession('login');
-      } else {
-        // Verify session state strictly with server endpoint
-        fetch('/api/auth/me')
-          .then(res => {
-            if (res.ok) return res.json();
-            throw new Error('Unauthenticated');
-          })
-          .then(data => {
-            if (data?.session) {
-              setSession(data.session);
-              saveStoredSession(data.session);
-            } else {
-              clearStoredSession();
-              setSession(null);
-            }
-          })
-          .catch(() => {
-            clearStoredSession();
-            setSession(null);
-          });
-      }
+    // Configure global secure fetch interceptor with automatic 401 handling
+    setupSecureFetch(() => {
+      clearStoredSession();
+      setSession(null);
+      setAuthStatus('unauthenticated');
+      setUnauthView('login');
+      setSessionExpiryNotice('Your session has expired or is invalid. Please sign in again.');
+    });
+
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('activateToken') || params.get('token');
+    const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase().trim();
+    const isLoginHash = hash === 'login' || hash === 'signin';
+    const isProtectedHash = Boolean(hash && !isLoginHash && hash !== 'forbidden-403');
+
+    if (token) {
+      setUrlInviteToken(token);
+      setSession(null);
+      setAuthStatus('unauthenticated');
+      setUnauthView('login');
+      return;
     }
+
+    // Check if user previously had stored session envelope (to distinguish expired session from guest visitor)
+    const existingStoredEnvelope = getStoredSession();
+
+    // Step 1: Validate session in background without resetting user to null/guest
+    const verifySession = async () => {
+      try {
+        const res = await fetch('/api/auth/me', { credentials: 'include' });
+        if (res.ok) {
+          const data = await res.json();
+          const freshUser = data?.session || data?.user || data;
+          if (freshUser) {
+            setSession(freshUser);
+            saveStoredSession(freshUser);
+            setAuthStatus('authenticated');
+            setSessionExpiryNotice(null);
+            setDataReloadTrigger(prev => prev + 1);
+          }
+        } else if (res.status === 401) {
+          // Only clear if server explicitly rejects token
+          clearStoredSession();
+          setSession(null);
+          setAuthStatus('unauthenticated');
+
+          // If the user had an active session envelope, or was directly attempting to access a protected URL:
+          // Redirect cleanly to login portal without exposing protected data or showing landing flash
+          if (existingStoredEnvelope || isProtectedHash) {
+            setUnauthView('login');
+            if (existingStoredEnvelope) {
+              setSessionExpiryNotice('Your session has expired or is invalid. Please sign in again.');
+            } else if (isProtectedHash) {
+              setSessionExpiryNotice('Please sign in to access this workspace module.');
+            }
+          } else if (isLoginHash) {
+            setUnauthView('login');
+          } else {
+            setUnauthView('landing');
+          }
+        }
+      } catch (err) {
+        // Offline / network hitch: keep cached user so sidebar doesn't collapse
+        console.warn('Network issue during session revalidation, preserving cached session', err);
+      }
+    };
+
+    verifySession();
   }, []);
 
   // ============================================================================
@@ -270,7 +320,7 @@ export default function App() {
 
   const fetchSchedule = useCallback(async () => {
     try {
-      const res = await fetch('/api/schedule');
+      const res = await fetch('/api/calendar/events');
       if (res.ok) {
         const data = await res.json();
         setScheduleEvents(Array.isArray(data) ? data.filter((e: any) => !isTombstoned(e.id)) : []);
@@ -362,16 +412,36 @@ export default function App() {
       setProjects((data.projects || []).filter((p: any) => !isTombstoned(p.id)));
       setExtendedPayroll((data.extendedPayroll || []).filter((ep: any) => !isTombstoned(ep.id)));
     } catch (err) {
-      console.error('Failed to load data from database:', err);
+      console.error('Failed to load data from database, executing resilient multi-endpoint fallback:', err);
+      try {
+        await Promise.allSettled([
+          fetchProjects(),
+          fetchContractors(),
+          fetchTasks(),
+          fetchSiteLogs(),
+          fetchDocuments(),
+          fetchClients(),
+          fetchSlots(),
+          fetchPayroll(),
+          fetchAuditLogs(),
+          fetchPermits(),
+          fetchSchedule(),
+          fetchExtendedPayroll()
+        ]);
+      } catch (fallbackErr) {
+        console.error('Fallback endpoint fetch error:', fallbackErr);
+      }
     } finally {
       setIsInitialLoading(false);
     }
   };
 
-  // Initial load
+  // Load operational ERP data ONLY when session is confirmed authenticated
   useEffect(() => {
-    reloadAllData();
-  }, []);
+    if (authStatus === 'authenticated') {
+      reloadAllData();
+    }
+  }, [authStatus, dataReloadTrigger]);
 
   // ============================================================================
   // SSE REAL-TIME SYNC ENGINE
@@ -434,13 +504,22 @@ export default function App() {
     };
   }, [fetchClients, fetchSlots, fetchPunchLists, fetchCivilMilestones, fetchAuditLogs, fetchPayroll, fetchTasks, fetchContractors, fetchSiteLogs, fetchDocuments, fetchPermits, fetchSchedule, fetchProjects, fetchExtendedPayroll, fetchChangeOrders, fetchRfis, fetchQuotations]);
 
+  // Connect real-time SSE stream ONLY when session is confirmed authenticated
   useEffect(() => {
-    connectSSE();
+    if (authStatus === 'authenticated') {
+      connectSSE();
+    }
     return () => {
-      if (sseRef.current) sseRef.current.close();
-      if (sseReconnectTimer.current) clearTimeout(sseReconnectTimer.current);
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
+      }
+      if (sseReconnectTimer.current) {
+        clearTimeout(sseReconnectTimer.current);
+        sseReconnectTimer.current = null;
+      }
     };
-  }, [connectSSE]);
+  }, [authStatus, connectSSE]);
 
   // --- SESSION AUTH TRANSITIONS WITH ANIMATION ---
   const handleInitiateLogin = (targetSession: UserSession) => {
@@ -456,8 +535,12 @@ export default function App() {
   const handleInitiateLogout = () => {
     fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     clearStoredSession();
+    try {
+      sessionStorage.removeItem('ctvill_active_tab');
+      window.location.hash = '';
+    } catch { /* silent */ }
     setSessionExpiryNotice(null);
-    const currentSession = typeof session === 'object' && session !== null ? session : null;
+    const currentSession = session;
     setLoadingState({
       active: true,
       mode: 'logout',
@@ -1256,6 +1339,12 @@ export default function App() {
       if (res.ok) {
         const newDoc = await res.json();
         setDocuments(prev => [newDoc, ...prev]);
+      } else {
+        const data = await res.json().catch(() => null);
+        console.error('Failed to save document:', data?.error || res.statusText);
+        if (data?.error) {
+          alert(`Upload failed: ${data.error}`);
+        }
       }
     } catch (e) {
       console.error('Failed to save document:', e);
@@ -1835,22 +1924,36 @@ export default function App() {
   // --- RENDERING ROUTER ---
 
   const renderActiveWorkspace = () => {
-    if (session === null) {
-      return <LandingPage onEnterPortal={() => setSession('login')} />;
+    // Explicit State 1: Validating existing session with server (shows lightweight neutral ERP shell skeleton)
+    if (authStatus === 'checking') {
+      return <ERPShellSkeleton />;
     }
 
-    if (session === 'login') {
+    // Explicit State 2: Unauthenticated (shows Landing Page or Login Portal)
+    if (authStatus === 'unauthenticated') {
+      if (unauthView === 'login') {
+        return (
+          <LoginPortal 
+            onLoginSuccess={(s) => handleInitiateLogin(s)} 
+            onBackToLanding={() => {
+              setUnauthView('landing');
+              setSessionExpiryNotice(null);
+            }} 
+            initialInviteToken={urlInviteToken}
+          />
+        );
+      }
       return (
-        <LoginPortal 
-          onLoginSuccess={(s) => handleInitiateLogin(s)} 
-          onBackToLanding={() => setSession(null)} 
-          initialInviteToken={urlInviteToken}
+        <LandingPage 
+          onEnterPortal={() => {
+            setUnauthView('login');
+            setSessionExpiryNotice(null);
+          }} 
         />
       );
     }
 
-    // All authenticated users route directly into CTVill Project Management Operations Portal
-
+    // Explicit State 3: Authenticated — renders CTVill Project Management Operations Portal
     return (
       <AdminPortal
           parcels={parcels}
@@ -1942,19 +2045,17 @@ export default function App() {
           onRefreshAllData={() => reloadAllData(true)}
         />
       );
-
-    return <LandingPage onEnterPortal={() => setSession('login')} />;
   };
 
   return (
     <div className={`w-full relative bg-slate-950 ${
-      session && session !== 'login' 
+      authStatus === 'authenticated' && session 
         ? 'h-screen h-[100dvh] overflow-hidden flex flex-col' 
         : 'min-h-screen flex flex-col justify-between overflow-x-hidden'
     }`}>
       
       {/* Session Expiry Security Audit Banner */}
-      {sessionExpiryNotice && !session && (
+      {sessionExpiryNotice && authStatus === 'unauthenticated' && (
         <div className="bg-amber-950/95 border-b border-amber-600/50 text-amber-200 px-4 py-2.5 text-xs flex items-center justify-between z-50 animate-fadeIn backdrop-blur-md sticky top-0 shadow-lg shrink-0">
           <div className="flex items-center gap-2.5 max-w-5xl mx-auto">
             <span className="font-semibold uppercase tracking-wider text-[10px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-2 py-0.5 rounded font-mono">
@@ -1980,15 +2081,19 @@ export default function App() {
           onComplete={() => {
             if (loadingState.mode === 'login' && loadingState.pendingSession) {
               setSession(loadingState.pendingSession);
+              setAuthStatus('authenticated');
+              setDataReloadTrigger(prev => prev + 1);
             } else if (loadingState.mode === 'logout') {
               setSession(null);
+              setAuthStatus('unauthenticated');
+              setUnauthView('landing');
             }
             setLoadingState({ active: false, mode: 'login', pendingSession: null });
           }}
         />
       )}
 
-      <div className={`w-full ${session && session !== 'login' ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-1'}`}>
+      <div className={`w-full ${authStatus === 'authenticated' && session ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-1'}`}>
         {renderActiveWorkspace()}
       </div>
     </div>

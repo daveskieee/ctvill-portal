@@ -83,6 +83,7 @@ export function setupSecureFetch(onUnauthorized?: () => void) {
         response.status === 401 && 
         isApiRequest && 
         !rawUrl.includes('/api/auth/login') &&
+        !rawUrl.includes('/api/auth/me') &&
         !rawUrl.includes('/api/auth/verify-invite') &&
         !rawUrl.includes('/api/auth/activate')
       ) {

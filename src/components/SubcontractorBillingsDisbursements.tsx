@@ -29,10 +29,10 @@ interface SubcontractorBillingsDisbursementsProps {
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 const STATUS_CONFIG: Record<SubcontractorPayableStatus, { label: string; color: string; icon: React.ElementType }> = {
-  PENDING_AUDIT:  { label: 'Pending Audit Verification',    color: 'bg-amber-500/15 text-amber-300 border-amber-500/30',   icon: Clock },
-  APPROVED:       { label: 'Approved',          color: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', icon: CheckCircle2 },
-  PAID:           { label: 'Paid / Disbursed',  color: 'bg-sky-500/15 text-sky-300 border-sky-500/30',         icon: CreditCard },
-  DISPUTED:       { label: 'Disputed',          color: 'bg-rose-500/15 text-rose-300 border-rose-500/30',      icon: AlertTriangle },
+  PENDING_AUDIT: { label: 'Pending Audit Verification', color: 'bg-amber-500/15 text-amber-300 border-amber-500/30', icon: Clock },
+  APPROVED: { label: 'Approved', color: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30', icon: CheckCircle2 },
+  PAID: { label: 'Paid / Disbursed', color: 'bg-sky-500/15 text-sky-300 border-sky-500/30', icon: CreditCard },
+  DISPUTED: { label: 'Disputed', color: 'bg-rose-500/15 text-rose-300 border-rose-500/30', icon: AlertTriangle },
 };
 
 const fmt = (n: number) => `₱${Number(n || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -91,71 +91,71 @@ export default function SubcontractorBillingsDisbursements({
   const [disbursing, setDisbursing] = useState(false);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
-// Default seed billing records linked to certified audits
-const SEED_PAYABLES: SubcontractorPayable[] = [
-  {
-    id: 'SPY-001',
-    disbursementDate: '2026-09-26T08:00:00.000Z',
-    payeeContractorId: 'CONT-1789598922028',
-    payeeContractorName: 'Brent',
-    tradeSpecialty: 'Concrete Pouring & Structural Works',
-    projectSite: 'NexBridge Software Hub',
-    auditId: 'AUD-1790357393677',
-    verifiedHeadcount: 15,
-    claimedHeadcount: 15,
-    billedDays: 3,
-    ratePerDay: 1000,
-    billedAmount: 45000,
-    paymentMethod: 'Bank Wire',
-    status: 'PENDING_AUDIT',
-    remarks: '15 Men Verified on-site for NexBridge Concrete Pouring shift. Gate muster 100% matched, pending fund release.',
-    createdBy: 'Finance Department',
-    createdAt: '2026-09-25T18:00:00.000Z'
-  },
-  {
-    id: 'SPY-002',
-    disbursementDate: '2026-09-20T08:00:00.000Z',
-    payeeContractorId: 'CONT-1789599140157',
-    payeeContractorName: 'Paul',
-    tradeSpecialty: 'Skilled Trade Crews (Electricians, Carpenters, Painters, Masons)',
-    projectSite: 'NexBridge Software Hub',
-    auditId: 'AUD-67542',
-    verifiedHeadcount: 10,
-    claimedHeadcount: 10,
-    billedDays: 2,
-    ratePerDay: 1400,
-    billedAmount: 28000,
-    approvedAmount: 28000,
-    paymentMethod: 'Check',
-    referenceNo: 'CHK-2026-0981',
-    status: 'APPROVED',
-    remarks: 'Quadrant B electrical rough-ins and conduit works verified with GPS photo proof. Approved for payout.',
-    createdBy: 'Finance Department',
-    createdAt: '2026-09-17T09:30:00.000Z'
-  },
-  {
-    id: 'SPY-003',
-    disbursementDate: '2026-09-18T08:00:00.000Z',
-    payeeContractorId: 'CONT-1789599064683',
-    payeeContractorName: 'Lizter',
-    tradeSpecialty: 'Site Foremen & General Labor Muster',
-    projectSite: 'NexBridge Software Hub',
-    auditId: 'AUD-08944',
-    verifiedHeadcount: 50,
-    claimedHeadcount: 50,
-    billedDays: 2.5,
-    ratePerDay: 1000,
-    billedAmount: 125000,
-    approvedAmount: 125000,
-    disbursedAmount: 125000,
-    paymentMethod: 'Bank Wire',
-    referenceNo: 'BW-889123-BDO',
-    status: 'PAID',
-    remarks: 'Full 50-man field supervision gang verified across all NexBridge levels. Disbursed via BDO wire.',
-    createdBy: 'Finance Department',
-    createdAt: '2026-09-17T14:15:00.000Z'
-  }
-];
+  // Default seed billing records linked to certified audits
+  const SEED_PAYABLES: SubcontractorPayable[] = [
+    {
+      id: 'SPY-001',
+      disbursementDate: '2026-09-26T08:00:00.000Z',
+      payeeContractorId: 'CONT-1789598922028',
+      payeeContractorName: 'Brent',
+      tradeSpecialty: 'Concrete Pouring & Structural Works',
+      projectSite: 'NexBridge Software Hub',
+      auditId: 'AUD-1790357393677',
+      verifiedHeadcount: 15,
+      claimedHeadcount: 15,
+      billedDays: 3,
+      ratePerDay: 1000,
+      billedAmount: 45000,
+      paymentMethod: 'Bank Wire',
+      status: 'PENDING_AUDIT',
+      remarks: '15 Men Verified on-site for NexBridge Concrete Pouring shift. Gate muster 100% matched, pending fund release.',
+      createdBy: 'Finance Department',
+      createdAt: '2026-09-25T18:00:00.000Z'
+    },
+    {
+      id: 'SPY-002',
+      disbursementDate: '2026-09-20T08:00:00.000Z',
+      payeeContractorId: 'CONT-1789599140157',
+      payeeContractorName: 'Paul',
+      tradeSpecialty: 'Skilled Trade Crews (Electricians, Carpenters, Painters, Masons)',
+      projectSite: 'NexBridge Software Hub',
+      auditId: 'AUD-67542',
+      verifiedHeadcount: 10,
+      claimedHeadcount: 10,
+      billedDays: 2,
+      ratePerDay: 1400,
+      billedAmount: 28000,
+      approvedAmount: 28000,
+      paymentMethod: 'Check',
+      referenceNo: 'CHK-2026-0981',
+      status: 'APPROVED',
+      remarks: 'Quadrant B electrical rough-ins and conduit works verified with GPS photo proof. Approved for payout.',
+      createdBy: 'Finance Department',
+      createdAt: '2026-09-17T09:30:00.000Z'
+    },
+    {
+      id: 'SPY-003',
+      disbursementDate: '2026-09-18T08:00:00.000Z',
+      payeeContractorId: 'CONT-1789599064683',
+      payeeContractorName: 'Lizter',
+      tradeSpecialty: 'Site Foremen & General Labor Muster',
+      projectSite: 'NexBridge Software Hub',
+      auditId: 'AUD-08944',
+      verifiedHeadcount: 50,
+      claimedHeadcount: 50,
+      billedDays: 2.5,
+      ratePerDay: 1000,
+      billedAmount: 125000,
+      approvedAmount: 125000,
+      disbursedAmount: 125000,
+      paymentMethod: 'Bank Wire',
+      referenceNo: 'BW-889123-BDO',
+      status: 'PAID',
+      remarks: 'Full 50-man field supervision gang verified across all NexBridge levels. Disbursed via BDO wire.',
+      createdBy: 'Finance Department',
+      createdAt: '2026-09-17T14:15:00.000Z'
+    }
+  ];
 
   // Sub-contractors from live contractor list and active trade crews / audited crews
   const tradeContractors = useMemo(() => {
@@ -234,11 +234,11 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
 
   // ── Derived KPIs ──
   const kpis = useMemo(() => {
-    const totalBilled   = records.reduce((s, r) => s + r.billedAmount, 0);
-    const approved      = records.filter(r => r.status === 'APPROVED' || r.status === 'PAID').reduce((s, r) => s + (r.approvedAmount ?? r.billedAmount), 0);
-    const pending       = records.filter(r => r.status === 'PENDING_AUDIT' || (r.status as string) === 'Pending Audit').reduce((s, r) => s + r.billedAmount, 0);
-    const disbursed     = records.filter(r => r.status === 'PAID' || (r.status as string) === 'Paid / Disbursed').reduce((s, r) => s + (r.disbursedAmount ?? r.approvedAmount ?? r.billedAmount), 0);
-    const disputed      = records.filter(r => r.status === 'DISPUTED' || (r.status as string) === 'Disputed').length;
+    const totalBilled = records.reduce((s, r) => s + r.billedAmount, 0);
+    const approved = records.filter(r => r.status === 'APPROVED' || r.status === 'PAID').reduce((s, r) => s + (r.approvedAmount ?? r.billedAmount), 0);
+    const pending = records.filter(r => r.status === 'PENDING_AUDIT' || (r.status as string) === 'Pending Audit').reduce((s, r) => s + r.billedAmount, 0);
+    const disbursed = records.filter(r => r.status === 'PAID' || (r.status as string) === 'Paid / Disbursed').reduce((s, r) => s + (r.disbursedAmount ?? r.approvedAmount ?? r.billedAmount), 0);
+    const disputed = records.filter(r => r.status === 'DISPUTED' || (r.status as string) === 'Disputed').length;
     return { totalBilled, approved, pending, disbursed, disputed };
   }, [records]);
 
@@ -455,14 +455,13 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
 
       {/* ── Toast ── */}
       {toastMsg && (
-        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl border text-sm font-semibold animate-in slide-in-from-bottom-4 duration-300 ${
-          toastMsg.type === 'success' ? 'bg-emerald-950 border-emerald-500/40 text-emerald-200' :
-          toastMsg.type === 'error'   ? 'bg-rose-950 border-rose-500/40 text-rose-200' :
-          'bg-sky-950 border-sky-500/40 text-sky-200'
-        }`}>
+        <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-2xl shadow-2xl border text-sm font-semibold animate-in slide-in-from-bottom-4 duration-300 ${toastMsg.type === 'success' ? 'bg-emerald-950 border-emerald-500/40 text-emerald-200' :
+            toastMsg.type === 'error' ? 'bg-rose-950 border-rose-500/40 text-rose-200' :
+              'bg-sky-950 border-sky-500/40 text-sky-200'
+          }`}>
           {toastMsg.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" /> :
-           toastMsg.type === 'error'   ? <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" /> :
-           <Info className="w-4 h-4 shrink-0 text-sky-400" />}
+            toastMsg.type === 'error' ? <AlertTriangle className="w-4 h-4 shrink-0 text-rose-400" /> :
+              <Info className="w-4 h-4 shrink-0 text-sky-400" />}
           <span>{toastMsg.text}</span>
           <button onClick={() => setToastMsg(null)} className="ml-1 text-slate-400 hover:text-white cursor-pointer"><X className="w-3.5 h-3.5" /></button>
         </div>
@@ -503,10 +502,10 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
       {/* ── KPI Cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3.5">
         {[
-          { label: 'Total Subcontractor Billed', value: fmt(kpis.totalBilled), sub: `${records.length} invoices`, icon: FileText, color: 'text-amber-400', ring: 'border-slate-800 bg-slate-900/90' },
-          { label: 'Approved for Payout', value: fmt(kpis.approved), sub: 'Audit-verified', icon: ShieldCheck, color: 'text-emerald-400', ring: 'border-slate-800 bg-slate-900/90' },
-          { label: 'Pending Disbursement', value: fmt(kpis.pending), sub: `${records.filter(r=>r.status==='PENDING_AUDIT').length} awaiting audit`, icon: Clock, color: 'text-amber-400', ring: 'border-slate-800 bg-slate-900/90' },
-          { label: 'Total Disbursed', value: fmt(kpis.disbursed), sub: `${records.filter(r=>r.status==='PAID').length} releases`, icon: CreditCard, color: 'text-sky-400', ring: 'border-slate-800 bg-slate-900/90' },
+          { label: 'Total Subcontractor Billed', value: fmt(kpis.totalBilled), sub: `${records.length} invoices`, icon: FileText, color: 'text-amber-400', ring: 'border-slate-800 bg-slate-900/60' },
+          { label: 'Approved for Payout', value: fmt(kpis.approved), sub: 'Audit-verified', icon: ShieldCheck, color: 'text-emerald-400', ring: 'border-slate-800 bg-slate-900/60' },
+          { label: 'Pending Disbursement', value: fmt(kpis.pending), sub: `${records.filter(r => r.status === 'PENDING_AUDIT').length} awaiting audit`, icon: Clock, color: 'text-amber-400', ring: 'border-slate-800 bg-slate-900/60' },
+          { label: 'Total Disbursed', value: fmt(kpis.disbursed), sub: `${records.filter(r => r.status === 'PAID').length} releases`, icon: CreditCard, color: 'text-sky-400', ring: 'border-slate-800 bg-slate-900/60' },
         ].map(card => (
           <div key={card.label} className={`rounded-xl border p-3.5 shadow-xs ${card.ring}`}>
             <div className="flex items-center justify-between mb-1.5">
@@ -514,7 +513,7 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
               <card.icon className={`w-4 h-4 ${card.color}`} />
             </div>
             <div className="text-lg font-bold text-white font-mono">{card.value}</div>
-            <div className="text-[10px] text-slate-500 mt-0.5">{card.sub}</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">{card.sub}</div>
           </div>
         ))}
       </div>
@@ -548,7 +547,7 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
           <option value="ALL">All Sites</option>
           {projectNames.map(p => <option key={p} value={p}>{p}</option>)}
         </select>
-        <div className="text-[10px] text-slate-500 whitespace-nowrap font-mono">
+        <div className="text-[10px] text-slate-400 whitespace-nowrap font-mono">
           {filtered.length} / {records.length} records
         </div>
       </div>
@@ -623,12 +622,12 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
                       {/* Date */}
                       <td className="py-3 px-4">
                         <div className="font-mono text-slate-300 text-xs">{fmtDate(record.disbursementDate || record.createdAt)}</div>
-                        <div className="text-[10px] text-slate-600 font-mono">{record.id}</div>
+                        <div className="text-[10px] text-slate-400 font-mono">{record.id}</div>
                       </td>
                       {/* Payee */}
                       <td className="py-3 px-4">
                         <div className="font-semibold text-slate-200 truncate max-w-[200px]">{record.payeeContractorName}</div>
-                        <div className="text-[10px] text-slate-500 mt-0.5 flex items-center gap-1">
+                        <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
                           <HardHat className="w-3 h-3 text-amber-500/60" />
                           {record.tradeSpecialty}
                         </div>
@@ -636,23 +635,22 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
                       {/* Project */}
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-1 text-slate-300">
-                          <Building2 className="w-3 h-3 text-slate-500 shrink-0" />
+                          <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
                           <span className="truncate max-w-[150px]">{record.projectSite}</span>
                         </div>
                       </td>
                       {/* Headcount */}
                       <td className="py-3 px-4">
-                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-bold ${
-                          headcountMatch
+                        <div className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[10px] font-bold ${headcountMatch
                             ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                             : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                        }`}>
+                          }`}>
                           <Users className="w-3 h-3" />
                           {record.verifiedHeadcount}/{record.claimedHeadcount} Verified
                         </div>
                         {record.auditId && (
-                          <div className="text-[9px] text-slate-600 mt-0.5 font-mono flex items-center gap-1">
-                            <ShieldCheck className="w-2.5 h-2.5 text-emerald-600" />
+                          <div className="text-[9px] text-slate-400 mt-0.5 font-mono flex items-center gap-1">
+                            <ShieldCheck className="w-2.5 h-2.5 text-emerald-500" />
                             Audit Linked
                           </div>
                         )}
@@ -667,11 +665,11 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
                       {/* Payment Channel */}
                       <td className="py-3 px-4">
                         <div className="flex items-center gap-1.5 text-slate-300">
-                          <CreditCard className="w-3 h-3 text-slate-500 shrink-0" />
+                          <CreditCard className="w-3 h-3 text-slate-400 shrink-0" />
                           <span className="truncate">{record.paymentMethod}</span>
                         </div>
                         {record.referenceNo && (
-                          <div className="text-[10px] text-slate-500 font-mono mt-0.5">#{record.referenceNo}</div>
+                          <div className="text-[10px] text-slate-400 font-mono mt-0.5">#{record.referenceNo}</div>
                         )}
                       </td>
                       {/* Status */}
@@ -750,22 +748,22 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
                         <td colSpan={8} className="px-6 py-4">
                           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 text-xs">
                             <div>
-                              <div className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Billing Basis</div>
+                              <div className="text-[10px] text-slate-400 font-mono uppercase tracking-wider mb-1">Billing Basis</div>
                               <div className="text-slate-200">{record.billedDays} days × {fmt(record.ratePerDay)}/day</div>
                             </div>
                             <div>
-                              <div className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Headcount Detail</div>
+                              <div className="text-[10px] text-slate-400 font-mono uppercase tracking-wider mb-1">Headcount Detail</div>
                               <div className="text-slate-200">Claimed: {record.claimedHeadcount} | Verified: {record.verifiedHeadcount}</div>
                               {record.claimedHeadcount > record.verifiedHeadcount && (
                                 <div className="text-rose-400 text-[10px] mt-0.5">⚠ {record.claimedHeadcount - record.verifiedHeadcount} ghost workers detected</div>
                               )}
                             </div>
                             <div>
-                              <div className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Disbursed Amount</div>
+                              <div className="text-[10px] text-slate-400 font-mono uppercase tracking-wider mb-1">Disbursed Amount</div>
                               <div className="text-slate-200 font-mono font-bold">{record.disbursedAmount !== undefined ? fmt(record.disbursedAmount) : '—'}</div>
                             </div>
                             <div>
-                              <div className="text-[10px] text-slate-500 font-mono uppercase tracking-wider mb-1">Remarks</div>
+                              <div className="text-[10px] text-slate-400 font-mono uppercase tracking-wider mb-1">Remarks</div>
                               <div className="text-slate-400">{record.remarks || '—'}</div>
                             </div>
                           </div>
@@ -784,8 +782,8 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
           <div className="border-t border-slate-800/60 bg-slate-900/50 px-6 py-3 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs">
             <span className="text-slate-400">{filtered.length} records shown</span>
             <div className="flex items-center gap-6 font-mono">
-              <span className="text-slate-400">Total Billed: <span className="text-amber-300 font-bold">{fmt(filtered.reduce((s,r)=>s+r.billedAmount,0))}</span></span>
-              <span className="text-slate-400">Total Disbursed: <span className="text-sky-300 font-bold">{fmt(filtered.filter(r=>r.status==='PAID').reduce((s,r)=>s+(r.disbursedAmount??r.approvedAmount??r.billedAmount),0))}</span></span>
+              <span className="text-slate-400">Total Billed: <span className="text-amber-300 font-bold">{fmt(filtered.reduce((s, r) => s + r.billedAmount, 0))}</span></span>
+              <span className="text-slate-400">Total Disbursed: <span className="text-sky-300 font-bold">{fmt(filtered.filter(r => r.status === 'PAID').reduce((s, r) => s + (r.disbursedAmount ?? r.approvedAmount ?? r.billedAmount), 0))}</span></span>
             </div>
           </div>
         )}
@@ -797,14 +795,14 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
           <div className="px-5 py-3 border-b border-slate-800/60 flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
             <span className="text-sm font-bold text-white">Certified Audit Headcounts — Available for Billing Linkage</span>
-            <span className="ml-auto text-[10px] font-mono text-slate-500">{manpowerAudits.length} audit records</span>
+            <span className="ml-auto text-[10px] font-mono text-slate-400">{manpowerAudits.length} audit records</span>
           </div>
           <div className="overflow-x-auto max-h-72 overflow-y-auto">
             <table className="w-full text-xs">
               <thead className="sticky top-0 bg-slate-900/90">
                 <tr className="border-b border-slate-800/60">
                   {['Date', 'Subcontractor / Crew', 'Trade', 'Project Site', 'Claimed', 'Verified', 'Status', 'Action'].map(h => (
-                    <th key={h} className="py-2.5 px-3 text-left text-[10px] font-bold font-mono uppercase tracking-widest text-slate-500">{h}</th>
+                    <th key={h} className="py-2.5 px-3 text-left text-[10px] font-bold font-mono uppercase tracking-widest text-slate-400">{h}</th>
                   ))}
                 </tr>
               </thead>
@@ -825,11 +823,10 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
                         </span>
                       </td>
                       <td className="py-2 px-3">
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
-                          audit.verificationStatus === 'VERIFIED_MATCH'
+                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${audit.verificationStatus === 'VERIFIED_MATCH'
                             ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
                             : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
-                        }`}>
+                          }`}>
                           {audit.verificationStatus === 'VERIFIED_MATCH' ? '✓ Verified' : '⚠ Flagged'}
                         </span>
                       </td>
@@ -1038,8 +1035,8 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
                 {/* Status */}
                 <div>
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Initial Status</label>
-                  <select 
-                    value={!form.auditId ? 'PENDING_AUDIT' : form.status} 
+                  <select
+                    value={!form.auditId ? 'PENDING_AUDIT' : form.status}
                     disabled={!form.auditId}
                     onChange={e => handleFormChange('status', e.target.value as any)}
                     className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
@@ -1059,13 +1056,13 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
                   <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
                     Audit Notes / Justification {!form.auditId && <span className="text-amber-400 font-bold">* (Required for Unverified Payouts)</span>}
                   </label>
-                  <textarea 
-                    value={form.remarks} 
-                    onChange={e => handleFormChange('remarks', e.target.value)} 
+                  <textarea
+                    value={form.remarks}
+                    onChange={e => handleFormChange('remarks', e.target.value)}
                     rows={2}
                     required={!form.auditId}
                     placeholder={!form.auditId ? "Justification required for executive OM sign-off on unverified manual payout..." : "Notes, billing dispute context, etc."}
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 resize-none" 
+                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 resize-none"
                   />
                 </div>
               </div>
@@ -1110,21 +1107,21 @@ const SEED_PAYABLES: SubcontractorPayable[] = [
                 <div className="flex justify-between"><span className="text-slate-400">Payee</span><span className="text-white font-semibold">{disburseTarget.payeeContractorName}</span></div>
                 <div className="flex justify-between"><span className="text-slate-400">Project</span><span className="text-slate-300">{disburseTarget.projectSite}</span></div>
                 <div className="flex justify-between"><span className="text-slate-400">Amount to Release</span><span className="text-sky-300 font-black font-mono">{fmt(disburseTarget.approvedAmount ?? disburseTarget.billedAmount)}</span></div>
-              <div className="flex justify-between"><span className="text-slate-400">Payment Channel</span><span className="text-slate-300">{disburseTarget.paymentMethod}</span></div>
-            </div>
-            <div>
-              <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Reference / Voucher No.</label>
-              <input value={disburseRef} onChange={e => setDisburseRef(e.target.value)}
-                placeholder="e.g. Check #1043, Wire TXN-20260927"
-                className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-sky-500/60" />
-            </div>
-            <div className="flex justify-end gap-3 pt-1">
-              <button onClick={() => setDisburseTarget(null)} className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer">Cancel</button>
-              <button onClick={handleDisburse} disabled={disbursing} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-colors cursor-pointer disabled:opacity-60 shadow-xs">
-                {disbursing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                {disbursing ? 'Processing…' : 'Confirm Disbursement'}
-              </button>
-            </div>
+                <div className="flex justify-between"><span className="text-slate-400">Payment Channel</span><span className="text-slate-300">{disburseTarget.paymentMethod}</span></div>
+              </div>
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Reference / Voucher No.</label>
+                <input value={disburseRef} onChange={e => setDisburseRef(e.target.value)}
+                  placeholder="e.g. Check #1043, Wire TXN-20260927"
+                  className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-sky-500/60" />
+              </div>
+              <div className="flex justify-end gap-3 pt-1">
+                <button onClick={() => setDisburseTarget(null)} className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer">Cancel</button>
+                <button onClick={handleDisburse} disabled={disbursing} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-colors cursor-pointer disabled:opacity-60 shadow-xs">
+                  {disbursing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
+                  {disbursing ? 'Processing…' : 'Confirm Disbursement'}
+                </button>
+              </div>
             </div>
           </div>
         </div>

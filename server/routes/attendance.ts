@@ -190,16 +190,10 @@ attendanceRouter.get('/roster', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE'
         w.created_at,
         w.updated_at,
         CASE 
-          WHEN LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%crew%' 
-            OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%team%'
-            OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%gang%'
-            OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%manpower%'
-            OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%subcontractor%'
-            OR LOWER(COALESCE(w.name, '')) LIKE '%manpower%'
-            OR LOWER(COALESCE(w.name, '')) LIKE '%crew%'
-            OR c."employmentType" = 'OUTSOURCED'
+          WHEN c."employmentType" = 'OUTSOURCED' 
             OR (c."activeManpower" IS NOT NULL AND c."activeManpower" > 1) 
-            OR c."workforceCategory" = 'TRADE_CREW' THEN 'Trade Crew'
+            OR LOWER(COALESCE(c.company, '')) LIKE '%manpower supply%'
+            OR LOWER(COALESCE(c.company, '')) LIKE '%subcontractor%' THEN 'Subcontractor'
           ELSE 'Artisan'
         END as workforce_class
       FROM workers w
@@ -220,41 +214,8 @@ attendanceRouter.get('/roster', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE'
         AND NOT (
           c."employmentType" = 'OUTSOURCED'
           OR (c."activeManpower" IS NOT NULL AND c."activeManpower" > 1)
-          OR COALESCE(c."workforceCategory", '') = 'TRADE_CREW'
-          OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%manpower supply%'
-          OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%subcontractor%'
-          OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%trade crew%'
-          OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%crew%'
-          OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%gang%'
-          OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%facilities maintenance%'
-          OR LOWER(COALESCE(w.name, '')) LIKE '%manpower supply%'
-          OR LOWER(COALESCE(w.name, '')) LIKE '%trade crew%'
-          OR LOWER(COALESCE(w.name, '')) LIKE '%facilities maintenance%'
-          OR LOWER(COALESCE(w.name, '')) LIKE '%subcontractor%'
-          OR LOWER(COALESCE(c.name, '')) LIKE '%manpower supply%'
-          OR LOWER(COALESCE(c.name, '')) LIKE '%facilities maintenance%'
-          OR LOWER(COALESCE(c.name, '')) LIKE '%subcontractor%'
-          OR LOWER(COALESCE(c.department, '')) LIKE '%executive%'
-          OR LOWER(COALESCE(c.department, '')) LIKE '%corporate%'
-          OR LOWER(COALESCE(c.department, '')) LIKE '%finance%'
-          OR LOWER(COALESCE(c.department, '')) LIKE '%accounting%'
-          OR LOWER(COALESCE(c.department, '')) LIKE '%human resources%'
-          OR LOWER(COALESCE(c.department, '')) LIKE '%admin%'
-          OR LOWER(COALESCE(c.department, '')) LIKE '%legal%'
-          OR LOWER(COALESCE(c.department, '')) LIKE '%procurement%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%coo%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%ceo%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%president%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%director%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%architect%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%human resources%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%accounting%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%procurement%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%admin%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%project manager%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%site engineer%'
-          OR LOWER(COALESCE(w.position, c."roleTitle", c.specialty, '')) LIKE '%safety officer%'
-          OR COALESCE(c."workforceCategory", '') = 'OFFICE_STAFF'
+          OR LOWER(COALESCE(c.company, '')) LIKE '%manpower supply%'
+          OR LOWER(COALESCE(c.company, '')) LIKE '%subcontractor%'
         )
       ORDER BY w.id, w.created_at DESC
     `;
@@ -269,22 +230,17 @@ attendanceRouter.get('/roster', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE'
 
     for (const r of result.rows) {
       if (!r.id || seenIds.has(r.id)) continue;
-      // Strictly exclude Corporate, Trade Crew, and Subcontractor entities from In-House Artisan Roll-Call
-      if (r.workforce_class === 'Corporate' || r.workforce_class === 'Trade Crew' || r.workforce_class === 'Subcontractor') continue;
+      // Strictly exclude Subcontractor external agencies from In-House Roll-Call
+      if (r.workforce_class === 'Subcontractor') continue;
 
       const rawName = (r.name || `${r.first_name || ''} ${r.last_name || ''}`).trim();
       const normName = rawName.toLowerCase();
       const posLower = (r.position || r.trade || '').toLowerCase();
 
-      // Additional defense against crew providers or agency titles
+      // Additional defense against external supply agencies
       if (
         normName.includes('manpower supply') ||
-        normName.includes('trade crew') ||
-        normName.includes('facilities maintenance') ||
-        normName.includes('subcontractor') ||
-        posLower.includes('manpower supply') ||
-        posLower.includes('trade crew') ||
-        posLower.includes('subcontractor')
+        (posLower.includes('subcontractor') && !posLower.includes('coordinator'))
       ) {
         continue;
       }
@@ -324,7 +280,7 @@ attendanceRouter.get('/roster', requireRole(['TIMEKEEPER', 'ENGINEER', 'FINANCE'
 // ============================================================================
 attendanceRouter.post('/', requireRole(['TIMEKEEPER', 'ADMIN']), async (req: Request, res: Response) => {
   try {
-    const { 
+    const {
       projectId, project_id, date, records, entries,
       override_reason, overrideReason,
       overridden_by, overriddenBy
@@ -376,20 +332,31 @@ attendanceRouter.post('/', requireRole(['TIMEKEEPER', 'ADMIN']), async (req: Req
 
     const client = await pool.connect();
     let savedCount = 0;
+    let hadExistingLogs = false;
+    const overrides: string[] = [];
+    const nowIso = new Date().toISOString();
+
     try {
       await client.query('BEGIN');
 
-      // Fetch pre-existing records to track OM overrides for audit logging
+      // Fetch pre-existing records and worker names to track modifications/overrides for audit logging
       const existingRes = await client.query(
-        `SELECT worker_id, status, overtime_hours FROM attendance_logs WHERE project_id = $1 AND date = $2::DATE`,
+        `SELECT a.worker_id, a.status, a.overtime_hours,
+                COALESCE(w.name, CONCAT(w.first_name, ' ', w.last_name)) as worker_name
+         FROM attendance_logs a
+         LEFT JOIN workers w ON a.worker_id = w.id
+         WHERE a.project_id = $1 AND a.date = $2::DATE`,
         [targetProject, effectiveDate]
       );
-      const existingMap = new Map<string, { status: string; otHours: number }>();
+      const existingMap = new Map<string, { status: string; otHours: number; name: string }>();
       for (const row of existingRes.rows) {
-        existingMap.set(row.worker_id, { status: row.status, otHours: Number(row.overtime_hours || 0) });
+        existingMap.set(row.worker_id, { 
+          status: row.status, 
+          otHours: Number(row.overtime_hours || 0),
+          name: row.worker_name || row.worker_id
+        });
       }
-
-      const overrides: string[] = [];
+      hadExistingLogs = existingRes.rows.length > 0;
 
       // Query active worker IDs to ensure inactive workers cannot be checked in
       const activeWorkersRes = await client.query(
@@ -405,7 +372,7 @@ attendanceRouter.post('/', requireRole(['TIMEKEEPER', 'ADMIN']), async (req: Req
 
         const prev = existingMap.get(rec.workerId);
         if (prev && (prev.status !== status || prev.otHours !== otHours)) {
-          overrides.push(`Worker ${rec.workerId}: status [${prev.status} -> ${status}], OT [${prev.otHours}h -> ${otHours}h]`);
+          overrides.push(`${prev.name}: status [${prev.status} -> ${status}], OT [${prev.otHours}h -> ${otHours}h]`);
         }
 
         await client.query(
@@ -425,24 +392,43 @@ attendanceRouter.post('/', requireRole(['TIMEKEEPER', 'ADMIN']), async (req: Req
         savedCount++;
       }
 
-      // If user is OM / ADMIN or if override reason was provided, record audit log in process_audit_logs
-      const isOM = req.user?.role === 'ADMIN';
-      if ((isOM && (overrideReasonText || overrides.length > 0)) || overrideReasonText) {
-        const auditDetails = overrideReasonText
-          ? `Administrative Attendance Override on ${effectiveDate} for project ${targetProject}. Reason: "${overrideReasonText}". ${overrides.length > 0 ? `Modifications: ${overrides.join('; ')}` : `Records saved: ${savedCount}`}`
-          : `Attendance override applied on ${effectiveDate} across ${overrides.length} worker record(s): ${overrides.join('; ')}`;
+      // Append centralized audit log for attendance submission, update, or OM override
+      const actorId = req.user?.id || 'usr-tk';
+      const actorRole = req.user?.role || 'TIMEKEEPER';
+      const actorName = req.user?.name || (actorRole === 'TIMEKEEPER' ? 'Site Timekeeper' : 'Operations Manager');
+      const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
+      const nowIso = new Date().toISOString();
+      const isOM = actorRole === 'ADMIN';
 
-        await client.query(`
-          INSERT INTO process_audit_logs (id, "entityType", "entityId", action, "actorName", "actorRole", details, "createdAt")
-          VALUES ($1, 'ATTENDANCE', $2, 'ATTENDANCE_OVERRIDE', $3, 'OPERATIONS_MANAGER', $4, CURRENT_TIMESTAMP)
-        `, [
-          `AUDIT-${Date.now()}`,
-          targetProject,
-          req.user?.name || 'Operations Manager',
-          auditDetails
-        ]);
-        broadcastChange('auditLogs');
+      let auditAction = 'ATTENDANCE_LOGGED';
+      let auditDetails = '';
+
+      if (overrideReasonText || (isOM && overrides.length > 0)) {
+        auditAction = 'ATTENDANCE_OVERRIDE';
+        auditDetails = `Attendance Override on ${effectiveDate} for project ${targetProject}. Reason: "${overrideReasonText || 'OM Adjustment'}". ${overrides.length > 0 ? `Modifications: ${overrides.join('; ')}` : `Records saved: ${savedCount}`}. [User: ${actorId}, Role: ${actorRole}, IP: ${clientIp}, Timestamp: ${nowIso}]`;
+      } else if (hadExistingLogs && overrides.length > 0) {
+        auditAction = 'ATTENDANCE_UPDATED';
+        auditDetails = `Timekeeper updated attendance for ${effectiveDate} (${overrides.length} change(s)): ${overrides.join('; ')}. [User: ${actorId}, Role: ${actorRole}, IP: ${clientIp}, Timestamp: ${nowIso}]`;
+      } else if (hadExistingLogs) {
+        auditAction = 'ATTENDANCE_REVERIFIED';
+        auditDetails = `Timekeeper re-verified existing attendance muster roll on ${effectiveDate} for project ${targetProject} (${savedCount} worker(s)). [User: ${actorId}, Role: ${actorRole}, IP: ${clientIp}, Timestamp: ${nowIso}]`;
+      } else {
+        auditAction = 'ATTENDANCE_LOGGED';
+        auditDetails = `Daily artisan roll-call submitted on ${effectiveDate} for project ${targetProject}. ${savedCount} worker record(s) logged. [User: ${actorId}, Role: ${actorRole}, IP: ${clientIp}, Timestamp: ${nowIso}]`;
       }
+
+      await client.query(`
+        INSERT INTO process_audit_logs (id, "entityType", "entityId", action, "actorName", "actorRole", details, "createdAt")
+        VALUES ($1, 'ATTENDANCE', $2, $3, $4, $5, $6, CURRENT_TIMESTAMP)
+      `, [
+        `AUDIT-${Date.now()}`,
+        targetProject,
+        auditAction,
+        actorName,
+        actorRole,
+        auditDetails
+      ]);
+      broadcastChange('auditLogs');
 
       await client.query('COMMIT');
     } catch (txError) {
@@ -456,10 +442,15 @@ attendanceRouter.post('/', requireRole(['TIMEKEEPER', 'ADMIN']), async (req: Req
 
     res.json({
       success: true,
-      message: `Successfully logged daily attendance for ${savedCount} worker(s).`,
+      message: hadExistingLogs
+        ? `Successfully updated daily attendance for ${savedCount} worker(s).`
+        : `Successfully logged daily attendance for ${savedCount} worker(s).`,
       count: savedCount,
       projectId: targetProject,
-      date: effectiveDate
+      date: effectiveDate,
+      isUpdate: hadExistingLogs,
+      modifiedCount: overrides.length,
+      updatedAt: nowIso
     });
   } catch (error: any) {
     console.error('Error submitting batch attendance:', error);

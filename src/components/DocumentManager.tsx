@@ -3,14 +3,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import { 
   FileText, Upload, Download, Eye, CheckCircle2, 
   Clock, ShieldAlert, Folder, Filter, Plus, X, FileCode,
   Edit3, Trash2, Check, AlertTriangle, FileSpreadsheet,
   Maximize2, ZoomIn, ZoomOut, RotateCcw, Layers, MapPin,
   BarChart3, RefreshCw, SlidersHorizontal, ArrowRight,
-  ExternalLink, Sparkles, FolderKanban, CheckCheck, Compass
+  ExternalLink, Sparkles, FolderKanban, CheckCheck, Compass,
+  LayoutGrid, List, ArrowUpDown, ArrowUp, ArrowDown,
+  HardDrive, ChevronDown, CheckSquare, Square, Search,
+  Calendar, User, Tag, FileCheck, FileArchive,
+  Database, AlertCircle
 } from 'lucide-react';
 import { ProjectDocument, CivilWorksMilestone } from '../types';
 
@@ -36,6 +40,10 @@ interface ScheduleRow {
   status: 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED';
 }
 
+export type SortField = 'title' | 'createdAt' | 'fileSize' | 'category' | 'status';
+export type SortDirection = 'asc' | 'desc';
+export type ViewMode = 'list' | 'grid';
+
 export const DEFAULT_SEED_DOCUMENTS: ProjectDocument[] = [
   {
     id: 'doc-arch-finishes-v2',
@@ -47,7 +55,7 @@ export const DEFAULT_SEED_DOCUMENTS: ProjectDocument[] = [
     status: 'APPROVED',
     uploadedBy: 'Ar. Jonathan Dela Cruz',
     notes: 'Architectural layout, ceiling reflected plan, and material specifications schedule.',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-09-24T08:30:00.000Z'
   },
   {
     id: 'doc-mepfs-singleline',
@@ -59,7 +67,7 @@ export const DEFAULT_SEED_DOCUMENTS: ProjectDocument[] = [
     status: 'APPROVED',
     uploadedBy: 'Engr. Carlos Mendoza',
     notes: 'Electrical single-line diagram, HVAC load calculations, and sanitary plumbing layout.',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-09-22T14:15:00.000Z'
   },
   {
     id: 'doc-boq-prj4693',
@@ -71,7 +79,7 @@ export const DEFAULT_SEED_DOCUMENTS: ProjectDocument[] = [
     status: 'APPROVED',
     uploadedBy: 'Engr. Ricardo Ramos',
     notes: 'Full itemized turnkey fit-out bill of quantities with materials breakdown and labor costings.',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-09-25T11:00:00.000Z'
   },
   {
     id: 'doc-permit-barangay-clearance',
@@ -83,9 +91,73 @@ export const DEFAULT_SEED_DOCUMENTS: ProjectDocument[] = [
     status: 'APPROVED',
     uploadedBy: 'Mauro R. Principe Jr.',
     notes: 'Approved local government building clearance and zoning endorsement certificate.',
-    createdAt: new Date().toISOString()
+    createdAt: '2026-09-20T09:45:00.000Z'
+  },
+  {
+    id: 'doc-two-story-plans',
+    title: 'Two story house plans.dwg',
+    category: 'CAD_DRAWING',
+    fileUrl: '/documents/Two_story_house_plans.dwg',
+    fileSize: '0.3 MB',
+    version: '1.0',
+    status: 'IN_REVIEW',
+    uploadedBy: 'Operations',
+    notes: 'Minor revisions changes upon client request.',
+    createdAt: '2026-09-26T16:20:00.000Z'
   }
 ];
+
+// Database maximum capacity thresholds (PostgreSQL / Express API)
+export const MAX_UPLOAD_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB
+export const MAX_UPLOAD_SIZE_LABEL = '50 MB';
+
+// Enterprise Database & Cloud Archive Total Storage Capacity (10 GB Standard Enterprise Quota)
+export const TOTAL_STORAGE_QUOTA_MB = 10240; // 10 GB
+export const TOTAL_STORAGE_QUOTA_BYTES = TOTAL_STORAGE_QUOTA_MB * 1024 * 1024;
+
+// Helper to format bytes into readable KB, MB, or GB string
+export const formatBytesToReadable = (bytes: number): string => {
+  if (bytes >= 1024 * 1024 * 1024) {
+    return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+  }
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(0)} KB`;
+  }
+  return `${bytes} B`;
+};
+
+// Helper to convert size string to bytes for precise mathematical sorting
+const parseFileSizeToBytes = (sizeStr?: string): number => {
+  if (!sizeStr) return 0;
+  const match = sizeStr.match(/([\d.]+)\s*(MB|KB|GB|B)/i);
+  if (!match) return 0;
+  const num = parseFloat(match[1]);
+  const unit = match[2].toUpperCase();
+  if (unit === 'GB') return num * 1024 * 1024 * 1024;
+  if (unit === 'MB') return num * 1024 * 1024;
+  if (unit === 'KB') return num * 1024;
+  return num;
+};
+
+// Formats file date to readable OneDrive format
+const formatOneDriveDate = (dateStr?: string): string => {
+  if (!dateStr) return 'Recently';
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr;
+    const now = new Date();
+    const diffMs = now.getTime() - d.getTime();
+    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+    if (diffDays === 0) return `Today, ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    if (diffDays === 1) return `Yesterday, ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return dateStr;
+  }
+};
 
 export default function DocumentManager({ 
   documents, 
@@ -97,14 +169,32 @@ export default function DocumentManager({
   onSyncSchedule,
   onNavigateTab
 }: DocumentManagerProps) {
+  // Navigation & Category state
   const [activeCategory, setActiveCategory] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'APPROVED' | 'IN_REVIEW' | 'DRAFT'>('ALL');
+
+  // OneDrive View & Sorting Controls
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    try {
+      const stored = localStorage.getItem('ctvill_doc_view_mode');
+      return (stored === 'grid' || stored === 'list') ? stored : 'list';
+    } catch {
+      return 'list';
+    }
+  });
+
+  const [sortField, setSortField] = useState<SortField>('createdAt');
+  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
+  const [isSortDropdownOpen, setIsSortDropdownOpen] = useState<boolean>(false);
+
   // Modals state
   const [isUploadModalOpen, setIsUploadModalOpen] = useState<boolean>(false);
   const [editDoc, setEditDoc] = useState<ProjectDocument | null>(null);
   const [deleteConfirmDoc, setDeleteConfirmDoc] = useState<ProjectDocument | null>(null);
   const [previewDoc, setPreviewDoc] = useState<ProjectDocument | null>(null);
+  const [toastNotification, setToastNotification] = useState<string | null>(null);
 
   // Upload Form State
   const [uploadTitle, setUploadTitle] = useState<string>('');
@@ -114,6 +204,8 @@ export default function DocumentManager({
   const [uploadFileSize, setUploadFileSize] = useState<string>('3.2 MB');
   const [uploadNotes, setUploadNotes] = useState<string>('');
   const [selectedFileName, setSelectedFileName] = useState<string>('');
+  const [selectedFileSizeBytes, setSelectedFileSizeBytes] = useState<number>(0);
+  const [fileSizeError, setFileSizeError] = useState<string | null>(null);
 
   // Edit Form State
   const [editTitle, setEditTitle] = useState<string>('');
@@ -171,6 +263,18 @@ export default function DocumentManager({
     { id: 'LGU_CLEARANCE', label: 'Permits & Clearances' },
   ];
 
+  const showToast = (msg: string) => {
+    setToastNotification(msg);
+    setTimeout(() => setToastNotification(null), 3500);
+  };
+
+  const handleToggleViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    try {
+      localStorage.setItem('ctvill_doc_view_mode', mode);
+    } catch { /* silent */ }
+  };
+
   // Detect file type for specialized previewer
   const isCadDocument = (doc: ProjectDocument) => {
     const title = doc.title.toLowerCase();
@@ -182,11 +286,80 @@ export default function DocumentManager({
     return title.endsWith('.xlsx') || title.endsWith('.csv') || title.endsWith('.xls') || title.includes('schedule') || title.includes('gantt') || title.includes('boq') || title.includes('wbs') || title.includes('timeline');
   };
 
+  const isPdfDocument = (doc: ProjectDocument) => {
+    const title = doc.title.toLowerCase();
+    return title.endsWith('.pdf') || doc.category === 'LGU_CLEARANCE';
+  };
+
+  // Helper for OneDrive-style file icon and colors
+  const getFileIconConfig = (doc: ProjectDocument) => {
+    const title = doc.title.toLowerCase();
+    if (title.endsWith('.pdf')) {
+      return {
+        icon: FileText,
+        bgColor: 'bg-rose-950/80',
+        borderColor: 'border-rose-700/60',
+        textColor: 'text-rose-400',
+        label: 'PDF',
+      };
+    }
+    if (title.endsWith('.xlsx') || title.endsWith('.xls') || title.endsWith('.csv') || doc.category === 'SPECIFICATIONS') {
+      return {
+        icon: FileSpreadsheet,
+        bgColor: 'bg-emerald-950/80',
+        borderColor: 'border-emerald-700/60',
+        textColor: 'text-emerald-400',
+        label: 'XLSX',
+      };
+    }
+    if (title.endsWith('.dwg') || title.endsWith('.dxf') || doc.category === 'CAD_DRAWING' || doc.category === 'STRUCTURAL_PLAN') {
+      return {
+        icon: FileCode,
+        bgColor: 'bg-amber-950/80',
+        borderColor: 'border-amber-700/60',
+        textColor: 'text-amber-400',
+        label: 'CAD',
+      };
+    }
+    return {
+      icon: FileText,
+      bgColor: 'bg-blue-950/80',
+      borderColor: 'border-blue-700/60',
+      textColor: 'text-blue-400',
+      label: 'DOC',
+    };
+  };
+
+  // Real download trigger
+  const handleDownloadFile = (doc: ProjectDocument) => {
+    const dummyContent = `CTVill Construction ERP Centralized Project Archive\nDocument: ${doc.title}\nVersion: ${doc.version}\nCategory: ${doc.category}\nStatus: ${doc.status}\nAuthor: ${doc.uploadedBy}\nNotes: ${doc.notes || 'None'}\nExported: ${new Date().toISOString()}`;
+    const blob = new Blob([dummyContent], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = doc.title;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast(`Downloaded: ${doc.title}`);
+  };
+
   // Handle File Input Selection
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setSelectedFileName(file.name);
+      setSelectedFileSizeBytes(file.size);
+
+      // Validate against the database max upload threshold (50 MB)
+      if (file.size > MAX_UPLOAD_SIZE_BYTES) {
+        const actualMb = (file.size / (1024 * 1024)).toFixed(1);
+        setFileSizeError(`File size (${actualMb} MB) exceeds the maximum database limit of ${MAX_UPLOAD_SIZE_LABEL}. Please choose an asset under 50 MB.`);
+      } else {
+        setFileSizeError(null);
+      }
+
       if (!uploadTitle.trim()) {
         setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
       }
@@ -209,6 +382,11 @@ export default function DocumentManager({
     e.preventDefault();
     if (!uploadTitle.trim()) return;
 
+    if (fileSizeError || selectedFileSizeBytes > MAX_UPLOAD_SIZE_BYTES) {
+      showToast('Cannot upload: File exceeds the maximum database limit of 50 MB');
+      return;
+    }
+
     onUploadDocument({
       title: uploadTitle.trim(),
       category: uploadCategory,
@@ -222,7 +400,10 @@ export default function DocumentManager({
     setUploadTitle('');
     setUploadNotes('');
     setSelectedFileName('');
+    setSelectedFileSizeBytes(0);
+    setFileSizeError(null);
     setIsUploadModalOpen(false);
+    showToast(`Uploaded "${uploadTitle.trim()}" to project archive`);
   };
 
   // Open Edit Modal
@@ -249,12 +430,14 @@ export default function DocumentManager({
     });
 
     setEditDoc(null);
+    showToast(`Updated document details`);
   };
 
   // Confirm Delete
   const handleConfirmDelete = () => {
     if (deleteConfirmDoc && onDeleteDocument) {
       onDeleteDocument(deleteConfirmDoc.id);
+      showToast(`Deleted document "${deleteConfirmDoc.title}"`);
       setDeleteConfirmDoc(null);
     }
   };
@@ -289,6 +472,7 @@ export default function DocumentManager({
     }
   };
 
+  // Merge seed documents if not present
   const effectiveDocuments = useMemo(() => {
     const list = [...(documents || [])];
     for (const seed of DEFAULT_SEED_DOCUMENTS) {
@@ -300,47 +484,341 @@ export default function DocumentManager({
     return list;
   }, [documents]);
 
-  const filteredDocs = useMemo(() => {
-    return effectiveDocuments.filter((d) => {
+  // Total Storage Metric Calculation (Used, Maximum Quota, Available)
+  const storageMetrics = useMemo(() => {
+    let totalBytes = 0;
+    const catCounts: Record<string, number> = { CAD: 0, Excel: 0, PDF: 0, Other: 0 };
+    for (const doc of effectiveDocuments) {
+      totalBytes += parseFileSizeToBytes(doc.fileSize);
+      const title = doc.title.toLowerCase();
+      if (title.endsWith('.dwg') || title.endsWith('.dxf') || doc.category === 'CAD_DRAWING' || doc.category === 'STRUCTURAL_PLAN') {
+        catCounts.CAD += 1;
+      } else if (title.endsWith('.xlsx') || title.endsWith('.csv') || doc.category === 'SPECIFICATIONS') {
+        catCounts.Excel += 1;
+      } else if (title.endsWith('.pdf') || doc.category === 'LGU_CLEARANCE' || doc.category === 'ARCHITECTURAL') {
+        catCounts.PDF += 1;
+      } else {
+        catCounts.Other += 1;
+      }
+    }
+    const totalMb = (totalBytes / (1024 * 1024)).toFixed(1);
+    const usedBytes = totalBytes;
+    const usedLabel = formatBytesToReadable(usedBytes);
+    const maxBytes = TOTAL_STORAGE_QUOTA_BYTES;
+    const maxLabel = formatBytesToReadable(maxBytes);
+    const availableBytes = Math.max(0, TOTAL_STORAGE_QUOTA_BYTES - usedBytes);
+    const availableLabel = formatBytesToReadable(availableBytes);
+    const percentageUsedNum = Math.min(100, (usedBytes / TOTAL_STORAGE_QUOTA_BYTES) * 100);
+    const percentageUsed = percentageUsedNum.toFixed(1);
+    const percentageAvailable = Math.max(0, 100 - percentageUsedNum).toFixed(1);
+
+    return { 
+      totalMb, 
+      usedBytes,
+      usedLabel,
+      maxBytes,
+      maxLabel,
+      availableBytes,
+      availableLabel,
+      percentageUsed,
+      percentageAvailable,
+      totalCount: effectiveDocuments.length, 
+      catCounts 
+    };
+  }, [effectiveDocuments]);
+
+  // Sorting Handler
+  const handleSortChange = (field: SortField) => {
+    if (sortField === field) {
+      setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortDirection(field === 'createdAt' || field === 'fileSize' ? 'desc' : 'asc');
+    }
+  };
+
+  // Filtered & Sorted Documents
+  const filteredAndSortedDocs = useMemo(() => {
+    const filtered = effectiveDocuments.filter((d) => {
       const matchesCategory = activeCategory === 'ALL' || d.category === activeCategory;
-      const matchesSearch = !searchQuery || d.title.toLowerCase().includes(searchQuery.toLowerCase()) || (d.notes && d.notes.toLowerCase().includes(searchQuery.toLowerCase()));
-      return matchesCategory && matchesSearch;
+      const matchesStatus = statusFilter === 'ALL' || d.status === statusFilter;
+      const q = searchQuery.toLowerCase().trim();
+      const matchesSearch = !q || 
+        d.title.toLowerCase().includes(q) || 
+        (d.notes && d.notes.toLowerCase().includes(q)) ||
+        d.uploadedBy.toLowerCase().includes(q) ||
+        d.version.toLowerCase().includes(q);
+      return matchesCategory && matchesStatus && matchesSearch;
     });
-  }, [effectiveDocuments, activeCategory, searchQuery]);
+
+    return filtered.sort((a, b) => {
+      let comparison = 0;
+      if (sortField === 'title') {
+        comparison = a.title.localeCompare(b.title);
+      } else if (sortField === 'createdAt') {
+        const timeA = new Date(a.createdAt || 0).getTime();
+        const timeB = new Date(b.createdAt || 0).getTime();
+        comparison = timeA - timeB;
+      } else if (sortField === 'fileSize') {
+        const bytesA = parseFileSizeToBytes(a.fileSize);
+        const bytesB = parseFileSizeToBytes(b.fileSize);
+        comparison = bytesA - bytesB;
+      } else if (sortField === 'category') {
+        comparison = a.category.localeCompare(b.category);
+      } else if (sortField === 'status') {
+        comparison = a.status.localeCompare(b.status);
+      }
+
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  }, [effectiveDocuments, activeCategory, statusFilter, searchQuery, sortField, sortDirection]);
+
+  // Selection Logic
+  const handleToggleSelectDoc = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setSelectedDocIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedDocIds.size === filteredAndSortedDocs.length) {
+      setSelectedDocIds(new Set());
+    } else {
+      setSelectedDocIds(new Set(filteredAndSortedDocs.map(d => d.id)));
+    }
+  };
+
+  const handleBatchDownload = () => {
+    const selected = filteredAndSortedDocs.filter(d => selectedDocIds.has(d.id));
+    if (selected.length === 0) return;
+    selected.forEach(doc => handleDownloadFile(doc));
+    showToast(`Triggered batch download of ${selected.length} files`);
+  };
+
+  const handleBatchApprove = () => {
+    if (!onUpdateDocument) return;
+    const selected = filteredAndSortedDocs.filter(d => selectedDocIds.has(d.id));
+    selected.forEach(doc => {
+      onUpdateDocument(doc.id, { status: 'APPROVED' });
+    });
+    setSelectedDocIds(new Set());
+    showToast(`Marked ${selected.length} document(s) as Approved`);
+  };
+
+  const activeSortLabel = useMemo(() => {
+    switch (sortField) {
+      case 'title': return sortDirection === 'asc' ? 'Name (A to Z)' : 'Name (Z to A)';
+      case 'createdAt': return sortDirection === 'desc' ? 'Modified (Newest)' : 'Modified (Oldest)';
+      case 'fileSize': return sortDirection === 'desc' ? 'Size (Largest)' : 'Size (Smallest)';
+      case 'category': return 'File Category';
+      case 'status': return 'Approval Status';
+      default: return 'Sort';
+    }
+  }, [sortField, sortDirection]);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       
-      {/* Header Bar */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="w-2 h-2 rounded-full bg-teal-400" />
-            <span className="text-[10px] font-mono text-teal-400 font-bold uppercase tracking-wider">
-              CENTRALIZED PROJECT ARCHIVE
-            </span>
+      {/* Toast Notification */}
+      {toastNotification && (
+        <div className="fixed top-5 right-5 z-[999999] bg-slate-900 border border-teal-500/50 text-white px-4 py-2.5 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold animate-fadeIn">
+          <CheckCircle2 className="w-4 h-4 text-teal-400" />
+          <span>{toastNotification}</span>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 1. ONEDRIVE COMMAND BAR & ARCHIVE STORAGE STATUS             */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        
+        {/* Title & Drive Storage Metric */}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-teal-500/10 text-teal-400 rounded-xl border border-teal-500/20 shadow-sm shrink-0">
+              <FolderKanban className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-base sm:text-lg font-bold text-white tracking-tight">
+                  Project Document Cloud
+                </h2>
+                <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse" />
+              </div>
+              <p className="text-xs text-slate-400">
+                Centralized vault for AutoCAD blueprints, Excel schedules, and permits
+              </p>
+            </div>
           </div>
-          <h2 className="text-base font-bold text-white flex items-center gap-2">
-            <FolderKanban className="w-5 h-5 text-teal-400" />
-            Document Management System
-          </h2>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Centralized database for CAD blueprints, Excel schedules, architectural sheets, and permits with interactive previewing.
-          </p>
+
+          {/* Clean Integrated OneDrive Storage Bar */}
+          <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400 pl-0.5 flex-wrap">
+            <HardDrive className="w-3.5 h-3.5 text-teal-400 shrink-0" />
+            <span className="text-white font-semibold">{storageMetrics.usedLabel} used</span>
+            <span className="text-slate-600">/</span>
+            <span className="text-slate-400">{storageMetrics.maxLabel}</span>
+            <span className="text-slate-600">•</span>
+            <span className="text-emerald-400 font-medium">{storageMetrics.availableLabel} available</span>
+            
+            {/* Visual mini progress bar */}
+            <div className="w-16 bg-slate-800 rounded-full h-1.5 overflow-hidden mx-1 hidden sm:inline-block" title={`${storageMetrics.percentageUsed}% of ${storageMetrics.maxLabel} used`}>
+              <div 
+                className="bg-gradient-to-r from-teal-500 to-emerald-400 h-1.5 rounded-full transition-all duration-300" 
+                style={{ width: `${Math.max(4, Math.min(100, parseFloat(storageMetrics.percentageUsed)))}%` }} 
+              />
+            </div>
+
+            <span className="text-slate-600 hidden sm:inline">•</span>
+            <span className="text-slate-400 hidden sm:inline">{storageMetrics.totalCount} assets</span>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 flex-wrap">
-          <input
-            type="text"
-            placeholder="Search documents..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
-          />
+        {/* Toolbar & Search Controls */}
+        <div className="flex items-center gap-2.5 flex-wrap sm:flex-nowrap shrink-0">
+          {/* Search Bar */}
+          <div className="relative">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Search documents..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="bg-slate-950 border border-slate-800 rounded-xl pl-8 pr-7 py-2 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-teal-500/60 w-44 sm:w-56 transition-all"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
 
+          {/* Sort Menu Dropdown */}
+          <div className="relative">
+            <button
+              onClick={() => setIsSortDropdownOpen(prev => !prev)}
+              className="flex items-center gap-1.5 px-3 py-2 bg-slate-950 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-xl text-xs font-semibold text-slate-300 transition-colors cursor-pointer"
+            >
+              <ArrowUpDown className="w-3.5 h-3.5 text-teal-400" />
+              <span className="hidden sm:inline">Sort:</span>
+              <span className="text-teal-400 font-mono">{activeSortLabel}</span>
+              <ChevronDown className="w-3 h-3 text-slate-400 ml-0.5" />
+            </button>
+
+            {isSortDropdownOpen && (
+              <>
+                <div 
+                  className="fixed inset-0 z-40" 
+                  onClick={() => setIsSortDropdownOpen(false)} 
+                />
+                <div className="absolute right-0 top-full mt-1.5 z-50 w-56 bg-slate-950 border border-slate-800 rounded-xl p-1.5 shadow-2xl space-y-1 text-xs">
+                  <div className="px-2.5 py-1 text-[10px] font-mono font-bold uppercase text-slate-400 tracking-wider">
+                    Sort Management
+                  </div>
+                  <button
+                    onClick={() => { setSortField('title'); setSortDirection('asc'); setIsSortDropdownOpen(false); }}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
+                      sortField === 'title' && sortDirection === 'asc' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-900'
+                    }`}
+                  >
+                    <span>Name (A to Z)</span>
+                    <ArrowUp className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => { setSortField('title'); setSortDirection('desc'); setIsSortDropdownOpen(false); }}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
+                      sortField === 'title' && sortDirection === 'desc' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-900'
+                    }`}
+                  >
+                    <span>Name (Z to A)</span>
+                    <ArrowDown className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => { setSortField('createdAt'); setSortDirection('desc'); setIsSortDropdownOpen(false); }}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
+                      sortField === 'createdAt' && sortDirection === 'desc' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-900'
+                    }`}
+                  >
+                    <span>Modified (Newest First)</span>
+                    <Clock className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => { setSortField('createdAt'); setSortDirection('asc'); setIsSortDropdownOpen(false); }}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
+                      sortField === 'createdAt' && sortDirection === 'asc' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-900'
+                    }`}
+                  >
+                    <span>Modified (Oldest First)</span>
+                    <Clock className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => { setSortField('fileSize'); setSortDirection('desc'); setIsSortDropdownOpen(false); }}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
+                      sortField === 'fileSize' && sortDirection === 'desc' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-900'
+                    }`}
+                  >
+                    <span>File Size (Largest First)</span>
+                    <ArrowDown className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => { setSortField('fileSize'); setSortDirection('asc'); setIsSortDropdownOpen(false); }}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
+                      sortField === 'fileSize' && sortDirection === 'asc' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-900'
+                    }`}
+                  >
+                    <span>File Size (Smallest First)</span>
+                    <ArrowUp className="w-3 h-3" />
+                  </button>
+                  <button
+                    onClick={() => { setSortField('status'); setSortDirection('asc'); setIsSortDropdownOpen(false); }}
+                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg text-left transition-colors cursor-pointer ${
+                      sortField === 'status' ? 'bg-teal-500/20 text-teal-300 font-bold' : 'text-slate-300 hover:bg-slate-900'
+                    }`}
+                  >
+                    <span>Approval Status</span>
+                    <FileCheck className="w-3 h-3" />
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* View Mode Toggle (OneDrive List vs Grid) */}
+          <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-0.5">
+            <button
+              onClick={() => handleToggleViewMode('list')}
+              className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                viewMode === 'list'
+                  ? 'bg-teal-500 text-slate-950 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="OneDrive Table / List View"
+            >
+              <List className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => handleToggleViewMode('grid')}
+              className={`p-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer ${
+                viewMode === 'grid'
+                  ? 'bg-teal-500 text-slate-950 font-bold shadow-sm'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+              title="OneDrive Tiles / Grid View"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Primary Upload Button */}
           <button
             onClick={() => setIsUploadModalOpen(true)}
-            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-3.5 py-2 rounded-xl transition-all shadow-md shadow-amber-500/20 cursor-pointer shrink-0 whitespace-nowrap"
           >
             <Upload className="w-4 h-4" />
             <span>Upload Document</span>
@@ -348,123 +826,467 @@ export default function DocumentManager({
         </div>
       </div>
 
-      {/* Category Tabs */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-800">
-        {categories.map((cat) => (
-          <button
-            key={cat.id}
-            onClick={() => setActiveCategory(cat.id)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold whitespace-nowrap transition-colors cursor-pointer ${
-              activeCategory === cat.id
-                ? 'bg-amber-500 text-slate-950 font-bold'
-                : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800'
-            }`}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 2. ONEDRIVE FOLDER / CATEGORY BARS & BATCH SELECTION TOOLBAR */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        {/* Category Filter Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-thin scrollbar-thumb-slate-800">
+          {categories.map((cat) => {
+            const count = cat.id === 'ALL' 
+              ? effectiveDocuments.length 
+              : effectiveDocuments.filter(d => d.category === cat.id).length;
+
+            return (
+              <button
+                key={cat.id}
+                onClick={() => setActiveCategory(cat.id)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium whitespace-nowrap transition-colors cursor-pointer flex items-center gap-1.5 ${
+                  activeCategory === cat.id
+                    ? 'bg-teal-500 text-slate-950 font-bold shadow-sm shadow-teal-500/20'
+                    : 'bg-slate-900 border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-800/80'
+                }`}
+              >
+                <span>{cat.label}</span>
+                <span className={`text-[10px] font-mono px-1.5 py-0.2 rounded-full ${
+                  activeCategory === cat.id ? 'bg-slate-950/30 text-slate-950 font-bold' : 'bg-slate-800 text-slate-400'
+                }`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Status Filter Dropdown */}
+        <div className="flex items-center gap-2 shrink-0">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as any)}
+            className="bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-teal-500/60 cursor-pointer"
           >
-            {cat.label}
-          </button>
-        ))}
+            <option value="ALL">All Statuses</option>
+            <option value="APPROVED">Approved Only</option>
+            <option value="IN_REVIEW">In Review</option>
+            <option value="DRAFT">Draft</option>
+          </select>
+        </div>
       </div>
 
-      {/* Documents Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredDocs.map((doc) => {
-          const isCad = isCadDocument(doc);
-          const isExcel = isExcelScheduleDocument(doc);
+      {/* Multi-Select Action Banner (Appears when 1+ documents checked) */}
+      {selectedDocIds.size > 0 && (
+        <div className="bg-teal-950/80 border border-teal-500/40 rounded-xl px-4 py-2.5 flex items-center justify-between gap-3 text-xs animate-fadeIn shadow-lg">
+          <div className="flex items-center gap-3">
+            <span className="font-mono font-bold text-teal-300 bg-teal-500/20 px-2 py-0.5 rounded border border-teal-500/40">
+              {selectedDocIds.size} Selected
+            </span>
+            <span className="text-slate-300 hidden sm:inline">OneDrive Batch Actions:</span>
+          </div>
 
-          return (
-            <div
-              key={doc.id}
-              className="bg-slate-900/90 border border-slate-800 hover:border-teal-700/60 rounded-2xl p-4 shadow-lg hover:shadow-xl transition-all flex flex-col justify-between group"
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleBatchDownload}
+              className="px-3 py-1 bg-teal-500 hover:bg-teal-400 text-slate-950 font-bold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
             >
-              <div>
-                <div className="flex items-start justify-between gap-2 mb-2">
-                  <div className="flex items-center gap-2.5">
-                    <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold border ${
-                      isCad ? 'bg-amber-950/80 border-amber-800 text-amber-400' :
-                      isExcel ? 'bg-emerald-950/80 border-emerald-800 text-emerald-400' :
-                      'bg-teal-950/80 border-teal-800 text-teal-400'
+              <Download className="w-3.5 h-3.5" />
+              <span>Download Selected</span>
+            </button>
+            <button
+              onClick={handleBatchApprove}
+              className="px-3 py-1 bg-slate-900 hover:bg-slate-800 text-emerald-400 border border-emerald-500/40 font-bold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>Mark Approved</span>
+            </button>
+            <button
+              onClick={() => setSelectedDocIds(new Set())}
+              className="px-2 py-1 text-slate-400 hover:text-white text-xs cursor-pointer"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 3. DOCUMENT ARCHIVE: ONEDRIVE LIST / TABLE VIEW              */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {viewMode === 'list' && (
+        <div className="bg-slate-900/95 border border-slate-800 rounded-2xl shadow-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-950/90 border-b border-slate-800 text-slate-400 font-mono text-[11px] select-none">
+                  {/* Select All Checkbox */}
+                  <th className="py-3 px-3 w-10 text-center">
+                    <button 
+                      type="button"
+                      onClick={handleSelectAll} 
+                      className="text-slate-400 hover:text-white cursor-pointer"
+                      title="Select all"
+                    >
+                      {selectedDocIds.size > 0 && selectedDocIds.size === filteredAndSortedDocs.length ? (
+                        <CheckSquare className="w-4 h-4 text-teal-400" />
+                      ) : (
+                        <Square className="w-4 h-4" />
+                      )}
+                    </button>
+                  </th>
+
+                  {/* Document Name */}
+                  <th 
+                    onClick={() => handleSortChange('title')}
+                    className="py-3 px-3 font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Document Name</span>
+                      {sortField === 'title' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-teal-400" /> : <ArrowDown className="w-3.5 h-3.5 text-teal-400" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Category / Discipline */}
+                  <th 
+                    onClick={() => handleSortChange('category')}
+                    className="py-3 px-3 font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors hidden md:table-cell"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Category</span>
+                      {sortField === 'category' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-teal-400" /> : <ArrowDown className="w-3.5 h-3.5 text-teal-400" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Date Modified */}
+                  <th 
+                    onClick={() => handleSortChange('createdAt')}
+                    className="py-3 px-3 font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors hidden sm:table-cell"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Date Modified</span>
+                      {sortField === 'createdAt' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-teal-400" /> : <ArrowDown className="w-3.5 h-3.5 text-teal-400" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Uploaded By */}
+                  <th className="py-3 px-3 font-semibold text-slate-300 hidden lg:table-cell">
+                    <span>Modified By</span>
+                  </th>
+
+                  {/* File Size */}
+                  <th 
+                    onClick={() => handleSortChange('fileSize')}
+                    className="py-3 px-3 font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors text-right"
+                  >
+                    <div className="flex items-center justify-end gap-1.5">
+                      <span>File Size</span>
+                      {sortField === 'fileSize' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-teal-400" /> : <ArrowDown className="w-3.5 h-3.5 text-teal-400" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Approval Status */}
+                  <th 
+                    onClick={() => handleSortChange('status')}
+                    className="py-3 px-3 font-semibold text-slate-300 hover:text-white cursor-pointer transition-colors text-center hidden md:table-cell"
+                  >
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span>Status</span>
+                      {sortField === 'status' && (
+                        sortDirection === 'asc' ? <ArrowUp className="w-3.5 h-3.5 text-teal-400" /> : <ArrowDown className="w-3.5 h-3.5 text-teal-400" />
+                      )}
+                    </div>
+                  </th>
+
+                  {/* Actions */}
+                  <th className="py-3 px-4 text-right">
+                    <span>Actions</span>
+                  </th>
+                </tr>
+              </thead>
+
+              <tbody className="divide-y divide-slate-800/80">
+                {filteredAndSortedDocs.map((doc) => {
+                  const iconCfg = getFileIconConfig(doc);
+                  const Icon = iconCfg.icon;
+                  const isSelected = selectedDocIds.has(doc.id);
+
+                  return (
+                    <tr
+                      key={doc.id}
+                      onClick={() => setPreviewDoc(doc)}
+                      className={`group hover:bg-slate-800/50 transition-colors cursor-pointer ${
+                        isSelected ? 'bg-teal-950/30' : ''
+                      }`}
+                    >
+                      {/* Checkbox */}
+                      <td 
+                        className="py-3 px-3 text-center"
+                        onClick={(e) => handleToggleSelectDoc(doc.id, e)}
+                      >
+                        <button type="button" className="text-slate-400 hover:text-white cursor-pointer">
+                          {isSelected ? (
+                            <CheckSquare className="w-4 h-4 text-teal-400" />
+                          ) : (
+                            <Square className="w-4 h-4 text-slate-600 group-hover:text-slate-400" />
+                          )}
+                        </button>
+                      </td>
+
+                      {/* File Name & Icon */}
+                      <td className="py-3 px-3">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border ${iconCfg.bgColor} ${iconCfg.borderColor} ${iconCfg.textColor}`}>
+                            <Icon className="w-4 h-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <span className="font-semibold text-white group-hover:text-teal-300 transition-colors truncate block">
+                              {doc.title}
+                            </span>
+                            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-mono">
+                              <span className="text-teal-400/90 font-bold">v{doc.version}</span>
+                              {doc.notes && (
+                                <span className="truncate max-w-[280px] text-slate-400">{doc.notes}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Category */}
+                      <td className="py-3 px-3 hidden md:table-cell">
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-950 text-slate-300 border border-slate-800 uppercase font-semibold">
+                          {doc.category.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+
+                      {/* Date Modified */}
+                      <td className="py-3 px-3 text-slate-400 font-mono text-[11px] hidden sm:table-cell">
+                        {formatOneDriveDate(doc.createdAt)}
+                      </td>
+
+                      {/* Author */}
+                      <td className="py-3 px-3 text-slate-400 text-[11px] truncate max-w-[140px] hidden lg:table-cell">
+                        {doc.uploadedBy}
+                      </td>
+
+                      {/* Size */}
+                      <td className="py-3 px-3 text-right font-mono text-slate-300 text-[11px]">
+                        {doc.fileSize || '2.5 MB'}
+                      </td>
+
+                      {/* Status */}
+                      <td className="py-3 px-3 text-center hidden md:table-cell">
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold inline-block ${
+                          doc.status === 'APPROVED' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 
+                          doc.status === 'IN_REVIEW' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
+                          'bg-slate-800 text-slate-300 border border-slate-700'
+                        }`}>
+                          {doc.status}
+                        </span>
+                      </td>
+
+                      {/* Actions */}
+                      <td 
+                        className="py-3 px-4 text-right"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => setPreviewDoc(doc)}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-teal-400 hover:text-teal-300 transition-colors cursor-pointer"
+                            title="Interactive Preview"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDownloadFile(doc)}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                            title="Download File"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenEdit(doc)}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                            title="Edit Details"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setDeleteConfirmDoc(doc)}
+                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/80 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                            title="Delete File"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {filteredAndSortedDocs.length === 0 && (
+            <div className="py-16 text-center text-slate-500 space-y-2">
+              <FolderKanban className="w-10 h-10 text-slate-600 mx-auto mb-2" />
+              <p className="text-sm font-semibold text-slate-300">No documents match the current search or filters.</p>
+              <p className="text-xs text-slate-500">Try adjusting your filters, sort order, or search query.</p>
+              <button
+                onClick={() => { setActiveCategory('ALL'); setSearchQuery(''); setStatusFilter('ALL'); }}
+                className="mt-2 px-3 py-1 bg-slate-800 hover:bg-slate-700 text-teal-400 text-xs rounded-lg cursor-pointer"
+              >
+                Reset Filters
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 4. DOCUMENT ARCHIVE: ONEDRIVE TILES / GRID VIEW              */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {viewMode === 'grid' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filteredAndSortedDocs.map((doc) => {
+            const iconCfg = getFileIconConfig(doc);
+            const Icon = iconCfg.icon;
+            const isCad = isCadDocument(doc);
+            const isExcel = isExcelScheduleDocument(doc);
+            const isSelected = selectedDocIds.has(doc.id);
+
+            return (
+              <div
+                key={doc.id}
+                onClick={() => setPreviewDoc(doc)}
+                className={`bg-slate-900/90 border rounded-2xl p-4 shadow-lg hover:shadow-2xl transition-all flex flex-col justify-between group cursor-pointer ${
+                  isSelected ? 'border-teal-500 bg-slate-900' : 'border-slate-800 hover:border-teal-700/60'
+                }`}
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2 mb-3">
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={(e) => handleToggleSelectDoc(doc.id, e)}
+                        className="text-slate-400 hover:text-white"
+                      >
+                        {isSelected ? (
+                          <CheckSquare className="w-4 h-4 text-teal-400" />
+                        ) : (
+                          <Square className="w-4 h-4 text-slate-600 group-hover:text-slate-400" />
+                        )}
+                      </button>
+
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold border ${iconCfg.bgColor} ${iconCfg.borderColor} ${iconCfg.textColor}`}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <span className="text-[10px] font-mono text-teal-400 font-bold uppercase block">
+                          {isCad ? 'CAD BLUEPRINT' : isExcel ? 'EXCEL SCHEDULE' : doc.category.replace(/_/g, ' ')}
+                        </span>
+                        <span className="text-[10px] text-slate-500 font-mono">v{doc.version} • {doc.fileSize || '2.5 MB'}</span>
+                      </div>
+                    </div>
+
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      doc.status === 'APPROVED' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 
+                      doc.status === 'IN_REVIEW' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
+                      'bg-slate-800 text-slate-300 border border-slate-700'
                     }`}>
-                      {isCad ? <FileCode className="w-4 h-4" /> : isExcel ? <FileSpreadsheet className="w-4 h-4" /> : <FileText className="w-4 h-4" />}
-                    </div>
-                    <div>
-                      <span className="text-[10px] font-mono text-teal-400 font-bold uppercase block">
-                        {isCad ? 'CAD BLUEPRINT' : isExcel ? 'EXCEL SCHEDULE' : doc.category.replace('_', ' ')}
-                      </span>
-                      <span className="text-[10px] text-slate-500 font-mono">v{doc.version} • {doc.fileSize || '2.5 MB'}</span>
-                    </div>
+                      {doc.status}
+                    </span>
                   </div>
 
-                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                    doc.status === 'APPROVED' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' : 
-                    doc.status === 'IN_REVIEW' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
-                    'bg-slate-800 text-slate-300 border border-slate-700'
-                  }`}>
-                    {doc.status}
-                  </span>
+                  <h4 className="text-sm font-bold text-white group-hover:text-teal-300 transition-colors leading-snug mb-1.5">
+                    {doc.title}
+                  </h4>
+
+                  {doc.notes && (
+                    <p className="text-xs text-slate-400 leading-relaxed mb-3 line-clamp-2">
+                      {doc.notes}
+                    </p>
+                  )}
                 </div>
 
-                <h4 className="text-sm font-bold text-white group-hover:text-teal-300 transition-colors leading-snug mb-1.5">
-                  {doc.title}
-                </h4>
+                <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
+                  <div className="flex flex-col">
+                    <span className="text-[11px] text-slate-400 font-medium truncate max-w-[120px]">
+                      By: {doc.uploadedBy.split(' ')[0]}
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      {formatOneDriveDate(doc.createdAt)}
+                    </span>
+                  </div>
 
-                {doc.notes && (
-                  <p className="text-xs text-slate-400 leading-relaxed mb-3 line-clamp-2">
-                    {doc.notes}
-                  </p>
-                )}
-              </div>
+                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    {/* Preview Button */}
+                    <button
+                      onClick={() => setPreviewDoc(doc)}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-teal-400 hover:text-teal-300 transition-colors cursor-pointer flex items-center gap-1 text-[11px] px-2 font-semibold"
+                      title="Interactive Preview"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                      <span>Preview</span>
+                    </button>
 
-              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-400">
-                <span className="text-[11px] text-slate-500 font-medium truncate max-w-[110px]">
-                  By: {doc.uploadedBy.split(' ')[0]}
-                </span>
+                    {/* Download Button */}
+                    <button
+                      onClick={() => handleDownloadFile(doc)}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                      title="Download File"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                    </button>
 
-                <div className="flex items-center gap-1.5">
-                  {/* Preview Button */}
-                  <button
-                    onClick={() => setPreviewDoc(doc)}
-                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-teal-400 hover:text-teal-300 transition-colors cursor-pointer flex items-center gap-1 text-[11px] px-2 font-semibold"
-                    title="Interactive Preview"
-                  >
-                    <Eye className="w-3.5 h-3.5" />
-                    <span>Preview</span>
-                  </button>
+                    {/* Edit Button */}
+                    <button
+                      onClick={() => handleOpenEdit(doc)}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
+                      title="Edit Document Metadata"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
 
-                  {/* Edit Button */}
-                  <button
-                    onClick={() => handleOpenEdit(doc)}
-                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors cursor-pointer"
-                    title="Edit Document Metadata"
-                  >
-                    <Edit3 className="w-3.5 h-3.5" />
-                  </button>
-
-                  {/* Delete Button */}
-                  <button
-                    onClick={() => setDeleteConfirmDoc(doc)}
-                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/80 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
-                    title="Delete Document"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                    {/* Delete Button */}
+                    <button
+                      onClick={() => setDeleteConfirmDoc(doc)}
+                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/80 text-slate-400 hover:text-rose-400 transition-colors cursor-pointer"
+                      title="Delete Document"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
               </div>
+            );
+          })}
+
+          {filteredAndSortedDocs.length === 0 && (
+            <div className="col-span-full h-44 bg-slate-900/40 border border-dashed border-slate-800 rounded-2xl flex flex-col items-center justify-center text-slate-500 space-y-2">
+              <FolderKanban className="w-8 h-8 text-slate-600" />
+              <p className="text-xs font-semibold text-slate-400">No documents found matching current filters.</p>
+              <button
+                onClick={() => { setActiveCategory('ALL'); setSearchQuery(''); setStatusFilter('ALL'); }}
+                className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-teal-400 text-xs rounded-lg cursor-pointer"
+              >
+                Reset Filters
+              </button>
             </div>
-          );
-        })}
+          )}
+        </div>
+      )}
 
-        {filteredDocs.length === 0 && (
-          <div className="col-span-full h-44 bg-slate-900/40 border border-dashed border-slate-800 rounded-2xl flex flex-col items-center justify-center text-slate-500 space-y-2">
-            <FolderKanban className="w-8 h-8 text-slate-600" />
-            <p className="text-xs font-semibold text-slate-400">No documents found in this category.</p>
-            <p className="text-[11px] text-slate-500">Upload a CAD floor plan, Excel schedule, or project blueprint to start.</p>
-          </div>
-        )}
-      </div>
-
-      {/* ------------------------------------------------------------- */}
-      {/* 1. UPLOAD DOCUMENT MODAL (CENTRALIZED DATABASE) */}
-      {/* ------------------------------------------------------------- */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 5. UPLOAD DOCUMENT MODAL (CENTRALIZED DATABASE)              */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {isUploadModalOpen && (
         <div className="fixed inset-0 z-[99999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-lg shadow-2xl space-y-4 animate-fadeIn">
@@ -480,7 +1302,12 @@ export default function DocumentManager({
                 </div>
               </div>
               <button
-                onClick={() => setIsUploadModalOpen(false)}
+                onClick={() => {
+                  setIsUploadModalOpen(false);
+                  setSelectedFileSizeBytes(0);
+                  setFileSizeError(null);
+                  setSelectedFileName('');
+                }}
                 className="text-slate-400 hover:text-white p-1 rounded-lg"
               >
                 <X className="w-5 h-5" />
@@ -489,23 +1316,99 @@ export default function DocumentManager({
 
             <form onSubmit={handleUploadSubmit} className="space-y-3.5">
               
-              {/* File Drag/Pick Box */}
+              {/* File Drag/Pick Box with Database Limit Indicator */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Select File (.dxf, .dwg, .xlsx, .csv, .pdf)</label>
-                <div className="border border-dashed border-slate-700 hover:border-teal-500/80 rounded-xl p-3 text-center bg-slate-950/60 cursor-pointer relative">
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs font-semibold text-slate-300">
+                    Select File (.dxf, .dwg, .xlsx, .csv, .pdf)
+                  </label>
+                  <div className="flex items-center gap-1 text-[10px] font-mono font-semibold text-teal-400 bg-teal-500/10 border border-teal-500/20 px-2 py-0.5 rounded-full">
+                    <Database className="w-3 h-3 text-teal-400" />
+                    <span>Max DB Limit: 50 MB</span>
+                  </div>
+                </div>
+
+                <div className={`border border-dashed rounded-xl p-3.5 text-center bg-slate-950/60 cursor-pointer relative transition-all ${
+                  fileSizeError 
+                    ? 'border-rose-500/80 bg-rose-950/20' 
+                    : selectedFileName 
+                      ? 'border-teal-500/80 bg-teal-950/10' 
+                      : 'border-slate-700 hover:border-teal-500/80'
+                }`}>
                   <input
                     type="file"
                     onChange={handleFileSelect}
                     className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
                   />
                   <div className="space-y-1">
-                    <Upload className="w-5 h-5 text-teal-400 mx-auto" />
+                    <Upload className={`w-5 h-5 mx-auto ${fileSizeError ? 'text-rose-400' : 'text-teal-400'}`} />
                     <div className="text-xs text-slate-300">
-                      {selectedFileName ? <strong className="text-teal-300">{selectedFileName}</strong> : 'Click or drop blueprint/spreadsheet file here'}
+                      {selectedFileName ? (
+                        <span className={fileSizeError ? 'text-rose-300 font-bold' : 'text-teal-300 font-semibold'}>
+                          {selectedFileName}
+                        </span>
+                      ) : (
+                        'Click or drop blueprint/spreadsheet file here'
+                      )}
                     </div>
-                    <div className="text-[10px] text-slate-500">AutoCAD DXF/DWG, Excel XLSX/CSV, or PDF drawings</div>
+                    <div className="text-[10px] text-slate-500">
+                      AutoCAD DXF/DWG, Excel XLSX/CSV, or PDF drawings (Database Max Cap: 50 MB)
+                    </div>
                   </div>
                 </div>
+
+                {/* Database Capacity Gauge / Validation Feedback */}
+                {fileSizeError ? (
+                  <div className="mt-2.5 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 flex items-start gap-2.5 text-xs animate-fadeIn">
+                    <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <div className="font-bold text-rose-200">Database Upload Cap Exceeded</div>
+                      <p className="text-[11px] text-rose-300/90 leading-relaxed">
+                        {fileSizeError}
+                      </p>
+                      <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden mt-1">
+                        <div className="bg-rose-500 h-1.5 rounded-full w-full" />
+                      </div>
+                    </div>
+                  </div>
+                ) : selectedFileSizeBytes > 0 ? (
+                  <div className="mt-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 space-y-1.5 text-xs">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-400 flex items-center gap-1">
+                        <Database className="w-3 h-3 text-teal-400" />
+                        Database Payload Capacity
+                      </span>
+                      <span className="font-mono text-slate-300">
+                        <strong className="text-teal-300">{(selectedFileSizeBytes / (1024 * 1024)).toFixed(1)} MB</strong> / {MAX_UPLOAD_SIZE_LABEL} ({Math.min(100, Math.round((selectedFileSizeBytes / MAX_UPLOAD_SIZE_BYTES) * 100))}%)
+                      </span>
+                    </div>
+                    <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
+                      <div 
+                        className={`h-1.5 rounded-full transition-all duration-300 ${
+                          (selectedFileSizeBytes / MAX_UPLOAD_SIZE_BYTES) > 0.8 
+                            ? 'bg-amber-400' 
+                            : 'bg-teal-400'
+                        }`}
+                        style={{ width: `${Math.min(100, (selectedFileSizeBytes / MAX_UPLOAD_SIZE_BYTES) * 100)}%` }}
+                      />
+                    </div>
+                    <div className="text-[10px] text-slate-400 flex items-center justify-between">
+                      <span className="text-emerald-400 flex items-center gap-1">
+                        <Check className="w-3 h-3" /> Within safe database payload threshold
+                      </span>
+                      <span>Archive Free: {storageMetrics.availableLabel} of {storageMetrics.maxLabel}</span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-1.5 flex items-center justify-between text-[10px] text-slate-400 font-mono px-1">
+                    <span className="flex items-center gap-1">
+                      <HardDrive className="w-2.5 h-2.5 text-teal-400" /> Storage: <strong className="text-slate-300">{storageMetrics.usedLabel}</strong> of <strong className="text-slate-300">{storageMetrics.maxLabel}</strong> ({storageMetrics.availableLabel} available)
+                    </span>
+                    <span className="text-teal-400 flex items-center gap-1">
+                      <Database className="w-2.5 h-2.5" /> Max 50 MB / file
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -575,14 +1478,24 @@ export default function DocumentManager({
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setIsUploadModalOpen(false)}
+                  onClick={() => {
+                    setIsUploadModalOpen(false);
+                    setSelectedFileSizeBytes(0);
+                    setFileSizeError(null);
+                    setSelectedFileName('');
+                  }}
                   className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-teal-600 hover:bg-teal-500 shadow-lg shadow-teal-950 cursor-pointer transition-all"
+                  disabled={Boolean(fileSizeError || selectedFileSizeBytes > MAX_UPLOAD_SIZE_BYTES)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
+                    fileSizeError || selectedFileSizeBytes > MAX_UPLOAD_SIZE_BYTES
+                      ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-60'
+                      : 'text-white bg-teal-600 hover:bg-teal-500 shadow-lg shadow-teal-950 cursor-pointer'
+                  }`}
                 >
                   Save to Centralized Archive
                 </button>
@@ -593,9 +1506,9 @@ export default function DocumentManager({
         </div>
       )}
 
-      {/* ------------------------------------------------------------- */}
-      {/* 2. EDIT DOCUMENT MODAL (CENTRALIZED DATABASE UPDATE) */}
-      {/* ------------------------------------------------------------- */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 6. EDIT DOCUMENT MODAL                                       */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {editDoc && (
         <div className="fixed inset-0 z-[99999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-md shadow-2xl space-y-4 animate-fadeIn">
@@ -620,7 +1533,7 @@ export default function DocumentManager({
 
             <form onSubmit={handleEditSubmit} className="space-y-3.5">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Document Title *</label>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">Document Title</label>
                 <input
                   type="text"
                   required
@@ -647,7 +1560,7 @@ export default function DocumentManager({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Version / Revision</label>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">Version</label>
                   <input
                     type="text"
                     value={editVersion}
@@ -690,33 +1603,29 @@ export default function DocumentManager({
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 shadow-lg shadow-amber-500/20 cursor-pointer transition-all"
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 cursor-pointer"
                 >
                   Save Changes
                 </button>
               </div>
-
             </form>
           </div>
         </div>
       )}
 
-      {/* ------------------------------------------------------------- */}
-      {/* 3. DELETE CONFIRMATION MODAL (CENTRALIZED DATABASE) */}
-      {/* ------------------------------------------------------------- */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 7. DELETE CONFIRMATION MODAL                                  */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {deleteConfirmDoc && (
         <div className="fixed inset-0 z-[99999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4 animate-fadeIn">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-rose-950 border border-rose-800 flex items-center justify-center text-rose-400">
-                <AlertTriangle className="w-5 h-5" />
-              </div>
-              <div>
-                <h3 className="text-sm font-bold text-white">Delete Document?</h3>
-                <p className="text-xs text-slate-400">This action will remove the file from the centralized database.</p>
-              </div>
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 w-full max-w-sm shadow-2xl space-y-3">
+            <div className="flex items-center gap-2.5 text-rose-400">
+              <AlertTriangle className="w-5 h-5 shrink-0" />
+              <h3 className="text-sm font-bold text-white">Delete Document?</h3>
             </div>
-
+            <p className="text-xs text-slate-400">
+              Are you sure you want to remove this document from the centralized database?
+            </p>
             <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 text-xs text-slate-300 font-mono">
               {deleteConfirmDoc.title} (v{deleteConfirmDoc.version})
             </div>
@@ -739,9 +1648,9 @@ export default function DocumentManager({
         </div>
       )}
 
-      {/* ------------------------------------------------------------- */}
-      {/* 4. INTERACTIVE PREVIEW MODAL (CAD OR EXCEL GANTT SCHEDULE) */}
-      {/* ------------------------------------------------------------- */}
+      {/* ───────────────────────────────────────────────────────────── */}
+      {/* 8. INTERACTIVE PREVIEW MODAL (CAD OR EXCEL GANTT SCHEDULE)    */}
+      {/* ───────────────────────────────────────────────────────────── */}
       {previewDoc && (
         <div className="fixed inset-0 z-[99999] bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl w-full max-w-5xl h-[88vh] flex flex-col shadow-2xl overflow-hidden animate-fadeIn">
@@ -773,7 +1682,13 @@ export default function DocumentManager({
               </div>
 
               <div className="flex items-center gap-2">
-                {/* Cross-module jump shortcuts */}
+                <button
+                  onClick={() => handleDownloadFile(previewDoc)}
+                  className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download</span>
+                </button>
 
                 {isExcelScheduleDocument(previewDoc) && (
                   <button
@@ -802,351 +1717,294 @@ export default function DocumentManager({
               </div>
             )}
 
-            {/* Preview Workspace Body */}
-            <div className="flex-1 overflow-hidden bg-slate-950 flex flex-col">
+            {/* Content Display: CAD Vector Canvas OR Excel Spreadsheet */}
+            <div className="flex-1 overflow-auto bg-slate-950 relative p-4 flex flex-col items-center justify-center">
               
-              {/* --- 4A. INTERACTIVE CAD BLUEPRINT PREVIEWER --- */}
+              {/* Specialized A: AutoCAD / Blueprint Interactive Vector Viewer */}
               {isCadDocument(previewDoc) && (
-                <div className="flex-1 flex flex-col overflow-hidden relative">
-                  
-                  {/* CAD Canvas Controls Toolbar */}
-                  <div className="p-2.5 bg-slate-900 border-b border-slate-800 flex items-center justify-between gap-3 text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-mono text-slate-400 uppercase font-bold flex items-center gap-1">
-                        <Compass className="w-3.5 h-3.5 text-amber-400" />
-                        Vector Blueprint Viewport
-                      </span>
-                      <span className="text-slate-600">|</span>
-                      <span className="text-[11px] text-slate-400 font-mono">Scale 1:100 • 440 sqm Floorplate</span>
+                <div className="w-full h-full flex flex-col">
+                  {/* Floating Toolbar */}
+                  <div className="flex items-center justify-between gap-3 bg-slate-900/90 border border-slate-800 backdrop-blur-md rounded-2xl px-4 py-2 mb-3 shadow-lg">
+                    <div className="flex items-center gap-2 text-xs text-slate-400">
+                      <Compass className="w-4 h-4 text-amber-400" />
+                      <span className="font-semibold text-slate-200">Scale 1:100</span>
+                      <span>•</span>
+                      <span>Coordinates: 14.2789° N, 121.1245° E</span>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-2">
                       <button
-                        onClick={() => setCadZoom(prev => Math.min(prev + 0.25, 2.5))}
-                        className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg"
+                        onClick={() => setCadZoom(prev => Math.max(0.6, prev - 0.2))}
+                        className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
+                        title="Zoom Out"
+                      >
+                        <ZoomOut className="w-3.5 h-3.5" />
+                      </button>
+                      <span className="text-xs font-mono text-amber-400 font-bold px-1.5">{Math.round(cadZoom * 100)}%</span>
+                      <button
+                        onClick={() => setCadZoom(prev => Math.min(2.5, prev + 0.2))}
+                        className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white cursor-pointer"
                         title="Zoom In"
                       >
                         <ZoomIn className="w-3.5 h-3.5" />
                       </button>
                       <button
-                        onClick={() => setCadZoom(prev => Math.max(prev - 0.25, 0.5))}
-                        className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg"
-                        title="Zoom Out"
-                      >
-                        <ZoomOut className="w-3.5 h-3.5" />
-                      </button>
-                      <button
                         onClick={() => setCadZoom(1)}
-                        className="p-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg"
+                        className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white cursor-pointer ml-1"
                         title="Reset View"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                       </button>
-                      <span className="text-slate-600">|</span>
+                    </div>
+
+                    {/* Layers Toggle */}
+                    <div className="flex items-center gap-2">
                       <button
-                        onClick={() => setCadShowGrid(!cadShowGrid)}
-                        className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold ${cadShowGrid ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'bg-slate-800 text-slate-400'}`}
+                        onClick={() => setCadShowGrid(prev => !prev)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold cursor-pointer transition-colors ${
+                          cadShowGrid ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-slate-800 text-slate-400'
+                        }`}
                       >
                         Grid
                       </button>
                       <button
-                        onClick={() => setCadShowMep(!cadShowMep)}
-                        className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold ${cadShowMep ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40' : 'bg-slate-800 text-slate-400'}`}
+                        onClick={() => setCadShowMep(prev => !prev)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold cursor-pointer transition-colors ${
+                          cadShowMep ? 'bg-teal-500/20 text-teal-300 border border-teal-500/40' : 'bg-slate-800 text-slate-400'
+                        }`}
                       >
                         MEPFS
                       </button>
                       <button
-                        onClick={() => setCadShowFurniture(!cadShowFurniture)}
-                        className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold ${cadShowFurniture ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40' : 'bg-slate-800 text-slate-400'}`}
+                        onClick={() => setCadShowFurniture(prev => !prev)}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold cursor-pointer transition-colors ${
+                          cadShowFurniture ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/40' : 'bg-slate-800 text-slate-400'
+                        }`}
                       >
-                        Layout
+                        Furniture
                       </button>
                     </div>
                   </div>
 
-                  {/* Interactive CAD Canvas Rendering */}
-                  <div className="flex-1 overflow-auto flex items-center justify-center p-6 bg-[#030712] relative select-none">
-                    
-                    <div 
-                      className="transition-transform duration-200 origin-center"
+                  {/* High-Fidelity SVG AutoCAD Vector Blueprint Simulation */}
+                  <div className="flex-1 w-full bg-[#030712] rounded-2xl border border-slate-800 relative overflow-hidden flex items-center justify-center shadow-inner">
+                    <svg
+                      viewBox="0 0 900 550"
+                      className="w-full h-full transition-transform duration-200"
                       style={{ transform: `scale(${cadZoom})` }}
                     >
-                      <svg width="760" height="460" viewBox="0 0 760 460" className="border border-slate-800 rounded-2xl bg-[#090d16] shadow-2xl">
-                        {/* Grid Layer */}
-                        {cadShowGrid && (
-                          <g stroke="#1e293b" strokeWidth="0.5" strokeDasharray="4,4">
-                            {Array.from({ length: 19 }).map((_, i) => (
-                              <line key={`v-${i}`} x1={i * 40} y1="0" x2={i * 40} y2="460" />
-                            ))}
-                            {Array.from({ length: 12 }).map((_, i) => (
-                              <line key={`h-${i}`} x1="0" y1={i * 40} x2="760" y2={i * 40} />
-                            ))}
-                          </g>
-                        )}
+                      <defs>
+                        <pattern id="cadGrid" width="30" height="30" patternUnits="userSpaceOnUse">
+                          <path d="M 30 0 L 0 0 0 30" fill="none" stroke="#1e293b" strokeWidth="0.8" opacity="0.6" />
+                        </pattern>
+                      </defs>
 
-                        {/* Outer Building Structural Perimeter Walls */}
-                        <rect x="50" y="40" width="660" height="380" fill="#0f172a" stroke="#cbd5e1" strokeWidth="4" rx="4" />
+                      {cadShowGrid && <rect width="900" height="550" fill="url(#cadGrid)" />}
 
-                        {/* Room Enclosures: Executive Boardroom */}
-                        <rect x="50" y="40" width="220" height="180" fill="#1e293b" stroke="#94a3b8" strokeWidth="2.5" />
-                        <text x="160" y="130" fill="#f8fafc" fontSize="13" fontWeight="bold" textAnchor="middle">Executive Boardroom</text>
-                        <text x="160" y="148" fill="#94a3b8" fontSize="10" textAnchor="middle">44.0 sqm • Acoustic Partition</text>
+                      {/* Structural Perimeter Walls */}
+                      <rect x="120" y="80" width="660" height="380" fill="none" stroke="#f59e0b" strokeWidth="3" />
+                      <rect x="126" y="86" width="648" height="368" fill="#0f172a" fillOpacity="0.5" stroke="#f59e0b" strokeWidth="1" strokeDasharray="4 2" />
 
-                        {/* Room Enclosure: Server & Network Hub */}
-                        <rect x="270" y="40" width="160" height="140" fill="#172554" stroke="#60a5fa" strokeWidth="2" strokeDasharray="3,3" />
-                        <text x="350" y="105" fill="#93c5fd" fontSize="12" fontWeight="bold" textAnchor="middle">Server & Telecom</text>
-                        <text x="350" y="122" fill="#60a5fa" fontSize="9" textAnchor="middle">Precision Cooling Zone</text>
+                      {/* Rooms / Partition Layout */}
+                      {/* Conference Room */}
+                      <rect x="120" y="80" width="240" height="180" fill="#1e293b" fillOpacity="0.4" stroke="#94a3b8" strokeWidth="2" />
+                      <text x="170" y="170" fill="#94a3b8" fontSize="12" fontFamily="monospace" fontWeight="bold">BOARDROOM (35 sqm)</text>
 
-                        {/* Meeting Pod 1 & 2 */}
-                        <rect x="430" y="40" width="140" height="140" fill="#1e293b" stroke="#94a3b8" strokeWidth="2" />
-                        <text x="500" y="115" fill="#f8fafc" fontSize="11" fontWeight="bold" textAnchor="middle">Meeting Pod A</text>
+                      {/* Executive Offices */}
+                      <rect x="120" y="260" width="240" height="200" fill="#1e293b" fillOpacity="0.4" stroke="#94a3b8" strokeWidth="2" />
+                      <text x="150" y="360" fill="#94a3b8" fontSize="12" fontFamily="monospace" fontWeight="bold">EXECUTIVE SUITE (42 sqm)</text>
 
-                        <rect x="570" y="40" width="140" height="140" fill="#1e293b" stroke="#94a3b8" strokeWidth="2" />
-                        <text x="640" y="115" fill="#f8fafc" fontSize="11" fontWeight="bold" textAnchor="middle">Meeting Pod B</text>
+                      {/* Open Plan Workstation Hub */}
+                      <rect x="360" y="80" width="420" height="260" fill="#1e293b" fillOpacity="0.2" stroke="#94a3b8" strokeWidth="2" />
+                      <text x="470" y="190" fill="#cbd5e1" fontSize="14" fontFamily="monospace" fontWeight="bold">OPEN OFFICE WORKSTATIONS (88 sqm)</text>
 
-                        {/* Open Plan Workstation Bays */}
-                        <rect x="50" y="220" width="460" height="200" fill="#090f1e" stroke="#334155" strokeWidth="1.5" />
-                        <text x="280" y="320" fill="#e2e8f0" fontSize="14" fontWeight="bold" textAnchor="middle">Open Collaboration & Desking Hub</text>
-                        <text x="280" y="338" fill="#64748b" fontSize="11" textAnchor="middle">32 Ergonomic Workstations • Exposed Deck</text>
+                      {/* Pantry & Collaboration Lounge */}
+                      <rect x="360" y="340" width="260" height="120" fill="#1e293b" fillOpacity="0.4" stroke="#94a3b8" strokeWidth="2" />
+                      <text x="390" y="405" fill="#94a3b8" fontSize="12" fontFamily="monospace" fontWeight="bold">PANTRY & LOUNGE (28 sqm)</text>
 
-                        {/* Pantry & Breakout Lounge */}
-                        <rect x="510" y="220" width="200" height="200" fill="#1e293b" stroke="#94a3b8" strokeWidth="2" />
-                        <text x="610" y="315" fill="#f8fafc" fontSize="12" fontWeight="bold" textAnchor="middle">Breakout Pantry</text>
-                        <text x="610" y="332" fill="#94a3b8" fontSize="10" textAnchor="middle">Wet Utilities & Island</text>
+                      {/* Server Room & MEPFS Utility */}
+                      <rect x="620" y="340" width="160" height="120" fill="#312e81" fillOpacity="0.5" stroke="#6366f1" strokeWidth="2" />
+                      <text x="640" y="405" fill="#a5b4fc" fontSize="11" fontFamily="monospace" fontWeight="bold">IDF / SERVER (16 sqm)</text>
 
-                        {/* Optional Furniture Layout Layer */}
-                        {cadShowFurniture && (
-                          <g stroke="#38bdf8" fill="#0284c7" fillOpacity="0.2" strokeWidth="1">
-                            {/* Boardroom Table */}
-                            <rect x="100" y="90" width="120" height="50" rx="20" />
-                            {/* Workstation Pods */}
-                            <rect x="100" y="250" width="100" height="40" rx="3" />
-                            <rect x="230" y="250" width="100" height="40" rx="3" />
-                            <rect x="360" y="250" width="100" height="40" rx="3" />
-                            <rect x="100" y="350" width="100" height="40" rx="3" />
-                            <rect x="230" y="350" width="100" height="40" rx="3" />
-                            <rect x="360" y="350" width="100" height="40" rx="3" />
-                          </g>
-                        )}
+                      {/* MEPFS Layer: Cable Tray / Sprinkler / HVAC Run */}
+                      {cadShowMep && (
+                        <g id="mepLayer">
+                          {/* Main HVAC Duct */}
+                          <line x1="200" y1="170" x2="700" y2="170" stroke="#06b6d4" strokeWidth="3" strokeDasharray="8 4" />
+                          <line x1="480" y1="170" x2="480" y2="400" stroke="#06b6d4" strokeWidth="3" strokeDasharray="8 4" />
+                          <circle cx="200" cy="170" r="7" fill="#06b6d4" />
+                          <circle cx="480" cy="170" r="7" fill="#06b6d4" />
+                          <circle cx="700" cy="170" r="7" fill="#06b6d4" />
+                          <text x="715" y="174" fill="#06b6d4" fontSize="10" fontFamily="monospace">HVAC RETURN</text>
 
-                        {/* Optional MEPFS Conduits & Fire Sprinkler Layer */}
-                        {cadShowMep && (
-                          <g stroke="#f59e0b" strokeWidth="2" strokeDasharray="6,3" fill="none">
-                            <path d="M 50 110 L 710 110" />
-                            <path d="M 350 40 L 350 420" />
-                            <circle cx="160" cy="110" r="6" fill="#f59e0b" />
-                            <circle cx="350" cy="110" r="6" fill="#f59e0b" />
-                            <circle cx="500" cy="110" r="6" fill="#f59e0b" />
-                            <circle cx="640" cy="110" r="6" fill="#f59e0b" />
-                            <circle cx="350" cy="270" r="6" fill="#f59e0b" />
-                            <circle cx="350" cy="370" r="6" fill="#f59e0b" />
-                          </g>
-                        )}
+                          {/* Sprinkler Run */}
+                          <line x1="160" y1="130" x2="740" y2="130" stroke="#ef4444" strokeWidth="1.5" strokeDasharray="5 3" />
+                          <line x1="160" y1="300" x2="740" y2="300" stroke="#ef4444" strokeWidth="1.5" strokeDasharray="5 3" />
+                          <circle cx="300" cy="130" r="4" fill="#ef4444" />
+                          <circle cx="500" cy="130" r="4" fill="#ef4444" />
+                          <circle cx="680" cy="130" r="4" fill="#ef4444" />
+                        </g>
+                      )}
 
-                        {/* Architectural Dimensions Markers */}
-                        <line x1="50" y1="25" x2="710" y2="25" stroke="#f59e0b" strokeWidth="1.5" />
-                        <text x="380" y="20" fill="#f59e0b" fontSize="11" fontWeight="bold" textAnchor="middle">24.50 METERS</text>
-                        <line x1="725" y1="40" x2="725" y2="420" stroke="#f59e0b" strokeWidth="1.5" />
-                        <text x="735" y="235" fill="#f59e0b" fontSize="11" fontWeight="bold" textAnchor="middle" transform="rotate(90, 735, 235)">18.00 METERS</text>
-                      </svg>
-                    </div>
+                      {/* Furniture Layout Layer */}
+                      {cadShowFurniture && (
+                        <g id="furnitureLayer">
+                          {/* Boardroom Table */}
+                          <ellipse cx="240" cy="165" rx="60" ry="25" fill="none" stroke="#64748b" strokeWidth="2" />
+                          <circle cx="200" cy="130" r="5" fill="#475569" />
+                          <circle cx="240" cy="130" r="5" fill="#475569" />
+                          <circle cx="280" cy="130" r="5" fill="#475569" />
+                          <circle cx="200" cy="200" r="5" fill="#475569" />
+                          <circle cx="240" cy="200" r="5" fill="#475569" />
+                          <circle cx="280" cy="200" r="5" fill="#475569" />
 
+                          {/* Workstation Clusters */}
+                          <rect x="420" y="110" width="70" height="40" fill="none" stroke="#64748b" strokeWidth="1.5" />
+                          <rect x="520" y="110" width="70" height="40" fill="none" stroke="#64748b" strokeWidth="1.5" />
+                          <rect x="620" y="110" width="70" height="40" fill="none" stroke="#64748b" strokeWidth="1.5" />
+
+                          <rect x="420" y="210" width="70" height="40" fill="none" stroke="#64748b" strokeWidth="1.5" />
+                          <rect x="520" y="210" width="70" height="40" fill="none" stroke="#64748b" strokeWidth="1.5" />
+                          <rect x="620" y="210" width="70" height="40" fill="none" stroke="#64748b" strokeWidth="1.5" />
+                        </g>
+                      )}
+
+                      {/* Dimension Marks */}
+                      <line x1="120" y1="50" x2="780" y2="50" stroke="#f59e0b" strokeWidth="1" />
+                      <line x1="120" y1="45" x2="120" y2="55" stroke="#f59e0b" strokeWidth="1" />
+                      <line x1="780" y1="45" x2="780" y2="55" stroke="#f59e0b" strokeWidth="1" />
+                      <text x="430" y="45" fill="#f59e0b" fontSize="12" fontFamily="monospace" fontWeight="bold">22.00 METERS</text>
+
+                      <line x1="795" y1="80" x2="795" y2="460" stroke="#f59e0b" strokeWidth="1" />
+                      <line x1="790" y1="80" x2="800" y2="80" stroke="#f59e0b" strokeWidth="1" />
+                      <line x1="790" y1="460" x2="800" y2="460" stroke="#f59e0b" strokeWidth="1" />
+                      <text x="805" y="275" fill="#f59e0b" fontSize="12" fontFamily="monospace" fontWeight="bold">12.50 M</text>
+                    </svg>
                   </div>
                 </div>
               )}
 
-              {/* --- 4B. INTERACTIVE EXCEL SPREADSHEET & GANTT PROGRESS EDITOR --- */}
+              {/* Specialized B: Excel / BOQ Interactive Schedule Spreadsheet */}
               {isExcelScheduleDocument(previewDoc) && (
-                <div className="flex-1 flex flex-col overflow-hidden">
-                  
-                  {/* Spreadsheet Header Controls */}
-                  <div className="p-3 bg-slate-900 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="w-full h-full flex flex-col">
+                  {/* Spreadsheet Header Toolbar */}
+                  <div className="flex items-center justify-between gap-3 bg-slate-900 border border-slate-800 rounded-2xl px-4 py-2.5 mb-3 shadow-sm">
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-mono text-emerald-400 font-bold uppercase flex items-center gap-1">
-                        <FileSpreadsheet className="w-3.5 h-3.5" />
-                        Interactive Schedule Workbook ({scheduleData.length} Tasks)
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                      <span className="text-xs font-bold text-white">Live Project BOQ & Milestones Matrix</span>
+                      <span className="text-[10px] font-mono text-emerald-400 bg-emerald-950 px-2 py-0.5 rounded border border-emerald-800">
+                        Spreadsheet Mode
                       </span>
-                      <span className="text-slate-600">|</span>
-                      <span className="text-[11px] text-slate-400">Edit progress sliders below to sync with project schedule</span>
                     </div>
 
                     <div className="flex items-center gap-2">
                       <button
                         onClick={handleSyncToGantt}
-                        className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-md shadow-emerald-950 cursor-pointer transition-all"
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-md cursor-pointer"
                       >
                         <RefreshCw className="w-3.5 h-3.5" />
-                        <span>Sync with Gantt Schedule</span>
-                      </button>
-
-                      <button
-                        onClick={handleOpenInGantt}
-                        className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-semibold flex items-center gap-1 cursor-pointer transition-all"
-                      >
-                        <span>Open in Gantt</span>
-                        <ArrowRight className="w-3 h-3" />
+                        <span>Sync Changes to Gantt</span>
                       </button>
                     </div>
                   </div>
 
-                  {/* Spreadsheet Table Grid */}
-                  <div className="flex-1 overflow-auto p-4">
-                    <div className="border border-slate-800 rounded-2xl overflow-hidden bg-slate-900/80 shadow-xl">
-                      <table className="w-full text-left border-collapse text-xs">
-                        <thead>
-                          <tr className="bg-slate-950 border-b border-slate-800 text-[11px] font-mono text-slate-400">
-                            <th className="py-3 px-3 w-16">WBS</th>
-                            <th className="py-3 px-4">Milestone Task Name</th>
-                            <th className="py-3 px-3">Trade Category</th>
-                            <th className="py-3 px-3">Assigned Contractor</th>
-                            <th className="py-3 px-3 w-28">Duration</th>
-                            <th className="py-3 px-4 w-48">Execution Progress (%)</th>
-                            <th className="py-3 px-3 w-32">Status</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-800/80">
-                          {scheduleData.map((row) => (
-                            <tr key={row.id} className="hover:bg-slate-800/50 transition-colors group">
-                              <td className="py-3 px-3 font-mono text-slate-500 font-bold">{row.wbs}</td>
-                              <td className="py-3 px-4 font-bold text-white group-hover:text-emerald-300 transition-colors">
-                                {row.taskName}
-                              </td>
-                              <td className="py-3 px-3">
-                                <span className="text-[10px] font-mono bg-slate-950 text-slate-300 border border-slate-800 px-2 py-0.5 rounded">
-                                  {row.category}
-                                </span>
-                              </td>
-                              <td className="py-3 px-3 text-slate-400 font-medium">{row.contractor}</td>
-                              <td className="py-3 px-3 font-mono text-slate-400">{row.durationWeeks} Weeks</td>
-                              
-                              {/* Interactive Progress Slider */}
-                              <td className="py-3 px-4">
-                                <div className="space-y-1">
-                                  <div className="flex items-center justify-between text-xs font-mono">
-                                    <span className="text-emerald-400 font-bold">{row.progress}%</span>
-                                  </div>
-                                  <input
-                                    type="range"
-                                    min="0"
-                                    max="100"
-                                    value={row.progress}
-                                    onChange={(e) => {
-                                      const val = Number(e.target.value);
-                                      setScheduleData(prev => prev.map(r => r.id === row.id ? { 
-                                        ...r, 
-                                        progress: val,
-                                        status: val === 100 ? 'COMPLETED' : val > 0 ? 'IN_PROGRESS' : 'NOT_STARTED'
-                                      } : r));
-                                    }}
-                                    className="w-full accent-emerald-500 cursor-pointer h-1.5 bg-slate-800 rounded-lg"
-                                  />
-                                </div>
-                              </td>
-
-                              {/* Interactive Status Selector */}
-                              <td className="py-3 px-3">
-                                <select
-                                  value={row.status}
+                  {/* Interactive Spreadsheet Grid */}
+                  <div className="flex-1 bg-slate-900 border border-slate-800 rounded-2xl overflow-auto shadow-inner">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-950 border-b border-slate-800 text-slate-400 font-mono text-[11px]">
+                          <th className="py-2.5 px-3 w-16">WBS</th>
+                          <th className="py-2.5 px-3">Work Package / Task Name</th>
+                          <th className="py-2.5 px-3">Discipline</th>
+                          <th className="py-2.5 px-3 w-28 text-center">Duration</th>
+                          <th className="py-2.5 px-3 w-36">Progress (%)</th>
+                          <th className="py-2.5 px-3 w-28">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-800">
+                        {scheduleData.map((row, idx) => (
+                          <tr key={row.id} className="hover:bg-slate-800/60 transition-colors">
+                            <td className="py-2.5 px-3 font-mono text-emerald-400 font-bold">{row.wbs}</td>
+                            <td className="py-2.5 px-3 font-semibold text-white">
+                              <input
+                                type="text"
+                                value={row.taskName}
+                                onChange={(e) => {
+                                  const updated = [...scheduleData];
+                                  updated[idx].taskName = e.target.value;
+                                  setScheduleData(updated);
+                                }}
+                                className="bg-transparent border-b border-transparent hover:border-slate-700 focus:border-emerald-500 focus:outline-none w-full text-white"
+                              />
+                            </td>
+                            <td className="py-2.5 px-3 text-slate-400">{row.category}</td>
+                            <td className="py-2.5 px-3 text-center font-mono text-slate-300">{row.durationWeeks} wks</td>
+                            <td className="py-2.5 px-3">
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="100"
+                                  value={row.progress}
                                   onChange={(e) => {
-                                    const st = e.target.value as any;
-                                    setScheduleData(prev => prev.map(r => r.id === row.id ? { 
-                                      ...r, 
-                                      status: st,
-                                      progress: st === 'COMPLETED' ? 100 : st === 'NOT_STARTED' ? 0 : r.progress
-                                    } : r));
+                                    const updated = [...scheduleData];
+                                    const val = parseInt(e.target.value, 10);
+                                    updated[idx].progress = val;
+                                    if (val === 100) updated[idx].status = 'COMPLETED';
+                                    else if (val > 0) updated[idx].status = 'IN_PROGRESS';
+                                    else updated[idx].status = 'NOT_STARTED';
+                                    setScheduleData(updated);
                                   }}
-                                  className={`text-[10px] font-mono font-bold rounded-lg px-2 py-1 border bg-slate-950 focus:outline-none cursor-pointer ${
-                                    row.status === 'COMPLETED' ? 'text-emerald-400 border-emerald-800' :
-                                    row.status === 'IN_PROGRESS' ? 'text-amber-400 border-amber-800' :
-                                    'text-slate-400 border-slate-700'
-                                  }`}
-                                >
-                                  <option value="NOT_STARTED">NOT_STARTED</option>
-                                  <option value="IN_PROGRESS">IN_PROGRESS</option>
-                                  <option value="COMPLETED">COMPLETED</option>
-                                </select>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                                  className="w-20 accent-emerald-500 cursor-pointer"
+                                />
+                                <span className="font-mono text-[11px] font-bold text-emerald-400 w-8">{row.progress}%</span>
+                              </div>
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                row.status === 'COMPLETED' ? 'bg-emerald-950 text-emerald-400 border border-emerald-800' :
+                                row.status === 'IN_PROGRESS' ? 'bg-amber-950 text-amber-400 border border-amber-800' :
+                                'bg-slate-800 text-slate-400'
+                              }`}>
+                                {row.status}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-
                 </div>
               )}
 
-              {/* --- 4C. GENERAL DOCUMENT VIEWER (PDF / SPECS) --- */}
+              {/* Specialized C: PDF / Document Clearance Sheet Preview */}
               {!isCadDocument(previewDoc) && !isExcelScheduleDocument(previewDoc) && (
-                <div className="flex-1 overflow-auto p-8 flex flex-col items-center justify-center text-center space-y-4">
-                  <div className="w-16 h-16 rounded-3xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-center text-teal-400">
+                <div className="w-full h-full flex flex-col items-center justify-center space-y-4 text-center max-w-md p-6 bg-slate-900 border border-slate-800 rounded-3xl shadow-xl">
+                  <div className="w-16 h-16 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center">
                     <FileText className="w-8 h-8" />
                   </div>
-                  
-                  <div className="max-w-md space-y-1">
-                    <h3 className="text-lg font-bold text-white">{previewDoc.title}</h3>
-                    <p className="text-xs text-slate-400 font-mono">
-                      Category: {previewDoc.category} • Revision: v{previewDoc.version} • Size: {previewDoc.fileSize || '3.2 MB'}
+                  <div>
+                    <h4 className="text-base font-bold text-white mb-1">{previewDoc.title}</h4>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                      {previewDoc.notes || 'Official Project Document Record and Compliance Clearances.'}
                     </p>
                   </div>
-
-                  <div className="p-4 rounded-2xl bg-slate-900 border border-slate-800 text-xs text-slate-300 max-w-lg leading-relaxed text-left">
-                    <strong className="block text-white mb-1 font-mono text-[11px] uppercase text-teal-400">Archived Document Details:</strong>
-                    {previewDoc.notes || 'Official project document archived in centralized repository.'}
+                  <div className="text-xs font-mono text-slate-400 space-y-1">
+                    <div>Author: <span className="text-slate-200">{previewDoc.uploadedBy}</span></div>
+                    <div>File Size: <span className="text-slate-200">{previewDoc.fileSize || '2.1 MB'}</span></div>
+                    <div>Status: <span className="text-emerald-400 font-bold">{previewDoc.status}</span></div>
                   </div>
-
-                  <div className="flex items-center gap-2 pt-2">
-                    <button
-                      onClick={() => {
-                        const doc = previewDoc;
-                        if (doc.fileUrl && doc.fileUrl.startsWith('http')) {
-                          const link = document.createElement('a');
-                          link.href = doc.fileUrl;
-                          link.download = (doc as any).fileName || `${doc.title.replace(/\s+/g, '_')}.pdf`;
-                          link.target = '_blank';
-                          document.body.appendChild(link);
-                          link.click();
-                          document.body.removeChild(link);
-                          return;
-                        }
-                        const archiveText = `CTVILL DESIGN & CONSTRUCTION - OFFICIAL DOCUMENT ARCHIVE
-========================================================================
-Document Title:    ${doc.title}
-Document ID:       ${doc.id}
-Category:          ${doc.category}
-Revision / Version: v${doc.version}
-File Size:         ${doc.fileSize || '3.2 MB'}
-Upload Date:       ${doc.createdAt || (doc as any).uploadDate || new Date().toISOString().split('T')[0]}
-Uploaded By:       ${doc.uploadedBy || 'Engineering Records Officer'}
-Verification:      VERIFIED & SEALED ARCHIVAL COPY
-Security Level:    CONFIDENTIAL - RESTRICTED DISTRIBUTION
-------------------------------------------------------------------------
-Document Notes & Specifications:
-${doc.notes || 'Official project architectural and engineering record archived in CTVill Centralized Document Management System.'}
-========================================================================
-Archived by CTVill Project Management Operations
-`;
-                        const blob = new Blob([archiveText], { type: 'text/plain;charset=utf-8' });
-                        const url = URL.createObjectURL(blob);
-                        const link = document.createElement('a');
-                        link.href = url;
-                        link.download = `${(doc.title || 'Document').replace(/[^a-zA-Z0-9_-]/g, '_')}_v${doc.version}_Archived.txt`;
-                        document.body.appendChild(link);
-                        link.click();
-                        document.body.removeChild(link);
-                        URL.revokeObjectURL(url);
-                      }}
-                      className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white text-xs font-bold rounded-xl flex items-center gap-2 cursor-pointer shadow-lg shadow-teal-950 transition-all hover:scale-105 active:scale-95"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Download Archive Copy</span>
-                    </button>
-                  </div>
+                  <button
+                    onClick={() => handleDownloadFile(previewDoc)}
+                    className="px-4 py-2 bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-bold rounded-xl flex items-center gap-2 cursor-pointer shadow-md"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Download Official Document</span>
+                  </button>
                 </div>
               )}
 
             </div>
-
           </div>
         </div>
       )}

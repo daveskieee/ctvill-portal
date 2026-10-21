@@ -4,9 +4,9 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { 
-  Sun, CloudRain, Cloud, CloudLightning, CloudSun, Wind, Droplets, 
-  Thermometer, Compass, Gauge, AlertTriangle, CheckCircle2, 
+import {
+  Sun, CloudRain, Cloud, CloudLightning, CloudSun, Wind, Droplets,
+  Thermometer, Compass, Gauge, AlertTriangle, CheckCircle2,
   RefreshCw, MapPin, Calendar, Clock, Plus, X, ChevronRight,
   ShieldAlert, Sparkles, Umbrella, Eye, ArrowUpRight, Download,
   SlidersHorizontal, Check, ShieldCheck, Activity, Search,
@@ -165,7 +165,7 @@ export function parseHourlyAndDaily(dailyData: any, hourlyData: any): DailyForec
     const dayName = idx === 0 ? 'Today' : idx === 1 ? 'Tomorrow' : dateObj.toLocaleDateString('en-US', { weekday: 'short' });
     const shortDayName = dateObj.toLocaleDateString('en-US', { weekday: 'short' });
     const fullDayName = dateObj.toLocaleDateString('en-US', { weekday: 'long' });
-    
+
     // Find all hourly points belonging to this dateStr
     const hourlyPoints: HourlyForecastPoint[] = [];
     if (hourlyData && Array.isArray(hourlyData.time)) {
@@ -193,7 +193,7 @@ export function parseHourlyAndDaily(dailyData: any, hourlyData: any): DailyForec
     // Determine peak rain hour and probability during working hours (06:00 to 19:00)
     let peakPoint: HourlyForecastPoint | null = null;
     let maxProb = 0;
-    
+
     hourlyPoints.forEach(p => {
       if (p.hour24 >= 6 && p.hour24 <= 19) {
         if (p.precipitationProb > maxProb) {
@@ -318,7 +318,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
         if (current) {
           const coords = resolveProjectCoordinates(current);
           if (
-            Math.abs(coords.lat - selectedLocation.lat) > 0.0001 || 
+            Math.abs(coords.lat - selectedLocation.lat) > 0.0001 ||
             Math.abs(coords.lon - selectedLocation.lon) > 0.0001 ||
             current.name !== selectedLocation.name ||
             (current.location && current.location !== selectedLocation.region)
@@ -336,7 +336,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
       }
     }
   }, [projects, selectedLocation.projectId, selectedLocation.id, selectedLocation.lat, selectedLocation.lon, selectedLocation.name, selectedLocation.region, resolveProjectCoordinates]);
-  
+
   // Custom Geocoding Search & Device GPS States
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
@@ -916,12 +916,12 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
     const finalLabel = manualCondition === currentWeatherInfo.conditionType
       ? currentWeatherInfo.label
       : manualCondition === 'SUNNY'
-      ? 'Clear Sky'
-      : manualCondition === 'OVERCAST'
-      ? 'Overcast'
-      : manualCondition === 'RAINY'
-      ? (liveWeather && liveWeather.weatherCode === 51 ? 'Light Drizzle' : 'Light Rain')
-      : 'Heavy Rain / Suspended';
+        ? 'Clear Sky'
+        : manualCondition === 'OVERCAST'
+          ? 'Overcast'
+          : manualCondition === 'RAINY'
+            ? (liveWeather && liveWeather.weatherCode === 51 ? 'Light Drizzle' : 'Light Rain')
+            : 'Heavy Rain / Suspended';
 
     onAddLog({
       date: new Date().toISOString(),
@@ -1040,7 +1040,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
         slotHour: slot.hour,
         hourLabel: slot.label,
         tempC: tempVal,
-        tempF: Math.round(tempVal * 9/5 + 32),
+        tempF: Math.round(tempVal * 9 / 5 + 32),
         precipitationProb: precipVal,
         windKmh: windVal,
         windMph: Math.round(windVal * 0.621371),
@@ -1098,8 +1098,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
       const displayLabel = chartTab === 'temperature'
         ? `${val}°`
         : chartTab === 'precipitation'
-        ? `${val}%`
-        : `${val}`;
+          ? `${val}%`
+          : `${val}`;
 
       return {
         ...d,
@@ -1120,28 +1120,28 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
   const themeConfig = chartTab === 'temperature'
     ? { stroke: '#f59e0b', fillGradId: 'tempGrad', fillStop: '#f59e0b', textClass: 'fill-amber-300' }
     : chartTab === 'precipitation'
-    ? { stroke: '#38bdf8', fillGradId: 'precipGrad', fillStop: '#38bdf8', textClass: 'fill-sky-300' }
-    : { stroke: '#2dd4bf', fillGradId: 'windGrad', fillStop: '#2dd4bf', textClass: 'fill-teal-300' };
+      ? { stroke: '#38bdf8', fillGradId: 'precipGrad', fillStop: '#38bdf8', textClass: 'fill-sky-300' }
+      : { stroke: '#2dd4bf', fillGradId: 'windGrad', fillStop: '#2dd4bf', textClass: 'fill-teal-300' };
 
   return (
     <div className="space-y-6">
-      
+
       {/* Top Header & Location Hub Switcher */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xl space-y-4">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs space-y-3.5">
         {/* Row 1: Title & Primary Actions */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse" />
-              <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider">
-                LIVE METEOROLOGICAL TELEMETRY
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase">
+                Meteorological Telemetry
               </span>
+              <span className="text-xs text-slate-400">Atmospheric Station & Safety Telemetry</span>
             </div>
-            <h2 className="text-xl font-black text-white flex items-center gap-2">
-              <CloudSun className="w-6 h-6 text-amber-400" />
+            <h2 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+              <CloudSun className="w-5 h-5 text-amber-400" />
               Project Weather Report & Atmospheric Station
             </h2>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-slate-400 text-xs mt-0.5">
               Real-time meteorological telemetry, automated trade safety calculators, and historical site diary archives.
             </p>
           </div>
@@ -1151,7 +1151,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
             <button
               type="button"
               onClick={handleExportCSV}
-              className="px-3 py-2 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs font-semibold transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer shadow-sm"
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer"
               title="Export Site Diary as CSV"
             >
               <Download className="w-3.5 h-3.5 text-amber-400" />
@@ -1161,7 +1161,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
             <button
               type="button"
               onClick={handleOpenLogModal}
-              className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-lg shadow-amber-500/20 cursor-pointer transition-all"
+              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-lg flex items-center gap-1.5 cursor-pointer transition-colors shadow-xs"
             >
               <Plus className="w-4 h-4" />
               <span>Log Weather Record</span>
@@ -1170,12 +1170,12 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
         </div>
 
         {/* Row 2: Clean Sub-Toolbar Divider & Grouped Controls */}
-        <div className="pt-3 border-t border-slate-800/80 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div className="pt-2.5 border-t border-slate-800/80 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5">
           {/* Left Group: Location & Station Selector */}
           <div className="flex items-center gap-2 flex-wrap">
             {/* Dynamic Active Project Selector */}
             {projects && projects.length > 0 && (
-              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white">
+              <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white">
                 <Building2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <select
                   value={selectedLocation.projectId || ''}
@@ -1208,7 +1208,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
 
             {/* Custom City / Municipality Geocoding Search */}
             <div className="relative">
-              <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1.5 text-xs text-white w-44 sm:w-48">
+              <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white w-44 sm:w-48">
                 <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 <input
                   type="text"
@@ -1223,7 +1223,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
 
               {/* Autocomplete Dropdown */}
               {showSearchDropdown && searchResults.length > 0 && (
-                <div className="absolute top-full left-0 mt-1 w-64 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl z-50 overflow-hidden">
+                <div className="absolute top-full left-0 mt-1 w-64 bg-slate-900 border border-slate-700 rounded-lg shadow-xl z-50 overflow-hidden">
                   {searchResults.map((item) => (
                     <button
                       key={item.id}
@@ -1244,7 +1244,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               type="button"
               onClick={handleUseDeviceGPS}
               disabled={isGpsLocating}
-              className="px-2.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 hover:text-white rounded-xl text-xs transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer"
+              className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs transition-colors border border-slate-700 flex items-center gap-1.5 cursor-pointer"
               title="Auto-detect current coordinates using Device GPS"
             >
               <LocateFixed className={`w-3.5 h-3.5 ${isGpsLocating ? 'animate-spin text-amber-400' : 'text-emerald-400'}`} />
@@ -1258,11 +1258,10 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
             <button
               type="button"
               onClick={handleToggleForceMajeure}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer border ${
-                isForceMajeureSuspended
-                  ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400 shadow-lg shadow-rose-600/30'
-                  : 'bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border-rose-800'
-              }`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer border ${isForceMajeureSuspended
+                  ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400 shadow-xs'
+                  : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-slate-700'
+                }`}
               title="Toggle Work Stoppage due to Severe Weather (Force Majeure)"
             >
               <ShieldAlert className={`w-3.5 h-3.5 ${isForceMajeureSuspended ? 'animate-bounce text-amber-300' : 'text-rose-400'}`} />
@@ -1273,11 +1272,10 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
             <button
               type="button"
               onClick={() => setIsManualOverride(prev => !prev)}
-              className={`px-2.5 py-1.5 rounded-xl text-xs transition-colors border flex items-center gap-1.5 cursor-pointer ${
-                isManualOverride
-                  ? 'bg-amber-500/20 border-amber-500 text-amber-300'
-                  : 'bg-slate-900 hover:bg-slate-800 text-slate-300 border-slate-700'
-              }`}
+              className={`px-2.5 py-1.5 rounded-lg text-xs transition-colors border flex items-center gap-1.5 cursor-pointer ${isManualOverride
+                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                }`}
               title="Toggle Manual Site Weather Fallback"
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -1289,7 +1287,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               type="button"
               onClick={() => fetchWeather(false, true)}
               disabled={isLoading}
-              className="p-1.5 px-2 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-slate-300 hover:text-white rounded-xl text-xs transition-colors border border-slate-700 flex items-center gap-1 cursor-pointer"
+              className="p-1.5 px-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 rounded-lg text-xs transition-colors border border-slate-700 flex items-center gap-1 cursor-pointer"
               title="Fetch Fresh Sensor Data Upstream"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${isLoading || isSilentSyncing ? 'animate-spin text-amber-400' : ''}`} />
@@ -1387,11 +1385,10 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                       precipitation: condition === 'RAINY' ? 4.5 : condition === 'STORM' ? 25 : 0
                     } : null);
                   }}
-                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${
-                    manualCondition === condition
+                  className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${manualCondition === condition
                       ? 'bg-amber-500 text-slate-950 font-bold'
                       : 'text-slate-400 hover:text-white hover:bg-slate-900'
-                  }`}
+                    }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
                   <span className="hidden xl:inline">{label}</span>
@@ -1462,33 +1459,33 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
         </div>
       ) : (
         <div className="space-y-6">
-          
+
           {/* --------------------------------------------------------------------- */}
           {/* UNIFIED LIVE METEOROLOGICAL TELEMETRY & 7-DAY OUTLOOK */}
           {/* --------------------------------------------------------------------- */}
-          <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 shadow-2xl space-y-5">
-            
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs space-y-4">
+
             {/* Top Row: Weather Summary Header & Real-time Live Clock */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-800/80">
-              <div className="flex items-center gap-4 sm:gap-5 flex-wrap">
-                <div className="p-3.5 rounded-2xl bg-slate-900 border border-slate-700 shadow-inner shrink-0">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-3.5 border-b border-slate-800/80">
+              <div className="flex items-center gap-3.5 sm:gap-4 flex-wrap">
+                <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 shadow-xs shrink-0">
                   {React.createElement(selectedForecastIndex === 0 ? CurrentIcon : SelectedIcon, {
-                    className: `w-12 h-12 sm:w-14 sm:h-14 ${selectedForecastIndex === 0 ? currentWeatherInfo.color : selectedWeatherInfo.color}`
+                    className: `w-10 h-10 sm:w-12 sm:h-12 ${selectedForecastIndex === 0 ? currentWeatherInfo.color : selectedWeatherInfo.color}`
                   })}
                 </div>
 
                 <div>
                   <div className="flex items-baseline gap-2 flex-wrap">
-                    <span className="text-4xl sm:text-5xl font-black text-white font-mono tracking-tight">
+                    <span className="text-3xl sm:text-4xl font-bold text-white font-mono tracking-tight">
                       {isFahrenheit
                         ? (selectedForecastIndex === 0 && liveWeather
-                            ? `${((liveWeather.temperature * 9) / 5 + 32).toFixed(1)}`
-                            : `${Math.round(displayHeroTemp * 9/5 + 32)}`)
+                          ? `${((liveWeather.temperature * 9) / 5 + 32).toFixed(1)}`
+                          : `${Math.round(displayHeroTemp * 9 / 5 + 32)}`)
                         : (selectedForecastIndex === 0 && liveWeather
-                            ? `${liveWeather.temperature.toFixed(1)}`
-                            : `${Math.round(displayHeroTemp)}`)}
+                          ? `${liveWeather.temperature.toFixed(1)}`
+                          : `${Math.round(displayHeroTemp)}`)}
                     </span>
-                    <div className="flex items-center gap-1 text-sm font-semibold text-slate-400 select-none">
+                    <div className="flex items-center gap-1 text-xs font-semibold text-slate-400 select-none">
                       <button
                         type="button"
                         onClick={() => setIsFahrenheit(false)}
@@ -1507,25 +1504,25 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                     </div>
                     <span className="text-xs font-normal text-slate-400 font-sans ml-1">
                       {selectedForecastIndex === 0 && liveWeather
-                        ? `Feels like ${isFahrenheit ? `${((liveWeather.apparentTemperature * 9/5) + 32).toFixed(1)}°F` : `${liveWeather.apparentTemperature.toFixed(1)}°C`}`
+                        ? `Feels like ${isFahrenheit ? `${((liveWeather.apparentTemperature * 9 / 5) + 32).toFixed(1)}°F` : `${liveWeather.apparentTemperature.toFixed(1)}°C`}`
                         : `Forecast Range (${selectedDay.tempMin}° – ${selectedDay.tempMax}°)`}
                     </span>
                   </div>
 
-                  <div className="text-sm font-bold text-slate-200 mt-1 flex items-center gap-2 flex-wrap">
+                  <div className="text-xs font-bold text-slate-200 mt-1 flex items-center gap-2 flex-wrap">
                     <span>{selectedForecastIndex === 0 ? currentWeatherInfo.label : selectedWeatherInfo.label}</span>
-                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${currentWeatherInfo.badgeColor}`}>
+                    <span className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded border ${currentWeatherInfo.badgeColor}`}>
                       {selectedLocation.name}
                     </span>
                     {selectedForecastIndex !== 0 && (
-                      <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-full">
+                      <span className="text-[10px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded">
                         Viewing: {selectedDay.fullDayName || selectedDay.dayName}
                       </span>
                     )}
                   </div>
 
                   {/* Project Site Location & Exact GPS Coordinates Badge */}
-                  <div className="flex items-center gap-2 mt-1.5 text-xs text-slate-400 flex-wrap">
+                  <div className="flex items-center gap-2 mt-1 text-xs text-slate-400 flex-wrap">
                     <span className="flex items-center gap-1 font-medium text-emerald-400">
                       <MapPin className="w-3.5 h-3.5 shrink-0" />
                       <span className="truncate max-w-sm sm:max-w-md">{selectedLocation.region || selectedLocation.name}</span>
@@ -1535,7 +1532,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                       GPS: {selectedLocation.lat.toFixed(4)}° N, {selectedLocation.lon.toFixed(4)}° E
                     </span>
                     <span className="text-slate-600">•</span>
-                    <span className="text-[10px] px-1.5 py-0.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 rounded font-mono font-semibold">
+                    <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 font-mono font-semibold">
                       Site Synced
                     </span>
                   </div>
@@ -1544,61 +1541,61 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
             </div>
 
             {/* Core Meteorological Data Grid (4 Sensors) - Syncs Live or Reflects Selected Day */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 space-y-1">
-                <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase tracking-wider">
                   <span>HUMIDITY</span>
                   <Droplets className="w-3.5 h-3.5 text-blue-400" />
                 </div>
-                <div className="text-xl font-bold font-mono text-white">
+                <div className="text-lg font-bold font-mono text-white">
                   {selectedForecastIndex === 0
                     ? (liveWeather ? `${liveWeather.humidity}%` : '--%')
                     : `${selectedDay?.avgHumidity ?? 75}%`}
                 </div>
-                <div className="text-[10px] text-slate-500">
+                <div className="text-[10px] text-slate-400">
                   {selectedForecastIndex === 0
                     ? (liveWeather && liveWeather.humidity > 80 ? 'High moisture (Live)' : 'Moderate (Live)')
                     : '24-hour Daily Average'}
                 </div>
               </div>
 
-              <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 space-y-1">
-                <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase tracking-wider">
                   <span>WIND SPEED</span>
                   <Wind className="w-3.5 h-3.5 text-teal-400" />
                 </div>
-                <div className="text-xl font-bold font-mono text-white">
+                <div className="text-lg font-bold font-mono text-white">
                   {selectedForecastIndex === 0
                     ? (liveWeather ? (isFahrenheit ? `${(liveWeather.windSpeed * 0.621371).toFixed(1)}` : `${liveWeather.windSpeed.toFixed(1)}`) : '--')
                     : (isFahrenheit ? `${Math.round((selectedDay?.windSpeedMax || 10) * 0.621371)}` : `${selectedDay?.windSpeedMax || 10}`)}{' '}
                   <span className="text-xs font-normal text-slate-400">{isFahrenheit ? 'mph' : 'km/h'}</span>
                 </div>
-                <div className="text-[10px] text-teal-400 font-mono">
+                <div className="text-[10px] text-slate-400 font-mono">
                   {selectedForecastIndex === 0
                     ? `Direction: ${liveWeather ? getWindDirection(liveWeather.windDirection) : '--'}`
                     : `Peak Forecast Gusts: ${selectedDay?.windSpeedMax || 10} km/h`}
                 </div>
               </div>
 
-              <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 space-y-1">
-                <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase tracking-wider">
                   <span>PRECIPITATION</span>
                   <CloudRain className="w-3.5 h-3.5 text-indigo-400" />
                 </div>
-                <div className="text-xl font-bold font-mono text-white">
+                <div className="text-lg font-bold font-mono text-white">
                   {selectedForecastIndex === 0
                     ? (liveWeather ? `${liveWeather.precipitation.toFixed(1)} mm` : '-- mm')
                     : `${selectedDay?.precipitationProb ?? 0}%`}
                 </div>
-                <div className="text-[10px] text-slate-500">
+                <div className="text-[10px] text-slate-400">
                   {selectedForecastIndex === 0
                     ? (liveWeather && liveWeather.precipitation > 0 ? `Active rain (${selectedDay?.precipitationProb ?? 0}% chance)` : `No rain recorded (${selectedDay?.precipitationProb ?? 0}% chance)`)
                     : 'Precipitation Probability'}
                 </div>
               </div>
 
-              <div className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 space-y-1">
-                <div className="flex items-center justify-between text-slate-400 text-xs font-mono">
+              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase tracking-wider">
                   <span>{selectedForecastIndex === 0 ? 'BAROMETER' : 'TEMP RANGE'}</span>
                   {selectedForecastIndex === 0 ? (
                     <Gauge className="w-3.5 h-3.5 text-purple-400" />
@@ -1606,25 +1603,25 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                     <Thermometer className="w-3.5 h-3.5 text-amber-400" />
                   )}
                 </div>
-                <div className="text-xl font-bold font-mono text-white">
+                <div className="text-lg font-bold font-mono text-white">
                   {selectedForecastIndex === 0
                     ? (liveWeather ? `${liveWeather.pressure.toFixed(0)} hPa` : '1012 hPa')
                     : `${selectedDay.tempMin}° – ${selectedDay.tempMax}°C`}
                 </div>
-                <div className="text-[10px] text-slate-500">
+                <div className="text-[10px] text-slate-400">
                   {selectedForecastIndex === 0 ? 'Atmospheric pressure' : 'Forecasted Diurnal Range'}
                 </div>
               </div>
             </div>
 
             {/* Field Operational Weather Advisory Banner */}
-            <div className={`p-4 rounded-xl border flex items-start gap-3 text-xs ${advisory.bg}`}>
-              <ShieldAlert className={`w-5 h-5 shrink-0 mt-0.5 ${advisory.color}`} />
+            <div className={`p-3 rounded-lg border flex items-start gap-2.5 text-xs ${advisory.bg}`}>
+              <ShieldAlert className={`w-4 h-4 shrink-0 mt-0.5 ${advisory.color}`} />
               <div className="space-y-0.5">
                 <strong className={`font-bold block tracking-wide ${advisory.color}`}>
                   SITE METEOROLOGICAL ADVISORY: {advisory.level}
                 </strong>
-                <p className="text-slate-300 leading-relaxed">
+                <p className="text-slate-300 leading-relaxed text-xs">
                   {advisory.text}
                 </p>
               </div>
@@ -1635,33 +1632,30 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               <button
                 type="button"
                 onClick={() => setChartTab('temperature')}
-                className={`pb-2.5 transition-all cursor-pointer relative ${
-                  chartTab === 'temperature'
+                className={`pb-2.5 transition-all cursor-pointer relative ${chartTab === 'temperature'
                     ? 'text-amber-400 font-bold border-b-2 border-amber-400'
                     : 'text-slate-400 hover:text-slate-200'
-                }`}
+                  }`}
               >
                 Temperature
               </button>
               <button
                 type="button"
                 onClick={() => setChartTab('precipitation')}
-                className={`pb-2.5 transition-all cursor-pointer relative ${
-                  chartTab === 'precipitation'
+                className={`pb-2.5 transition-all cursor-pointer relative ${chartTab === 'precipitation'
                     ? 'text-sky-400 font-bold border-b-2 border-sky-400'
                     : 'text-slate-400 hover:text-slate-200'
-                }`}
+                  }`}
               >
                 Precipitation
               </button>
               <button
                 type="button"
                 onClick={() => setChartTab('wind')}
-                className={`pb-2.5 transition-all cursor-pointer relative ${
-                  chartTab === 'wind'
+                className={`pb-2.5 transition-all cursor-pointer relative ${chartTab === 'wind'
                     ? 'text-teal-400 font-bold border-b-2 border-teal-400'
                     : 'text-slate-400 hover:text-slate-200'
-                }`}
+                  }`}
               >
                 Wind
               </button>
@@ -1782,19 +1776,18 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                 const isSelected = (selectedForecastIndex ?? 0) === idx;
                 const dInfo = getWeatherInfo(day.weatherCode);
                 const DIcon = dInfo.icon;
-                const maxT = isFahrenheit ? Math.round(day.tempMax * 9/5 + 32) : Math.round(day.tempMax);
-                const minT = isFahrenheit ? Math.round(day.tempMin * 9/5 + 32) : Math.round(day.tempMin);
+                const maxT = isFahrenheit ? Math.round(day.tempMax * 9 / 5 + 32) : Math.round(day.tempMax);
+                const minT = isFahrenheit ? Math.round(day.tempMin * 9 / 5 + 32) : Math.round(day.tempMin);
 
                 return (
                   <button
                     key={idx}
                     type="button"
                     onClick={() => setSelectedForecastIndex(idx)}
-                    className={`flex flex-col items-center justify-between p-3 rounded-2xl transition-all cursor-pointer text-center ${
-                      isSelected
-                        ? 'bg-slate-800/90 border border-slate-700/80 shadow-md shadow-amber-500/5 ring-1 ring-amber-400/20'
-                        : 'bg-transparent hover:bg-slate-900/60 border border-transparent hover:border-slate-800/60'
-                    }`}
+                    className={`flex flex-col items-center justify-between p-3 rounded-xl transition-all cursor-pointer text-center ${isSelected
+                        ? 'bg-slate-800 border border-amber-500/50 shadow-md ring-1 ring-amber-400/20'
+                        : 'bg-slate-900/60 hover:bg-slate-800/60 border border-slate-800 hover:border-slate-700'
+                      }`}
                   >
                     <span className="text-xs font-semibold text-slate-300">
                       {idx === 0 ? 'Today' : day.shortDayName || day.dayName}
@@ -1804,7 +1797,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                     </div>
                     <div className="text-xs font-mono">
                       <span className="text-white font-bold">{maxT}°</span>{' '}
-                      <span className="text-slate-500">{minT}°</span>
+                      <span className="text-slate-400">{minT}°</span>
                     </div>
                   </button>
                 );
@@ -1834,32 +1827,34 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
       {/* --------------------------------------------------------------------- */}
       {/* INTERACTIVE TRADE IMPACT SAFETY CALCULATOR & WHAT-IF SIMULATOR */}
       {/* --------------------------------------------------------------------- */}
-      <div className="bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950/30 border border-indigo-500/30 rounded-2xl p-6 shadow-xl space-y-6">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
+      {/* --------------------------------------------------------------------- */}
+      {/* INTERACTIVE TRADE IMPACT SAFETY CALCULATOR & WHAT-IF SIMULATOR */}
+      {/* --------------------------------------------------------------------- */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800/80 pb-3.5">
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold tracking-wider uppercase">
-                Interactive Engineering Matrix
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-semibold tracking-wider uppercase">
+                Safety Matrix
               </span>
               <span className="text-xs text-slate-400">Trade Hazard & Weather Impact Engine</span>
             </div>
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+            <h3 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
               <Activity className="w-5 h-5 text-indigo-400" />
               Trade Weather Safety Evaluator & What-If Simulator
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-slate-400 text-xs mt-0.5">
               Select specific construction trades to automatically test wind, rain, and humidity safety limits against live telemetry or simulated extreme scenarios.
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <button
               onClick={() => setIsSimulationMode(!isSimulationMode)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-mono font-bold transition border cursor-pointer ${
-                isSimulationMode 
-                  ? 'bg-amber-500 text-slate-950 border-amber-400' 
-                  : 'bg-slate-900 text-slate-300 border-slate-700 hover:border-slate-600'
-              }`}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition border cursor-pointer ${isSimulationMode
+                  ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
+                  : 'bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700'
+                }`}
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
               <span>{isSimulationMode ? 'Simulation: Active' : 'Enable What-If Simulator'}</span>
@@ -1867,25 +1862,24 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
 
             <button
               onClick={handleLogTradeSafetyResult}
-              className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition shadow-lg shadow-indigo-600/20 cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer"
             >
               <ShieldCheck className="w-4 h-4" />
-              Record Inspection to Diary
+              <span>Record Inspection to Diary</span>
             </button>
           </div>
         </div>
 
         {/* Trade Selector Tabs */}
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-1.5">
           {TRADE_RULES.map((trade) => (
             <button
               key={trade.id}
               onClick={() => setSelectedTrade(trade)}
-              className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                selectedTrade.id === trade.id
-                  ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                  : 'bg-slate-900 text-slate-400 hover:text-white border border-slate-800'
-              }`}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${selectedTrade.id === trade.id
+                  ? 'bg-indigo-600 text-white font-semibold shadow-xs'
+                  : 'bg-slate-950 border border-slate-800 text-slate-400 hover:text-white'
+                }`}
             >
               {trade.name}
             </button>
@@ -1894,7 +1888,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
 
         {/* What-If Sliders (Visible when isSimulationMode is true) */}
         {isSimulationMode && (
-          <div className="p-4 bg-slate-900/90 border border-amber-500/40 rounded-xl space-y-4 animate-fadeIn">
+          <div className="p-3.5 bg-slate-950/80 border border-amber-500/40 rounded-lg space-y-3 animate-fadeIn">
             <div className="flex justify-between items-center text-xs">
               <span className="font-bold text-amber-400 font-mono flex items-center gap-1.5">
                 <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -1915,7 +1909,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-xs font-mono">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs font-mono">
               <div>
                 <div className="flex justify-between mb-1">
                   <span className="text-slate-400">Wind Speed:</span>
@@ -1981,12 +1975,12 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
         )}
 
         {/* Live Safety Evaluation Card */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 flex flex-col justify-between">
             <div>
-              <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-2">Evaluation Verdict</div>
+              <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-2">Evaluation Verdict</div>
               <div className="flex items-center gap-2">
-                <span className={`text-xs font-bold px-2.5 py-1 rounded-full border font-mono ${tradeSafety.badgeColor}`}>
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded border font-mono ${tradeSafety.badgeColor}`}>
                   {tradeSafety.verdict}
                 </span>
               </div>
@@ -1996,23 +1990,22 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                 <span>Calculated Safety Index</span>
                 <span className="text-white font-bold">{tradeSafety.score}%</span>
               </div>
-              <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden border border-slate-800">
+              <div className="w-full bg-slate-900 rounded-full h-1.5 overflow-hidden border border-slate-800/80">
                 <div
-                  className={`h-full transition-all duration-500 ${
-                    tradeSafety.score > 80 ? 'bg-emerald-400' : tradeSafety.score > 50 ? 'bg-amber-400' : 'bg-rose-400'
-                  }`}
+                  className={`h-full transition-all duration-500 ${tradeSafety.score > 80 ? 'bg-emerald-400' : tradeSafety.score > 50 ? 'bg-amber-400' : 'bg-rose-400'
+                    }`}
                   style={{ width: `${tradeSafety.score}%` }}
                 />
               </div>
-              <p className="text-[10px] text-slate-500 italic pt-1.5 font-mono">
+              <p className="text-[10px] text-slate-400 italic pt-1.5 font-mono">
                 Source: {isSimulationMode ? 'Simulated Weather Override' : `Live Weather Sensors (${selectedLocation.name})`}
               </p>
             </div>
           </div>
 
-          <div className="md:col-span-2 bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3 flex flex-col justify-between">
+          <div className="md:col-span-2 bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-2.5 flex flex-col justify-between">
             <div>
-              <div className="text-[11px] font-mono text-slate-400 uppercase tracking-wider mb-1.5">Trade Safety Rationale & Field Advisory</div>
+              <div className="text-[10px] font-mono text-slate-400 uppercase tracking-wider mb-1.5">Trade Safety Rationale & Field Advisory</div>
               <div className="space-y-1">
                 {tradeSafety.reasons.map((r, idx) => (
                   <div key={idx} className="flex items-start gap-1.5 text-xs text-slate-300">
@@ -2023,7 +2016,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               </div>
             </div>
 
-            <div className="p-2.5 bg-slate-900/60 rounded-lg border border-slate-800 text-[11px] text-indigo-300">
+            <div className="p-2.5 bg-slate-900/60 rounded-md border border-slate-800 text-[11px] text-indigo-300">
               <strong className="text-indigo-200 font-bold mr-1">Engineering Protocol:</strong>
               {selectedTrade.advice}
             </div>
@@ -2032,18 +2025,18 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
       </div>
 
       {/* Historical Weather Observation Records */}
-      <div className="bg-slate-950 border border-slate-800 rounded-2xl p-5 shadow-xs space-y-3">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 sm:p-5 shadow-xs space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800/80 pb-3">
           <div>
             <h3 className="text-sm font-bold text-white flex items-center gap-2">
               <Clock className="w-4 h-4 text-amber-400" />
               Recorded Weather Observations & Historical Logs ({logs.length})
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-slate-400 text-xs mt-0.5">
               Archived weather logs saved for site safety compliance, weather delay verification, and insurance audits.
             </p>
           </div>
-          
+
           <button
             onClick={() => setIsModalOpen(true)}
             className="text-xs text-amber-400 hover:text-amber-300 font-semibold flex items-center gap-1 cursor-pointer"
@@ -2054,7 +2047,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
         </div>
 
         {logs.length === 0 ? (
-          <div className="h-32 bg-slate-900/40 border border-dashed border-slate-800 rounded-xl flex flex-col items-center justify-center text-slate-500 space-y-1.5">
+          <div className="h-32 bg-slate-950/40 border border-dashed border-slate-800 rounded-lg flex flex-col items-center justify-center text-slate-500 space-y-1.5">
             <CloudSun className="w-7 h-7 text-slate-600" />
             <p className="text-xs font-semibold text-slate-400">No historical weather observations recorded yet.</p>
             <p className="text-[11px] text-slate-500 max-w-sm text-center">
@@ -2062,7 +2055,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
             </p>
           </div>
         ) : (
-          <div className="bg-slate-900/60 border border-slate-800 rounded-xl overflow-hidden">
+          <div className="bg-slate-900/40 border border-slate-800 rounded-lg overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
@@ -2297,18 +2290,18 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
             </div>
 
             {/* Meteorological Grounding Snapshot */}
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
               <div>
-                <span className="text-slate-500 text-[10px] block">ATMOSPHERIC</span>
-                <span className="text-amber-400 font-bold">{currentWeatherInfo.label}</span>
+                <span className="text-slate-400 text-[10px] block uppercase tracking-wider">ATMOSPHERIC</span>
+                <span className="text-white font-bold">{currentWeatherInfo.label}</span>
               </div>
               <div>
-                <span className="text-slate-500 text-[10px] block">WIND VELOCITY</span>
+                <span className="text-slate-400 text-[10px] block uppercase tracking-wider">WIND VELOCITY</span>
                 <span className="text-white font-bold">{liveWeather ? liveWeather.windSpeed.toFixed(1) : manualWind} km/h</span>
               </div>
               <div>
-                <span className="text-slate-500 text-[10px] block">PRECIPITATION</span>
-                <span className="text-indigo-400 font-bold">{liveWeather ? liveWeather.precipitation.toFixed(1) : '0.0'} mm</span>
+                <span className="text-slate-400 text-[10px] block uppercase tracking-wider">PRECIPITATION</span>
+                <span className="text-white font-bold">{liveWeather ? liveWeather.precipitation.toFixed(1) : '0.0'} mm</span>
               </div>
               <div>
                 <span className="text-slate-500 text-[10px] block">SITE HEADCOUNT</span>
@@ -2359,11 +2352,10 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                             prev.includes(c.id) ? prev.filter((id) => id !== c.id) : [...prev, c.id]
                           );
                         }}
-                        className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${
-                          isSelected
+                        className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${isSelected
                             ? 'bg-amber-950/20 border-amber-500/50 text-white'
                             : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
-                        }`}
+                          }`}
                       >
                         <div>
                           <strong className="text-white block">{c.company || c.name}</strong>
@@ -2371,9 +2363,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                             {c.specialty || c.tradeType || 'General Trade'} • {c.activeManpower || 0} Workers
                           </span>
                         </div>
-                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                          isSelected ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-slate-800 text-slate-400'
-                        }`}>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${isSelected ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-slate-800 text-slate-400'
+                          }`}>
                           {isSelected ? 'Selected' : 'Skip'}
                         </span>
                       </div>

@@ -504,39 +504,39 @@ export default function FinancePayrollDashboard({
       {/* KPI Cards: Calculated Totals */}
       {(draftCalculation || selectedRunDetail) && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3.5">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-            <div className="text-[10px] text-slate-400 uppercase font-semibold">Active Labor Headcount</div>
-            <div className="text-2xl font-bold text-white mt-1">
-              {selectedRunDetail?.workerCount || draftCalculation?.workerCount} <span className="text-xs font-normal text-slate-500">workers</span>
+          <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+            <div className="text-[10px] text-slate-400 uppercase font-semibold font-mono tracking-wider">Active Labor Headcount</div>
+            <div className="text-2xl font-bold font-mono text-white mt-1">
+              {selectedRunDetail?.workerCount || draftCalculation?.workerCount} <span className="text-xs font-normal text-slate-400">workers</span>
             </div>
-            <div className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1">
-              <ShieldCheck className="w-3.5 h-3.5" />
+            <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1">
+              <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
               <span>Attendance Verified</span>
             </div>
           </div>
 
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4">
-            <div className="text-[10px] text-slate-400 uppercase font-semibold">Total Gross Wages</div>
-            <div className="text-2xl font-bold text-white mt-1">
+          <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+            <div className="text-[10px] text-slate-400 uppercase font-semibold font-mono tracking-wider">Total Gross Wages</div>
+            <div className="text-2xl font-bold font-mono text-white mt-1">
               ₱{(selectedRunDetail?.totalGross || draftCalculation?.totalGross || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </div>
             <div className="text-[11px] text-slate-400 mt-1">Includes Base + Overtime</div>
           </div>
 
-          <div className="bg-slate-900 border border-rose-900/40 rounded-2xl p-4">
-            <div className="text-[10px] text-rose-400 uppercase font-semibold">Cash Advances / Vale</div>
-            <div className="text-2xl font-bold text-rose-300 mt-1">
+          <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+            <div className="text-[10px] text-slate-400 uppercase font-semibold font-mono tracking-wider">Cash Advances / Vale</div>
+            <div className="text-2xl font-bold font-mono text-white mt-1">
               -₱{(selectedRunDetail?.totalDeductions || draftCalculation?.totalDeductions || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </div>
-            <div className="text-[11px] text-rose-400/80 mt-1">Subtracted from gross pay</div>
+            <div className="text-[11px] text-slate-400 mt-1">Subtracted from gross pay</div>
           </div>
 
-          <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl p-4 shadow-lg shadow-emerald-500/5">
-            <div className="text-[10px] text-emerald-400 uppercase font-semibold">Total Net Disbursal</div>
-            <div className="text-2xl font-bold text-emerald-300 mt-1">
+          <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
+            <div className="text-[10px] text-slate-400 uppercase font-semibold font-mono tracking-wider">Total Net Disbursal</div>
+            <div className="text-2xl font-bold font-mono text-white mt-1">
               ₱{(selectedRunDetail?.totalNet || draftCalculation?.totalNet || 0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
             </div>
-            <div className="text-[11px] text-emerald-400 mt-1 font-semibold">Final Take-Home Payout</div>
+            <div className="text-[11px] text-slate-400 mt-1">Final Take-Home Payout</div>
           </div>
         </div>
       )}
@@ -581,9 +581,9 @@ export default function FinancePayrollDashboard({
                       <td className="py-3 px-4 font-semibold text-white">{run.projectName}</td>
                       <td className="py-3 px-4 font-mono text-slate-300">{run.periodStart} &rarr; {run.periodEnd}</td>
                       <td className="py-3 px-4 text-center">{run.workerCount}</td>
-                      <td className="py-3 px-4 text-right font-mono">₱{run.totalGross.toLocaleString()}</td>
-                      <td className="py-3 px-4 text-right font-mono text-rose-400">-₱{run.totalDeductions.toLocaleString()}</td>
-                      <td className="py-3 px-4 text-right font-mono font-bold text-emerald-400">₱{run.totalNet.toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-mono">₱{Number(run.totalGross || 0).toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-mono text-rose-400">-₱{Number(run.totalDeductions || 0).toLocaleString()}</td>
+                      <td className="py-3 px-4 text-right font-mono font-bold text-emerald-400">₱{Number(run.totalNet || 0).toLocaleString()}</td>
                       <td className="py-3 px-4 text-center">
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                           {run.status}
@@ -727,7 +727,7 @@ export default function FinancePayrollDashboard({
                         {/* Worker Name */}
                         <td className="py-3 px-4 font-semibold text-white">
                           <div>{item.workerName}</div>
-                          <div className="text-[10px] text-slate-500 font-mono">{item.workerId}</div>
+                          <div className="text-[10px] text-slate-400 font-mono">{item.workerId}</div>
                         </td>
 
                         {/* Position */}
@@ -739,51 +739,51 @@ export default function FinancePayrollDashboard({
 
                         {/* Daily Rate */}
                         <td className="py-3 px-4 text-right font-mono text-slate-300">
-                          ₱{item.dailyRate.toLocaleString()}
+                          ₱{Number(item.dailyRate || 0).toLocaleString()}
                         </td>
 
                         {/* Days Worked */}
                         <td className="py-3 px-4 text-center font-mono">
-                          <span className="font-bold text-white">{item.daysWorked}</span>
-                          <span className="text-[10px] text-slate-500 ml-1">days</span>
+                          <span className="font-bold text-white">{item.daysWorked ?? 0}</span>
+                          <span className="text-[10px] text-slate-400 ml-1">days</span>
                         </td>
 
                         {/* OT Hours */}
                         <td className="py-3 px-4 text-center font-mono">
-                          {item.otHours > 0 ? (
+                          {Number(item.otHours || 0) > 0 ? (
                             <span className="text-blue-400 font-bold">{item.otHours} hrs</span>
                           ) : (
-                            <span className="text-slate-600">0</span>
+                            <span className="text-slate-400 font-mono">0</span>
                           )}
                         </td>
 
                         {/* Base Pay */}
                         <td className="py-3 px-4 text-right font-mono text-slate-300">
-                          ₱{item.basePay.toLocaleString()}
+                          ₱{Number(item.basePay ?? (Number(item.daysWorked || 0) * Number(item.dailyRate || 0))).toLocaleString()}
                         </td>
 
                         {/* OT Pay */}
                         <td className="py-3 px-4 text-right font-mono text-blue-300">
-                          {item.otPay > 0 ? `₱${item.otPay.toLocaleString()}` : '₱0'}
+                          {Number(item.otPay || 0) > 0 ? `₱${Number(item.otPay || 0).toLocaleString()}` : '₱0'}
                         </td>
 
                         {/* Gross Pay */}
                         <td className="py-3 px-4 text-right font-mono font-semibold text-white">
-                          ₱{item.grossPay.toLocaleString()}
+                          ₱{Number(item.grossPay || 0).toLocaleString()}
                         </td>
 
                         {/* Vale / Deductions */}
                         <td className="py-3 px-4 text-right font-mono">
                           {hasDeductions ? (
-                            <span className="text-rose-400 font-bold">-₱{item.totalDeductions.toLocaleString()}</span>
+                            <span className="text-rose-400 font-bold">-₱{Number(item.totalDeductions || 0).toLocaleString()}</span>
                           ) : (
-                            <span className="text-slate-600">₱0</span>
+                            <span className="text-slate-400 font-mono">₱0</span>
                           )}
                         </td>
 
                         {/* Net Pay */}
                         <td className="py-3 px-4 text-right font-mono font-bold text-emerald-400 text-sm">
-                          ₱{item.netPay.toLocaleString()}
+                          ₱{Number(item.netPay || 0).toLocaleString()}
                         </td>
 
                         {/* Action: Add Vale (Finance Only) */}
@@ -847,7 +847,7 @@ export default function FinancePayrollDashboard({
               <div>
                 <span className="text-slate-400">Worker:</span>
                 <div className="font-bold text-white text-sm mt-0.5">{selectedWorkerForVale.name}</div>
-                <div className="text-slate-500 font-mono text-[10px]">{selectedWorkerForVale.id}</div>
+                <div className="text-slate-400 font-mono text-[10px]">{selectedWorkerForVale.id}</div>
               </div>
 
               <div>
@@ -973,12 +973,12 @@ export default function FinancePayrollDashboard({
                       <td className="p-1 border border-black text-center">{idx + 1}</td>
                       <td className="p-1 border border-black font-bold">{item.workerName}</td>
                       <td className="p-1 border border-black">{item.position}</td>
-                      <td className="p-1 border border-black text-right">₱{item.dailyRate.toLocaleString()}</td>
-                      <td className="p-1 border border-black text-center">{item.daysWorked}</td>
-                      <td className="p-1 border border-black text-center">{item.otHours}</td>
-                      <td className="p-1 border border-black text-right">₱{item.grossPay.toLocaleString()}</td>
-                      <td className="p-1 border border-black text-right text-red-700">₱{item.totalDeductions.toLocaleString()}</td>
-                      <td className="p-1 border border-black text-right font-black">₱{item.netPay.toLocaleString()}</td>
+                      <td className="p-1 border border-black text-right">₱{Number(item.dailyRate || 0).toLocaleString()}</td>
+                      <td className="p-1 border border-black text-center">{item.daysWorked ?? 0}</td>
+                      <td className="p-1 border border-black text-center">{item.otHours ?? 0}</td>
+                      <td className="p-1 border border-black text-right">₱{Number(item.grossPay || 0).toLocaleString()}</td>
+                      <td className="p-1 border border-black text-right text-red-700">₱{Number(item.totalDeductions || 0).toLocaleString()}</td>
+                      <td className="p-1 border border-black text-right font-black">₱{Number(item.netPay || 0).toLocaleString()}</td>
                       <td className="p-1 border border-black"></td>
                     </tr>
                   ))}
@@ -1027,27 +1027,27 @@ export default function FinancePayrollDashboard({
                     </div>
                     <div className="flex justify-between">
                       <span>Daily Wage Rate:</span>
-                      <span>₱{item.dailyRate.toLocaleString()}</span>
+                      <span>₱{Number(item.dailyRate || 0).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between">
                       <span>Days Worked:</span>
-                      <span>{item.daysWorked} days</span>
+                      <span>{item.daysWorked ?? 0} days</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>Overtime ({item.otHours} hrs):</span>
-                      <span>₱{item.otPay.toLocaleString()}</span>
+                      <span>Overtime ({item.otHours ?? 0} hrs):</span>
+                      <span>₱{Number(item.otPay || 0).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between font-semibold">
                       <span>Gross Pay:</span>
-                      <span>₱{item.grossPay.toLocaleString()}</span>
+                      <span>₱{Number(item.grossPay || 0).toLocaleString()}</span>
                     </div>
                     <div className="flex justify-between text-red-700">
                       <span>Vale Deductions:</span>
-                      <span>-₱{item.totalDeductions.toLocaleString()}</span>
+                      <span>-₱{Number(item.totalDeductions || 0).toLocaleString()}</span>
                     </div>
                     <div className="border-t border-black pt-1 flex justify-between font-black text-sm">
                       <span>NET TAKE-HOME:</span>
-                      <span>₱{item.netPay.toLocaleString()}</span>
+                      <span>₱{Number(item.netPay || 0).toLocaleString()}</span>
                     </div>
                     <div className="mt-4 pt-4 border-t border-dashed border-gray-400 text-center text-[9px] text-gray-500">
                       Received by: _________________________ (Signature)

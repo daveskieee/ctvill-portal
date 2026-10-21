@@ -175,48 +175,48 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
 
       {/* Subcontractor Fraud Audit KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>24H ROLL-CALL AUDIT</span>
             <ShieldCheck className="w-4 h-4 text-blue-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-blue-300">
+          <div className="text-xl font-bold font-mono text-white">
             {totalVerified} / {totalClaimed}
             <span className="text-xs text-slate-400 font-normal ml-1">
               ({filteredAudits.length} Audits)
             </span>
           </div>
-          <span className="text-[10px] text-blue-400 block font-mono">
+          <span className="text-[10px] text-slate-400 block font-mono">
             {filteredAudits.length > 0 ? `${filteredAudits.length} Audits Active • GPS Geotagged` : 'No Active Audits'}
           </span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>LABOR DISCREPANCY RATE</span>
             <AlertTriangle className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-amber-400">
+          <div className="text-xl font-bold font-mono text-white">
             {filteredAudits.length === 0 ? '0%' : `${Math.round((flaggedCount / filteredAudits.length) * 100)}%`}
             <span className="text-xs text-slate-400 font-normal ml-1.5">
               ({flaggedCount} of {filteredAudits.length} Shifts)
             </span>
           </div>
-          <span className="text-[10px] text-amber-300/80 block font-mono">Subcontractor Billing auto-locked on variance</span>
+          <span className="text-[10px] text-slate-400 block font-mono">Subcontractor Billing auto-locked on variance</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>FRAUD PREVENTION</span>
             <Award className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-emerald-300">
+          <div className="text-xl font-bold font-mono text-white">
             {filteredAudits.length === 0 ? '100%' : `${Math.round((cleanCount / filteredAudits.length) * 100)}%`}
             <span className="text-xs text-slate-400 font-normal ml-1.5">
               ({cleanCount} of {filteredAudits.length} Audits)
             </span>
           </div>
-          <span className="text-[10px] text-emerald-400 block font-mono">100% Gate Muster Match</span>
+          <span className="text-[10px] text-slate-400 block font-mono">100% Gate Muster Match</span>
         </div>
       </div>
 

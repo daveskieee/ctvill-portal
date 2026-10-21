@@ -83,7 +83,7 @@ export default function RiskMatrix({ risks, onAddRisk, onUpdateRiskStatus }: Ris
       {/* 5x5 Risk Heatmap & Summary Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Heatmap Card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col justify-between">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
           <div>
             <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider mb-3">
               5x5 Probability vs Impact Matrix
@@ -137,7 +137,7 @@ export default function RiskMatrix({ risks, onAddRisk, onUpdateRiskStatus }: Ris
         </div>
 
         {/* Risk Register Table (2 Cols) */}
-        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-2xl p-4 space-y-3">
+        <div className="lg:col-span-2 bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-3">
           <h3 className="text-xs font-bold text-slate-200 uppercase tracking-wider">
             Active Risk Mitigation Log
           </h3>

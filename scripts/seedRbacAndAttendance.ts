@@ -59,6 +59,14 @@ async function seed() {
       role: 'FINANCE',
       password: 'finance123',
       contact: '+63 917 400 0004'
+    },
+    {
+      id: 'usr-client-default',
+      email: 'client@ctvill.com',
+      name: 'Jonathan Dela Cruz (Client)',
+      role: 'CLIENT',
+      password: 'client123',
+      contact: '+63 917 500 0005'
     }
   ];
 

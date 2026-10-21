@@ -11,12 +11,12 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   style,
   ...props
 }) => {
-  const variantClass = 
+  const variantClass =
     variant === 'circular'
       ? 'rounded-full'
       : variant === 'rectangular'
-      ? 'rounded-none'
-      : 'rounded-xl';
+        ? 'rounded-none'
+        : 'rounded-xl';
 
   return (
     <div

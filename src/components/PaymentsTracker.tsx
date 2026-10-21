@@ -4,12 +4,13 @@
  */
 
 import React, { useState, useMemo, useEffect } from 'react';
-import { 
-  DollarSign, CheckCircle2, Clock, AlertTriangle, Filter, 
-  Search, Plus, ArrowUpRight, ShieldAlert, CreditCard, Building2, 
+import {
+  DollarSign, CheckCircle2, Clock, AlertTriangle, Filter,
+  Search, Plus, ArrowUpRight, ShieldAlert, CreditCard, Building2,
   Receipt, Calendar, X, Check, FileText, Printer, Trash2, Edit3
 } from 'lucide-react';
 import { Client, ProjectProfile } from '../types';
+import { useTheme } from '../context/ThemeContext';
 
 export interface InstallmentRowItem {
   id: string;
@@ -28,6 +29,7 @@ export interface InstallmentRowItem {
 interface PaymentsTrackerProps {
   clients: Client[];
   projects?: ProjectProfile[];
+  selectedProjectId?: string;
   userRole?: string;
   isPrivateAccounting?: boolean;
   onRecordPayment?: (paymentData: {
@@ -39,13 +41,16 @@ interface PaymentsTrackerProps {
   }) => Promise<void>;
 }
 
-export default function PaymentsTracker({ 
-  clients = [], 
-  projects = [], 
+export default function PaymentsTracker({
+  clients = [],
+  projects = [],
+  selectedProjectId,
   userRole = 'ADMIN',
   isPrivateAccounting = false,
-  onRecordPayment 
+  onRecordPayment
 }: PaymentsTrackerProps) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const isFinance = (userRole || '').toUpperCase() === 'FINANCE';
   const isAdmin = isFinance || (userRole || '').toUpperCase() === 'ADMIN' || (userRole || '').toUpperCase() === 'OPERATIONS_DIRECTOR';
   // Local list of installment records initialized from clients
@@ -82,7 +87,14 @@ export default function PaymentsTracker({
     }
   }, [clients]);
 
-  const [selectedProjectFilter, setSelectedProjectFilter] = useState<string>('ALL');
+  const [selectedProjectFilter, setSelectedProjectFilter] = useState<string>(() => selectedProjectId || 'ALL');
+
+  useEffect(() => {
+    if (selectedProjectId !== undefined) {
+      setSelectedProjectFilter(selectedProjectId || 'ALL');
+    }
+  }, [selectedProjectId]);
+
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
 
@@ -136,7 +148,7 @@ export default function PaymentsTracker({
   // Dynamically aggregate payable entities (both Clients and Commercial Projects)
   const payableAccounts = useMemo(() => {
     const list: Array<{ id: string; name: string; subtitle: string; balanceText: string; isProject: boolean; clientName?: string; projectId?: string }> = [];
-    
+
     // 1. Commercial Projects
     (projects || []).forEach(p => {
       const balance = Math.max(0, (p.budget || 0) - (p.fundsCollected || 0));
@@ -207,24 +219,30 @@ export default function PaymentsTracker({
     }
   }, [availableProjectNames]);
 
-  // Resolve active project from selection filter or defaults (e.g. PRJ-4693)
+  const isAllSelected = !selectedProjectFilter || selectedProjectFilter.toUpperCase() === 'ALL' || selectedProjectFilter === '';
+
+  // Active projects list across commercial portfolio
+  const activeProjectsList = useMemo(() => {
+    return (projects || []).filter(p => (p as any).status !== 'ARCHIVED');
+  }, [projects]);
+
+  const activeProjectsCount = activeProjectsList.length > 0 ? activeProjectsList.length : availableProjectNames.length;
+
+  // Resolve active project from selection filter ONLY when a specific project is selected
   const activeProject = useMemo(() => {
-    if (selectedProjectFilter !== 'ALL') {
-      return (projects || []).find(p => 
-        p.name.trim().toLowerCase() === selectedProjectFilter.trim().toLowerCase() ||
-        p.id.toLowerCase() === selectedProjectFilter.toLowerCase()
-      ) || null;
-    }
-    // When 'ALL', default to project that has active installments, or PRJ-4693, or first project
-    const projWithInstallments = (projects || []).find(p => 
-      installments.some(inst => inst.projectName?.trim().toLowerCase() === p.name?.trim().toLowerCase())
-    );
-    return projWithInstallments || (projects || []).find(p => p.id === 'PRJ-4693') || (projects && projects[0]) || null;
-  }, [projects, selectedProjectFilter, installments]);
+    if (isAllSelected) return null;
+    return (projects || []).find(p =>
+      p.name.trim().toLowerCase() === selectedProjectFilter.trim().toLowerCase() ||
+      p.id.toLowerCase() === selectedProjectFilter.toLowerCase()
+    ) || null;
+  }, [projects, selectedProjectFilter, isAllSelected]);
 
   const filteredInstallments = installments.filter(item => {
-    if (selectedProjectFilter !== 'ALL' && item.projectName.trim().toLowerCase() !== selectedProjectFilter.trim().toLowerCase()) {
-      return false;
+    if (!isAllSelected) {
+      const targetName = activeProject ? activeProject.name.trim().toLowerCase() : selectedProjectFilter.trim().toLowerCase();
+      if (item.projectName.trim().toLowerCase() !== targetName && item.projectName.trim().toLowerCase() !== selectedProjectFilter.trim().toLowerCase()) {
+        return false;
+      }
     }
     if (statusFilter === 'PAID' && item.status !== 'Paid') return false;
     if (statusFilter === 'PENDING' && (item.status !== 'Pending' || item.isOverdue)) return false;
@@ -236,22 +254,47 @@ export default function PaymentsTracker({
     return true;
   });
 
-  // Compute live funds collected from paid installments for the active project / view
-  const targetInstallments = selectedProjectFilter !== 'ALL' ? filteredInstallments : installments;
-  const totalCollected = targetInstallments
-    .filter(i => i.status === 'Paid')
-    .reduce((sum, i) => sum + i.amount, 0);
+  // Target installments for the selected view
+  const targetInstallments = !isAllSelected ? filteredInstallments : installments;
 
-  // Compute Total Contract Price (TCP) from active project's true totalContractValue / budget (e.g. ₱3,600,000 for PRJ-4693)
-  const rawProjectBudget = activeProject 
-    ? Number((activeProject as any).totalContractValue || activeProject.budget || 0)
-    : (projects || []).reduce((sum, p) => sum + Number((p as any).totalContractValue || p.budget || 0), 0);
+  // Total Funds Collected:
+  // When 'ALL': Sum collected amounts across all projects
+  // When specific project selected: project's fundsCollected or paid installments for that project
+  const totalCollected = useMemo(() => {
+    if (isAllSelected) {
+      const sumProjects = activeProjectsList.reduce((sum, p) => sum + Number(p.fundsCollected || 0), 0);
+      const sumInstallments = installments
+        .filter(i => i.status === 'Paid')
+        .reduce((sum, i) => sum + i.amount, 0);
+      return Math.max(sumProjects, sumInstallments);
+    }
+    const projectPaid = filteredInstallments
+      .filter(i => i.status === 'Paid')
+      .reduce((sum, i) => sum + i.amount, 0);
+    const projectFunds = activeProject ? Number(activeProject.fundsCollected || 0) : 0;
+    return Math.max(projectFunds, projectPaid);
+  }, [isAllSelected, activeProjectsList, installments, filteredInstallments, activeProject]);
 
-  const totalTCP = rawProjectBudget > 0 
-    ? rawProjectBudget 
-    : (totalCollected + targetInstallments.filter(i => i.status === 'Pending').reduce((sum, i) => sum + i.amount, 0));
+  // Compute Total Contract Price (TCP):
+  // When 'ALL': Sum of budget / totalContractValue across all active projects (e.g. ₱3.60M + ₱5.00M = ₱8.60M)
+  // When specific project selected: that project's budget / totalContractValue
+  const totalTCP = useMemo(() => {
+    if (isAllSelected) {
+      const sumBudget = activeProjectsList.reduce(
+        (sum, p) => sum + Number((p as any).totalContractValue || p.budget || 0),
+        0
+      );
+      if (sumBudget > 0) return sumBudget;
+      return totalCollected + installments.filter(i => i.status === 'Pending').reduce((sum, i) => sum + i.amount, 0);
+    }
+    if (activeProject) {
+      const b = Number((activeProject as any).totalContractValue || activeProject.budget || 0);
+      if (b > 0) return b;
+    }
+    return totalCollected + targetInstallments.filter(i => i.status === 'Pending').reduce((sum, i) => sum + i.amount, 0);
+  }, [isAllSelected, activeProjectsList, activeProject, totalCollected, installments, targetInstallments]);
 
-  // Pending Receivables = TCP - Total Funds Collected
+  // Pending Receivables = Portfolio TCP - Total Portfolio Funds Collected
   const totalPending = Math.max(0, totalTCP - totalCollected);
   const overdueCount = targetInstallments.filter(i => i.isOverdue).length;
 
@@ -396,8 +439,8 @@ export default function PaymentsTracker({
 
   // Check confidentiality policy:
   // If prop isPrivateAccounting is set OR if the selected project filter matches a project with isPrivateAccounting
-  const matchingProject = projects.find(p => p.name.toLowerCase().includes(selectedProjectFilter.toLowerCase()));
-  const isConfidential = isPrivateAccounting || (selectedProjectFilter !== 'ALL' && matchingProject?.isPrivateAccounting) || false;
+  const matchingProject = !isAllSelected ? projects.find(p => p.name.toLowerCase().includes(selectedProjectFilter.toLowerCase())) : undefined;
+  const isConfidential = isPrivateAccounting || (!isAllSelected && matchingProject?.isPrivateAccounting) || false;
   const isAccessRestricted = isConfidential && !isAdmin;
 
   if (isAccessRestricted) {
@@ -515,7 +558,11 @@ export default function PaymentsTracker({
             ₱{totalTCP.toLocaleString()}
           </div>
           <div className="text-xs text-slate-400 mt-1">
-            {activeProject ? `${activeProject.name} (${activeProject.id})` : `Across ${installments.length} installment schedules`}
+            {isAllSelected
+              ? `Portfolio Total (${activeProjectsCount} Active Projects)`
+              : activeProject
+                ? `${activeProject.name} (${activeProject.id})`
+                : selectedProjectFilter}
           </div>
         </div>
 
@@ -524,11 +571,11 @@ export default function PaymentsTracker({
             <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Total Funds Collected</span>
             <CheckCircle2 className="w-5 h-5 text-emerald-400" />
           </div>
-          <div className="text-2xl font-bold text-emerald-400 mt-2 font-mono">
+          <div className="text-2xl font-bold text-white mt-2 font-mono">
             ₱{totalCollected.toLocaleString()}
           </div>
-          <div className="text-xs text-emerald-500/80 mt-1">
-            {totalTCP > 0 ? Math.round((totalCollected / totalTCP) * 100) : 0}% collected of total contract
+          <div className="text-xs text-slate-400 mt-1">
+            {totalTCP > 0 ? Math.round((totalCollected / totalTCP) * 100) : 0}% collected {isAllSelected ? 'across portfolio' : 'of total contract'}
           </div>
         </div>
 
@@ -537,11 +584,11 @@ export default function PaymentsTracker({
             <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Pending Receivables</span>
             <Clock className="w-5 h-5 text-amber-400" />
           </div>
-          <div className="text-2xl font-bold text-amber-400 mt-2 font-mono">
+          <div className="text-2xl font-bold text-white mt-2 font-mono">
             ₱{totalPending.toLocaleString()}
           </div>
-          <div className="text-xs text-amber-500/80 mt-1">
-            TCP − Total Funds Collected
+          <div className="text-xs text-slate-400 mt-1">
+            {isAllSelected ? 'Portfolio TCP − Total Funds Collected' : 'TCP − Total Funds Collected'}
           </div>
         </div>
 
@@ -550,10 +597,10 @@ export default function PaymentsTracker({
             <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Overdue Accounts</span>
             <AlertTriangle className="w-5 h-5 text-rose-400" />
           </div>
-          <div className="text-2xl font-bold text-rose-400 mt-2 font-mono">
+          <div className="text-2xl font-bold text-white mt-2 font-mono">
             {overdueCount} Overdue
           </div>
-          <div className="text-xs text-rose-500/80 mt-1">
+          <div className="text-xs text-slate-400 mt-1">
             Requires follow-up / notice of delay
           </div>
         </div>
@@ -860,7 +907,7 @@ export default function PaymentsTracker({
                       value={invoiceDueDate}
                       onChange={(e) => setInvoiceDueDate(e.target.value)}
                       onClick={(e) => {
-                        try { (e.target as any).showPicker?.(); } catch {}
+                        try { (e.target as any).showPicker?.(); } catch { }
                       }}
                       className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono focus:border-emerald-500 focus:outline-none cursor-pointer [color-scheme:dark]"
                     />
@@ -931,11 +978,10 @@ export default function PaymentsTracker({
             </div>
 
             {feedbackMsg && (
-              <div className={`p-3 rounded-xl mb-4 text-xs font-mono flex items-center gap-2 ${
-                feedbackMsg.startsWith('Error') 
+              <div className={`p-3 rounded-xl mb-4 text-xs font-mono flex items-center gap-2 ${feedbackMsg.startsWith('Error')
                   ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
                   : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
-              }`}>
+                }`}>
                 {feedbackMsg.startsWith('Error') ? <AlertTriangle className="w-4 h-4 shrink-0" /> : <Check className="w-4 h-4 shrink-0" />}
                 {feedbackMsg}
               </div>

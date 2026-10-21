@@ -116,12 +116,11 @@ app.use('/api/documents', documentsRouter);
 app.use('/api', siteDiaryRouter);
 app.use('/api', financeRouter);
 app.use('/api/finance', financeRouter);
+app.use('/api/workers', workersRouter);
 app.use('/api', workforceRouter);
 app.use('/api', legacyParcelsRouter);
 app.use('/api/attendance', attendanceRouter);
 app.use('/api/payroll', payrollRouter);
-app.use('/api/workers', workersRouter);
-app.use('/api', workersRouter);
 
 // Serve static frontend build in production
 const distPath = path.join(__dirname, 'dist');
@@ -140,6 +139,11 @@ app.get('*', (req, res, next) => {
 
 // Generic centralized error handler (prevents leaking internal stack traces)
 app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  if (err?.type === 'entity.too.large' || err?.status === 413) {
+    return res.status(413).json({
+      error: 'Upload payload exceeds the maximum database limit of 50 MB. Please reduce file size before uploading.'
+    });
+  }
   console.error('Unhandled server error:', err?.message || err);
   if (res.headersSent) return;
   res.status(500).json({ error: 'Internal Server Error' });

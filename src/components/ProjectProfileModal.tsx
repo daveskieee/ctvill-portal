@@ -25,8 +25,13 @@ export const ProjectProfileModal: React.FC<ProjectProfileModalProps> = ({
 }) => {
   if (!isOpen || !project) return null;
 
-  const progress = calculateProjectProgress(project.id, tasks, project.progressPercentage);
-  const effectiveStatus = progress > 0 && project.status === 'PLANNING' ? 'IN_PROGRESS' : project.status;
+  const rawProgress = 
+    project.cpmProgress !== undefined && project.cpmProgress !== null ? project.cpmProgress :
+    project.overallProgress !== undefined && project.overallProgress !== null ? project.overallProgress :
+    project.progress !== undefined && project.progress !== null ? project.progress :
+    project.progressPercentage || 0;
+  const progress = calculateProjectProgress(project.id, tasks, Number(rawProgress));
+  const effectiveStatus = progress > 0 && (project.status === 'PLANNING' || !project.status) ? 'IN_PROGRESS' : project.status;
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">

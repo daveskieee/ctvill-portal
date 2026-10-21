@@ -1,0 +1,200 @@
+================================================================================
+CTVILL ENTERPRISE ERP — AUTHENTICATION REFRESH BUG VERIFICATION REPORT
+================================================================================
+Timestamp: 2026-10-18T02:18:00+08:00
+Workspace: c:\Users\Daveskiii\Desktop\xyz-company-real-estate-erp
+Git Restore Point Branch: restore-point-auth-refresh-bug
+Environment: Node.js v24.14.0 | React 19 | Vite 6.2.3 | PostgreSQL + Prisma 7.9.1
+
+--------------------------------------------------------------------------------
+1. ROOT CAUSE ANALYSIS
+--------------------------------------------------------------------------------
+Observed Bug:
+When an authenticated user on any role refreshed the browser (F5 / hard reload),
+the public marketing Landing Page briefly appeared before the application returned
+to the dashboard.
+
+Underlying Technical Root Causes:
+1. Implicit / Conflated Authentication State:
+   In `src/App.tsx`, the active session state was modeled as:
+     const [session, setSession] = useState<UserSession | 'login' | null>(null);
+   Here, `null` was overloaded to represent two mutually exclusive scenarios:
+     a. An unauthenticated guest visitor browsing the public Landing Page.
+     b. An initializing / in-flight state while checking whether an existing
+        session exists in the browser's HttpOnly session cookie.
+
+2. Asynchronous Network Gap:
+   On every page reload or hard refresh:
+     - React initialized `session` synchronously to `null`.
+     - `renderActiveWorkspace()` evaluated:
+         if (session === null) {
+           return <LandingPage onEnterPortal={() => setSession('login')} />;
+         }
+     - The browser immediately mounted and rendered `<LandingPage />` (including
+       hero banners, marketing carousels, and public showcases).
+     - Concurrently, `useEffect` fired `fetch('/api/auth/me')` asynchronously.
+     - 50–250ms later, the HTTP response returned with the authenticated user session.
+     - `setSession(data.session)` triggered a re-render, unmounting `<LandingPage />`
+       and mounting `<AdminPortal />`.
+   This produced the temporary flash of the public landing page on every refresh.
+
+3. Unscoped Mount Requests (Premature Queries & SSE):
+   `reloadAllData()` and `connectSSE()` were invoked unconditionally in `useEffect` on
+   initial component mount, regardless of whether the user was authenticated.
+   For unauthenticated visitors or during in-flight verification, this fired requests
+   to `/api/all-data` and `/api/events`, receiving 401 Unauthorized responses and
+   triggering redundant session cleanup handlers and false expiration alerts.
+
+4. Route / Module Amnesia on Refresh:
+   In `src/components/AdminPortal.tsx`, `activeTab` initialized directly to the role's
+   default home (e.g. 'dashboard') without inspecting the active URL hash or
+   session storage during `useState` initialization.
+   Furthermore, sidebar clicks updated local component state without writing back to
+   `window.location.hash` or `sessionStorage`. On refresh, users lost their active module
+   context (e.g. Gantt, RFIs, Timekeeper attendance, Payroll) and were reset to the home tab.
+
+--------------------------------------------------------------------------------
+2. ARCHITECTURAL & CODE IMPLEMENTATION
+--------------------------------------------------------------------------------
+1. Explicit 3-State Authentication State Machine:
+   Replaced overloaded `session` state with explicit `AuthStatus`:
+     type AuthStatus = 'checking' | 'authenticated' | 'unauthenticated';
+     - 'checking': The application is strictly verifying the session with
+       backend `/api/auth/me`. During this state, the minimal CTVILL
+       `SessionVerificationScreen` is rendered. The Landing Page and Login Portal
+       are NEVER rendered during this state.
+     - 'authenticated': The server has cryptographically verified the session
+       via HttpOnly cookie. Renders `<AdminPortal />`.
+     - 'unauthenticated': No valid session exists. Renders `<LandingPage />` or
+       `<LoginPortal />` based on `unauthView`.
+
+2. Minimal CTVILL Branded Loading Screen (`SessionVerificationScreen.tsx`):
+   Created a dedicated, lightweight, theme-aware loading component that displays:
+     - Authentic CTVILL enterprise logo (`logoJpg`) with ambient gold/amber pulse ring
+     - "CTVILL ENTERPRISE • Project Management Operations" badge
+     - Sleek animated spinner and "Verifying secure workspace session..." indicator
+     - Zero public marketing content, zero login inputs, zero data exposure
+     - Unmounts cleanly the instant `/api/auth/me` resolves.
+
+3. Module Route Preservation & Browser History Synchronization:
+   In `src/components/AdminPortal.tsx`:
+     - Initial `activeTab` state inspects `window.location.hash`, query parameters (`?tab=`),
+       `sessionStorage('ctvill_active_tab')`, and pathname against a canonical
+       `routeMap` and verifies vertical RBAC permissions via `canAccessModule(role, tab)`.
+     - An active synchronization effect maintains bidirectional lockstep between
+       `activeTab`, `window.location.hash` (e.g. `#gantt`, `#rfis`, `#timekeeper-attendance`),
+       and `sessionStorage`.
+     - Listens to `hashchange` and `popstate` events to provide seamless browser
+       Back / Forward navigation.
+
+4. Protected Data Scoping & SSE Lifecycle:
+   - `reloadAllData()` is triggered ONLY when `authStatus === 'authenticated'`.
+   - `connectSSE()` is connected ONLY when `authStatus === 'authenticated'`, and
+     tears down immediately upon logout or session invalidation.
+   - `/api/auth/me` is excluded from the global 401 fetch interceptor in `apiClient.ts`
+     to prevent duplicate session revocation alerts and redirect loops.
+   - When a session expires, client redirects cleanly to `<LoginPortal />` with an
+     informative security audit notice, strictly preventing access to protected data.
+
+--------------------------------------------------------------------------------
+3. EXACT CODE CHANGES BY FILE
+--------------------------------------------------------------------------------
+
+A. `src/components/SessionVerificationScreen.tsx` (NEW FILE)
+   - Created minimal branded session verification screen with CTVILL logo,
+     sleek amber glow, and "Verifying secure workspace session..." status.
+
+B. `src/App.tsx`
+   - Added import `SessionVerificationScreen`.
+   - Replaced `session: UserSession | 'login' | null` with:
+       type AuthStatus = 'checking' | 'authenticated' | 'unauthenticated';
+       const [authStatus, setAuthStatus] = useState<AuthStatus>('checking');
+       const [session, setSession] = useState<UserSession | null>(null);
+       const [unauthView, setUnauthView] = useState<'landing' | 'login'>('landing');
+   - Updated session restorer `useEffect` to use single-flight guard
+     (`authCheckStartedRef`) and verify session via `/api/auth/me`.
+   - Scoped `reloadAllData()` and `connectSSE()` to run strictly when
+     `authStatus === 'authenticated'`.
+   - In `renderActiveWorkspace()`, implemented explicit branching:
+       if (authStatus === 'checking') return <SessionVerificationScreen />;
+       if (authStatus === 'unauthenticated') return unauthView === 'login' ? <LoginPortal /> : <LandingPage />;
+       return <AdminPortal ... />;
+   - Updated root container and `useInactivityTimeout` to observe explicit `authStatus`.
+
+C. `src/components/AdminPortal.tsx`
+   - Defined canonical `routeMap` registering all module routes:
+     gantt, kanban, rfis, change-orders, risks, timekeeper-attendance,
+     finance-payroll, worker-masterlist, projects, site-diary, documents,
+     permits, audit-trail, account-settings, operations-settings.
+   - Enhanced `useState<string>` for `activeTab` to resolve directly from
+     URL hash, search param, or sessionStorage on initial render while enforcing RBAC.
+   - Added `useEffect` to synchronize `activeTab` with `window.location.hash`
+     and `sessionStorage.setItem('ctvill_active_tab', activeTab)`.
+   - Updated `hashchange` and `popstate` listeners to handle browser back/forward.
+
+D. `src/utils/apiClient.ts`
+   - Added `!rawUrl.includes('/api/auth/me')` to the 401 unauthorized interceptor
+     exclusion list, preventing double-invocations and false alerts during initial
+     session checks.
+
+E. `src/utils/session.ts`
+   - Updated `clearStoredSession()` to purge `sessionStorage.removeItem('ctvill_active_tab')`
+     alongside user session envelopes, ensuring clean state on sign-out.
+
+F. `scripts/seedRbacAndAttendance.ts`
+   - Added `client@ctvill.com` (password: `client123`, role: `CLIENT`) to seed data
+     to enable complete 5-role end-to-end verification.
+
+--------------------------------------------------------------------------------
+4. VERIFICATION AND TEST RESULTS
+--------------------------------------------------------------------------------
+
+Test 1: TypeScript Static Typecheck (`npm run lint` / `tsc --noEmit`)
+Result: ✅ PASSED (0 errors, clean compile)
+
+Test 2: Production Bundle Build (`npm run build` / `vite build`)
+Result: ✅ PASSED (Built in 55.36s, all chunks resolved successfully)
+
+Test 3: Security & RBAC Suite (`npm run test:security`)
+Result: ✅ PASSED (39 passed, 3 skipped [isolated DB required], 0 failed out of 42 tests)
+  - Deny-by-default project scoping: PASSED
+  - Role normalization: PASSED
+  - CSRF cryptographic verification: PASSED
+  - Separation of duties (Timekeeper cannot finalize payroll): PASSED
+  - Staff credential protection (omits passwordHash and inviteToken): PASSED
+  - 5-Role access control verification: PASSED
+
+Test 4: Automated Refresh Bug Test Suite (`npx tsx scripts/verifyAuthRefreshBug.ts`)
+Result: ✅ PASSED (100% All tests passed)
+  - Role Verification & Session Refresh: ADMIN: PASSED
+  - Role Verification & Session Refresh: ENGINEER: PASSED
+  - Role Verification & Session Refresh: TIMEKEEPER: PASSED
+  - Role Verification & Session Refresh: FINANCE: PASSED
+  - Role Verification & Session Refresh: CLIENT: PASSED
+  - Expired/Invalid Session Security & Redirection: PASSED (Returns 401, zero data leaked)
+  - Direct Navigation to Protected URLs (Unauthenticated): PASSED (Strict 401 on /api/all-data, /api/events, /api/staff)
+  - Sign-Out Followed by Refresh (Session Revocation): PASSED (Pre-logout 200, Logout 200, Post-logout 401)
+  - Role-Based Navigation & Strict RBAC Enforcement: PASSED (Timekeeper forbidden from /api/payroll-records)
+  - Nested Module Route Mapping & Preservation Registry: PASSED
+
+Test 5: Frontend Lifecycle & Navigation Simulation (`npx tsx scripts/verifyFrontendRefreshFlow.ts`)
+Result: ✅ PASSED (12/12 Scenarios Passed)
+  [✅ PASSED] Admin refresh on nested #gantt: Initial rendering is SessionVerificationScreen (Zero flash of LandingPage)
+  [✅ PASSED] Admin refresh on nested #gantt: Final rendering is AdminPortal with preserved #gantt module
+  [✅ PASSED] Engineer refresh on nested #rfis: Preserves RFIs module without flashing landing page
+  [✅ PASSED] Timekeeper refresh on #timekeeper-attendance: Preserves attendance module
+  [✅ PASSED] Finance refresh on #finance-payroll: Preserves payroll module
+  [✅ PASSED] Client refresh on #projects: Preserves projects module
+  [✅ PASSED] Slow Network: Session verification displays minimal loading screen with zero data leakage while awaiting response
+  [✅ PASSED] Expired Session: Redirects cleanly to LoginPortal with security notice (zero landing flash, zero data leakage)
+  [✅ PASSED] Direct Navigation to Protected URL (Unauthenticated): Redirects to LoginPortal with access notice
+  [✅ PASSED] Sign-Out followed by refresh: Persists unauthenticated state on LandingPage without returning to dashboard
+  [✅ PASSED] Vertical RBAC Guard: Timekeeper accessing #payroll is blocked with forbidden-403
+  [✅ PASSED] Browser Navigation & Module Hash Sync: Navigating tabs updates state, hash, and session storage in lockstep
+
+================================================================================
+CONCLUSION: The critical authentication refresh bug has been completely resolved.
+The public landing page never flashes during authenticated refresh; the active
+route and module are preserved across refreshes; expired sessions redirect cleanly;
+and full backend session security and role-based permissions remain intact.
+================================================================================

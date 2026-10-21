@@ -6,24 +6,33 @@
   --font-mono: "Inter", "Helvetica Neue", Arial, sans-serif;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   min-height: 100%;
   width: 100%;
 }
 
+html {
+  background-color: #020617;
+}
+
 body {
-  background-color: #0f172a;
+  background-color: #020617;
   font-family: var(--font-sans);
   overflow-x: hidden;
-  transition: background-color 0.2s ease, color 0.2s ease;
   /* Mobile: improve scroll momentum */
   -webkit-overflow-scrolling: touch;
 }
 
 /* Touch-device improvements */
 @media (hover: none) and (pointer: coarse) {
+
   /* Prevent double-tap zoom on interactive elements */
-  button, a, select, input {
+  button,
+  a,
+  select,
+  input {
     touch-action: manipulation;
   }
 }
@@ -60,10 +69,17 @@ html.light body {
   color: #0f172a;
 }
 
-/* Main Page Wrappers */
+/* Main Page Wrappers & Root Workspace Canvas */
 html.light .min-h-screen,
 html.light #landing-page-root {
   background-color: #f8fafc !important;
+  color: #0f172a !important;
+}
+
+/* Root Workspace Canvas in Light Mode - Soft Slate Tone for clear contrast against crisp white cards */
+html.light main,
+html.light .workspace-canvas {
+  background-color: #f1f5f9 !important;
   color: #0f172a !important;
 }
 
@@ -74,17 +90,32 @@ html.light footer {
   color: #475569 !important;
 }
 
+/* Crisp White Elevated Card Surfaces in Light Mode */
+html.light .bg-white,
+html.light [class*="bg-white"] {
+  background-color: #ffffff !important;
+}
+
+/* Soft Elevation Shadow for Light Mode Cards (Stripe / Linear Ergonomics) */
+html.light .shadow-sm {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05) !important;
+}
+
+html.light .shadow-xs {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04) !important;
+}
+
 /* Universal Slate-950 Containers (Cards, Modals, Sections) */
-html.light [class~="bg-slate-950"]:not([class*="fixed inset-0"]),
-html.light [class*=" bg-slate-950/"]:not([class*="fixed inset-0"]),
-html.light [class^="bg-slate-950/"]:not([class*="fixed inset-0"]) {
+html.light [class~="bg-slate-950"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.light [class*=" bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.light [class^="bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas) {
   background-color: #ffffff !important;
 }
 
 /* Universal Slate-900 Containers (Cards, Secondary Sections) */
-html.light [class~="bg-slate-900"]:not([class*="fixed inset-0"]),
-html.light [class*=" bg-slate-900/"]:not([class*="fixed inset-0"]),
-html.light [class^="bg-slate-900/"]:not([class*="fixed inset-0"]) {
+html.light [class~="bg-slate-900"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.light [class*=" bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.light [class^="bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas) {
   background-color: #ffffff !important;
 }
 
@@ -367,6 +398,7 @@ html.light ::-webkit-scrollbar-thumb:hover {
   from {
     opacity: 0;
   }
+
   to {
     opacity: 1;
   }
@@ -377,6 +409,7 @@ html.light ::-webkit-scrollbar-thumb:hover {
     opacity: 0;
     transform: translateY(20px) scale(0.98);
   }
+
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -384,9 +417,12 @@ html.light ::-webkit-scrollbar-thumb:hover {
 }
 
 @keyframes pulseGlow {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 0.9;
   }
+
   50% {
     opacity: 1;
   }
@@ -498,54 +534,39 @@ html:not(.light) .erp-table tr:hover td {
   from {
     width: 0%;
   }
+
   to {
     width: 100%;
   }
 }
 
 /* Skeleton Shimmer Sweep Effect */
-@keyframes skeletonShimmer {
+@keyframes shimmerSweep {
   0% {
-    transform: translateX(-100%);
+    background-position: -200% 0;
   }
   100% {
-    transform: translateX(100%);
+    background-position: 200% 0;
   }
 }
 
 .skeleton-shimmer {
-  position: relative;
-  overflow: hidden;
-}
-
-.skeleton-shimmer::after {
-  position: absolute;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  transform: translateX(-100%);
-  background-image: linear-gradient(
+  background: linear-gradient(
     90deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.04) 20%,
-    rgba(255, 255, 255, 0.12) 50%,
-    rgba(255, 255, 255, 0.04) 80%,
-    rgba(255, 255, 255, 0) 100%
+    rgba(30, 41, 59, 0.45) 0%,
+    rgba(51, 65, 85, 0.65) 50%,
+    rgba(30, 41, 59, 0.45) 100%
   );
-  animation: skeletonShimmer 2s infinite ease-in-out;
-  content: '';
-  pointer-events: none;
+  background-size: 200% 100%;
+  animation: shimmerSweep 1.8s ease-in-out infinite;
 }
 
-html.light .skeleton-shimmer::after {
-  background-image: linear-gradient(
+html.light .skeleton-shimmer {
+  background: linear-gradient(
     90deg,
-    rgba(0, 0, 0, 0) 0%,
-    rgba(0, 0, 0, 0.03) 20%,
-    rgba(0, 0, 0, 0.08) 50%,
-    rgba(0, 0, 0, 0.03) 80%,
-    rgba(0, 0, 0, 0) 100%
+    rgba(226, 232, 240, 0.6) 0%,
+    rgba(203, 213, 225, 0.9) 50%,
+    rgba(226, 232, 240, 0.6) 100%
   );
+  background-size: 200% 100%;
 }
-

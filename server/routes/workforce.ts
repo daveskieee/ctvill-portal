@@ -114,7 +114,7 @@ workforceRouter.get('/contractors-list', async (req: Request, res: Response) => 
     const dbContractors = await prisma.contractor.findMany({
       orderBy: { name: 'asc' }
     });
-    
+
     const presencesRes = await pool.query('SELECT id, active_presence, status FROM contractors').catch(() => ({ rows: [] }));
     const presenceMap = new Map((presencesRes.rows || []).map((r: any) => [r.id, r.active_presence || r.status]));
 
@@ -124,7 +124,7 @@ workforceRouter.get('/contractors-list', async (req: Request, res: Response) => 
       const rawP = presenceMap.get(c.id) || (c as any).status || 'ACTIVE';
       const activePresence = (rawP === 'BREAK' || rawP === 'ON_BREAK') ? 'BREAK'
         : (rawP === 'OFFLINE' || rawP === 'INACTIVE' || rawP === 'ON_LEAVE') ? 'OFFLINE'
-        : 'ONLINE';
+          : 'ONLINE';
 
       const dept = ((c as any).department || '').toLowerCase();
       const role = ((c as any).roleTitle || c.specialty || '').toLowerCase();
@@ -152,10 +152,10 @@ workforceRouter.get('/contractors-list', async (req: Request, res: Response) => 
         role.includes('admin')
       ) && !role.includes('safety') && !role.includes('ehso');
 
-      const workforceClass = isCorporate 
-        ? 'Corporate' 
-        : ((c as any).employmentType === 'OUTSOURCED' || Number(c.activeManpower || 1) > 1) 
-          ? 'Trade Crew' 
+      const workforceClass = isCorporate
+        ? 'Corporate'
+        : ((c as any).employmentType === 'OUTSOURCED' || Number(c.activeManpower || 1) > 1)
+          ? 'Trade Crew'
           : 'Artisan';
 
       return {
@@ -642,7 +642,8 @@ export function validateRecommendationCandidate(
   },
   workerMap: Map<string, any>,
   projectMap: Map<string, any>,
-  dismissedPairs: Set<string>
+  dismissedPairs: Set<string>,
+  antiPingPongPairs?: Set<string>
 ): { valid: boolean; reason?: string } {
   const { workerId, targetProjectId, donorProjectId, workerTrade } = candidate;
 
@@ -666,9 +667,9 @@ export function validateRecommendationCandidate(
   }
   if (workerTrade) {
     if (!checkTradeCompatibility(workerTradeStr, workerTrade)) {
-      return { 
-        valid: false, 
-        reason: `Worker trade skill (${worker.specialty || 'General'}) is incompatible with required trade (${workerTrade})` 
+      return {
+        valid: false,
+        reason: `Worker trade skill (${worker.specialty || 'General'}) is incompatible with required trade (${workerTrade})`
       };
     }
   }
@@ -681,6 +682,9 @@ export function validateRecommendationCandidate(
   const targetStatus = (targetProj.status || '').toUpperCase();
   if (targetStatus === 'COMPLETED' || targetStatus === 'HANDED_OVER') {
     return { valid: false, reason: `Target project "${targetProj.name}" is already ${targetStatus}` };
+  }
+  if (targetStatus === 'PLANNING' || targetStatus === 'BIDDING' || targetStatus === 'PERMITTING' || (Number(targetProj.progress_percentage || 0) === 0 && targetStatus !== 'IN_PROGRESS')) {
+    return { valid: false, reason: `Target project "${targetProj.name}" is in planning/pre-construction stage and does not accept field trade artisans yet.` };
   }
 
   // 4. Prevent Self-Transfer / Circular Assignment
@@ -719,6 +723,11 @@ export function validateRecommendationCandidate(
   const pairKey = `${(worker.name || '').toLowerCase()}|${(targetProj.name || '').toLowerCase()}`;
   if (dismissedPairs.has(pairKey)) {
     return { valid: false, reason: `Recommendation for ${worker.name} to "${targetProj.name}" was previously dismissed` };
+  }
+
+  // 8. Anti-Ping-Pong / Labor Whiplash Check: Prevent immediately transferring a worker back to a site they recently departed
+  if (antiPingPongPairs && antiPingPongPairs.has(pairKey)) {
+    return { valid: false, reason: `Labor Whiplash: Worker ${worker.name} was recently transferred from "${targetProj.name}". Circular reallocation is disallowed.` };
   }
 
   return { valid: true };
@@ -960,7 +969,7 @@ workforceRouter.post('/labor-allocations/apply-ai-rec', requireRole(['ADMIN', 'E
       );
     }
     await client.query(
-      'UPDATE contractors SET "activeProjectSite" = $1, "status" = \'ACTIVE\' WHERE id = $2',
+      'UPDATE contractors SET active_project_site = $1, "activeProjectSite" = $1, "status" = \'ACTIVE\' WHERE id = $2',
       [targetProj.name, targetWorkerId]
     );
 
@@ -1050,8 +1059,8 @@ workforceRouter.post('/labor-allocations/apply-ai-rec', requireRole(['ADMIN', 'E
     broadcastChange('auditLogs');
     invalidateAllDataCache();
 
-    res.json({ 
-      success: true, 
+    res.json({
+      success: true,
       message: `Workforce reallocation successfully approved and recorded for ${worker.name}.`,
       recommendation: {
         id: rec.id,
@@ -1062,7 +1071,7 @@ workforceRouter.post('/labor-allocations/apply-ai-rec', requireRole(['ADMIN', 'E
       }
     });
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch(() => { });
     console.error('Error applying AI recommendation in transaction:', error);
     res.status(500).json({ error: 'Failed to apply recommendation: transaction rolled back' });
   } finally {
@@ -1194,7 +1203,7 @@ function parseRecommendationsJson(rawText: string): any[] {
         const sub = cleaned.substring(startIdx, endIdx + 1);
         const parsed = JSON.parse(sub);
         if (Array.isArray(parsed)) return parsed;
-      } catch {}
+      } catch { }
     }
   }
   return [];
@@ -1208,11 +1217,21 @@ function processAndValidateCandidates(
   modelName: string,
   workerMap: Map<string, any>,
   projectMap: Map<string, any>,
-  dismissedPairs: Set<string>
+  dismissedPairs: Set<string>,
+  antiPingPongPairs?: Set<string>
 ): any[] {
   const validated: any[] = [];
+  const seenWorkers = new Set<string>();
+
   for (const item of candidates) {
     if (!item || !item.workerId || !item.targetProjectId) continue;
+
+    // Strict in-deck uniqueness: prevent duplicate or conflicting recommendations for the same worker
+    if (seenWorkers.has(item.workerId)) {
+      console.log(`[${provider.toUpperCase()} Candidate Discarded]: Worker ${item.workerId} already has a recommendation in this batch`);
+      continue;
+    }
+
     const validation = validateRecommendationCandidate(
       {
         workerId: item.workerId,
@@ -1222,10 +1241,12 @@ function processAndValidateCandidates(
       },
       workerMap,
       projectMap,
-      dismissedPairs
+      dismissedPairs,
+      antiPingPongPairs
     );
 
     if (validation.valid) {
+      seenWorkers.add(item.workerId);
       const verifiedWorker = workerMap.get(item.workerId)!;
       const verifiedTarget = projectMap.get(item.targetProjectId)!;
       const verifiedDonor = item.donorProjectId ? projectMap.get(item.donorProjectId) : null;
@@ -1299,7 +1320,7 @@ workforceRouter.post('/ai-recommendations/scan', requireRole(['ADMIN', 'ENGINEER
       ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_name TEXT;
       ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS approving_user_role TEXT;
       ALTER TABLE ai_workforce_learning_history ADD COLUMN IF NOT EXISTS applied_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP;
-    `).catch(() => {});
+    `).catch(() => { });
 
     // Query active projects and available workforce
     const dbProjectsRes = await pool.query(`
@@ -1307,10 +1328,10 @@ workforceRouter.post('/ai-recommendations/scan', requireRole(['ADMIN', 'ENGINEER
       WHERE status NOT IN ('COMPLETED', 'HANDED_OVER') 
       ORDER BY created_at ASC
     `);
-    const dbContractors = await prisma.contractor.findMany({ 
-      where: { 
-        status: { notIn: ['INACTIVE', 'ON_LEAVE', 'SUSPENDED'] } 
-      } 
+    const dbContractors = await prisma.contractor.findMany({
+      where: {
+        status: { notIn: ['INACTIVE', 'ON_LEAVE', 'SUSPENDED'] }
+      }
     });
     const dbHistoryRes = await pool.query('SELECT * FROM ai_workforce_learning_history ORDER BY created_at DESC LIMIT 50');
 
@@ -1323,8 +1344,8 @@ workforceRouter.post('/ai-recommendations/scan', requireRole(['ADMIN', 'ENGINEER
       const allowed = new Set(req.user.projectIds || []);
       projects = projects.filter((p: any) => allowed.has(p.id));
       if (projects.length === 0) {
-        return res.status(403).json({ 
-          error: 'Forbidden: You have no assigned active projects to scan for recommendations.' 
+        return res.status(403).json({
+          error: 'Forbidden: You have no assigned active projects to scan for recommendations.'
         });
       }
     }
@@ -1333,6 +1354,14 @@ workforceRouter.post('/ai-recommendations/scan', requireRole(['ADMIN', 'ENGINEER
       learningHistory
         .filter((h: any) => h.action === 'DISMISSED')
         .map((h: any) => `${(h.worker_name || '').toLowerCase()}|${(h.target_project_name || '').toLowerCase()}`)
+    );
+
+    // Anti-ping-pong: if a worker was recently ACCEPTED to their current site from a donor site,
+    // prevent immediately proposing to send them BACK to that donor site (labor whiplash / ping-pong)
+    const antiPingPongPairs = new Set(
+      learningHistory
+        .filter((h: any) => h.action === 'ACCEPTED' && h.donor_project_name && !h.donor_project_name.toLowerCase().includes('standby') && !h.donor_project_name.toLowerCase().includes('unassigned'))
+        .map((h: any) => `${(h.worker_name || '').toLowerCase()}|${(h.donor_project_name || '').toLowerCase()}`)
     );
 
     // Filter strictly for eligible trade artisans (excluding corporate staff, PMs, permanent safety inspectors)
@@ -1368,14 +1397,21 @@ workforceRouter.post('/ai-recommendations/scan', requireRole(['ADMIN', 'ENGINEER
     }));
 
     const prompt = `You are an expert Commercial Construction Workforce Optimization AI for CTVill Builders Corporation.
-Analyze active commercial fit-out projects and the anonymized artisan workforce roster to generate 4 to 8 targeted, actionable labor reallocation recommendations.
+Analyze active commercial fit-out projects and the anonymized artisan workforce roster to generate high-impact labor reallocation recommendations.
 Only include field trade artisans and laborers. Strictly EXCLUDE corporate executives, office staff, finance, HR, legal, project managers (PMs), and permanent safety officers (EHSO).
 
-CRITICAL ACCURACY RULES:
-1. You MUST ONLY select workerId from the provided WORKFORCE ROSTER. Never invent worker IDs.
-2. You MUST ONLY select targetProjectId and donorProjectId from the provided ACTIVE PROJECTS list. Never invent project IDs.
-3. Never reallocate a worker to the site they are already working on.
-4. donorProjectId can be null if the worker is in standby or unassigned.
+CONSTRUCTION TRADE OPTIMIZATION PRINCIPLES:
+1. TARGET SITES (RECIPIENTS): Reallocate artisans ONLY to active construction sites (status IN_PROGRESS or BEHIND_SCHEDULE). NEVER transfer field trade artisans to projects in PLANNING, BIDDING, or 0% progress, as physical build works have not started.
+2. DONOR SITES (SOURCES): Field artisans should ONLY be drawn from:
+   - Standby / unassigned pool (Idle Labor Mitigation)
+   - Projects near completion (progress >= 80%) with surplus finishing trades (Timeline Compression)
+   - Weather-suspended projects
+   NEVER pull workers away from active construction sites (progress < 80%) unless the site is paused or overstaffed.
+3. ANTI-CHURN & ANTI-PING-PONG: Never propose transferring a worker back to a site they recently departed. Each worker may appear at most ONCE across all recommendations.
+4. ADAPTIVE VOLUME: Generate ONLY genuinely beneficial recommendations (up to 4 maximum). If current allocations are already optimal or no donor surplus exists, return an empty array [] in "recommendations". Do NOT invent artificial, circular, or contradictory transfers.
+5. You MUST ONLY select workerId from the provided WORKFORCE ROSTER. Never invent worker IDs.
+6. You MUST ONLY select targetProjectId and donorProjectId from the provided ACTIVE PROJECTS list. Never invent project IDs.
+7. Never reallocate a worker to the site they are already working on.
 
 ACTIVE PROJECTS:
 ${JSON.stringify(anonymizedProjects)}
@@ -1445,7 +1481,8 @@ Return a strict JSON object with a "recommendations" array containing objects wi
             configuredGeminiModel,
             workerMap,
             projectMap,
-            dismissedPairs
+            dismissedPairs,
+            antiPingPongPairs
           );
           if (validatedRecs.length > 0) {
             newRecommendations = validatedRecs;
@@ -1519,7 +1556,8 @@ Return a strict JSON object with a "recommendations" array containing objects wi
             configuredGroqModel,
             workerMap,
             projectMap,
-            dismissedPairs
+            dismissedPairs,
+            antiPingPongPairs
           );
           if (validatedRecs.length > 0) {
             newRecommendations = validatedRecs;
@@ -1546,9 +1584,12 @@ Return a strict JSON object with a "recommendations" array containing objects wi
       usedProvider = 'heuristic';
       usedAiModel = 'heuristic-v1';
 
-      const recipientProjects = projects.filter((p: any) => 
-        p.status !== 'COMPLETED' && 
+      const recipientProjects = projects.filter((p: any) =>
+        p.status !== 'COMPLETED' &&
         p.status !== 'HANDED_OVER' &&
+        p.status !== 'PLANNING' &&
+        p.status !== 'BIDDING' &&
+        p.status !== 'PERMITTING' &&
         Number(p.progress_percentage || 0) < 95
       ).sort((a: any, b: any) => {
         const aUrgent = a.weather_suspended || a.status === 'BEHIND_SCHEDULE' ? 2 : 0;
@@ -1558,10 +1599,13 @@ Return a strict JSON object with a "recommendations" array containing objects wi
       });
 
       const candidatePool = [...eligibleWorkers];
-      const maxQueueItems = Math.min(10, Math.max(4, candidatePool.length));
+      const maxQueueItems = Math.min(6, Math.max(2, recipientProjects.length * 2));
+      const seenHeuristicWorkers = new Set<string>();
 
       for (let i = 0; i < candidatePool.length && newRecommendations.length < maxQueueItems; i++) {
         const worker = candidatePool[i] as any;
+        if (seenHeuristicWorkers.has(worker.id)) continue;
+
         const trade = worker.tradeType || worker.specialty || 'General Trade';
         const isStandby = !worker.activeProjectSite || worker.activeProjectSite === 'STANDBY' || worker.allocationStatus === 'STANDBY';
 
@@ -1579,7 +1623,7 @@ Return a strict JSON object with a "recommendations" array containing objects wi
 
         if (!targetProj) continue;
 
-        const donorProj = projects.find((p: any) => 
+        const donorProj = projects.find((p: any) =>
           worker.activeProjectSite && p.name && p.name.toLowerCase().trim() === worker.activeProjectSite.toLowerCase().trim()
         );
         const donorId = donorProj ? donorProj.id : null;
@@ -1593,10 +1637,12 @@ Return a strict JSON object with a "recommendations" array containing objects wi
           },
           workerMap,
           projectMap,
-          dismissedPairs
+          dismissedPairs,
+          antiPingPongPairs
         );
 
         if (!validation.valid) continue;
+        seenHeuristicWorkers.add(worker.id);
 
         const donorName = donorProj ? donorProj.name : 'General Standby Pool';
         const isTargetBehind = targetProj.weather_suspended || targetProj.status === 'BEHIND_SCHEDULE';
@@ -1621,10 +1667,10 @@ Return a strict JSON object with a "recommendations" array containing objects wi
         const priority: 'HIGH' | 'MEDIUM' = (isTargetBehind || isStandby || newRecommendations.length % 2 === 0) ? 'HIGH' : 'MEDIUM';
         const recId = `REC-${donorId || 'STANDBY'}-${targetProj.id}-${worker.id}`;
 
-        const isCrew = (worker.activeManpower || 1) > 1 || 
-          worker.workforceCategory === 'TRADE_CREW' || 
+        const isCrew = (worker.activeManpower || 1) > 1 ||
+          worker.workforceCategory === 'TRADE_CREW' ||
           worker.entityType === 'CREW' ||
-          (worker.specialty || '').toLowerCase().includes('crew') || 
+          (worker.specialty || '').toLowerCase().includes('crew') ||
           (worker.specialty || '').toLowerCase().includes('gang') ||
           (worker.specialty || '').toLowerCase().includes('supply');
 
@@ -1891,7 +1937,7 @@ workforceRouter.get('/workforce/reallocation-suggestions', async (req: Request, 
     const suggestions: any[] = [];
     if (donorProjects.length > 0 && recipientProjects.length > 0) {
       donorProjects.forEach(donor => {
-        const assignedWorkers = contractors.filter(c => 
+        const assignedWorkers = contractors.filter(c =>
           !isOfficeOrExecutiveWorker(c) && (
             (c.activeProjectSite && donor.name && c.activeProjectSite.toLowerCase().includes(donor.name.toLowerCase())) ||
             (c as any).allocationStatus === 'STANDBY'
@@ -1968,7 +2014,7 @@ workforceRouter.post('/workforce/reallocate', requireRole(['ADMIN', 'ENGINEER'])
         SET assigned_contractor_ids = array_append(array_remove(COALESCE(assigned_contractor_ids, ARRAY[]::TEXT[]), $1), $1),
             assigned_workers_count = COALESCE(cardinality(array_append(array_remove(COALESCE(assigned_contractor_ids, ARRAY[]::TEXT[]), $1), $1)), 0)
         WHERE id = $2
-      `, [workerId, targetProjectId]).catch(() => {});
+      `, [workerId, targetProjectId]).catch(() => { });
     }
 
     await prisma.processAuditLog.create({
@@ -1980,15 +2026,15 @@ workforceRouter.post('/workforce/reallocate', requireRole(['ADMIN', 'ENGINEER'])
         actorRole: (req as any).user?.role || 'ADMIN',
         details: `Reallocated ${worker.name} (${worker.roleTitle || worker.specialty}) from "${originSite}" to "${targetProjectName}".`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
     broadcastChange('contractors');
     broadcastChange('projects');
     broadcastChange('auditLogs');
 
-    res.json({ 
-      success: true, 
-      message: `Successfully reallocated ${worker.name} to ${targetProjectName}.` 
+    res.json({
+      success: true,
+      message: `Successfully reallocated ${worker.name} to ${targetProjectName}.`
     });
   } catch (error) {
     console.error('Error executing workforce reallocation:', error);

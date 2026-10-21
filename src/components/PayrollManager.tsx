@@ -437,10 +437,10 @@ export default function PayrollManager({
             <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Statutory Deductions</span>
             <ShieldCheck className="w-5 h-5 text-indigo-400" />
           </div>
-          <div className="text-2xl font-bold text-indigo-400 mt-2 font-mono">
+          <div className="text-2xl font-bold text-white mt-2 font-mono">
             ₱{totalDeductions.toLocaleString()}
           </div>
-          <div className="text-xs text-indigo-500/80 mt-1">
+          <div className="text-xs text-slate-400 mt-1">
             SSS, PhilHealth, Pag-IBIG & withholding
           </div>
         </div>
@@ -450,10 +450,10 @@ export default function PayrollManager({
             <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Total Net Pay</span>
             <BadgeDollarSign className="w-5 h-5 text-emerald-400" />
           </div>
-          <div className="text-2xl font-bold text-emerald-400 mt-2 font-mono">
+          <div className="text-2xl font-bold text-white mt-2 font-mono">
             ₱{totalNet.toLocaleString()}
           </div>
-          <div className="text-xs text-emerald-500/80 mt-1">
+          <div className="text-xs text-slate-400 mt-1">
             Total take-home wage obligation
           </div>
         </div>
@@ -463,10 +463,10 @@ export default function PayrollManager({
             <span className="text-xs font-mono text-slate-400 uppercase tracking-wider">Pending Release</span>
             <Clock className="w-5 h-5 text-amber-400" />
           </div>
-          <div className="text-2xl font-bold text-amber-400 mt-2 font-mono">
+          <div className="text-2xl font-bold text-white mt-2 font-mono">
             ₱{pendingAmount.toLocaleString()}
           </div>
-          <div className="text-xs text-amber-500/80 mt-1">
+          <div className="text-xs text-slate-400 mt-1">
             {pendingCount} worker payout{pendingCount === 1 ? '' : 's'} awaiting release
           </div>
         </div>

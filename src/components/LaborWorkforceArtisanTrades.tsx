@@ -5,10 +5,11 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Users, HardHat, ShieldCheck, AlertTriangle, Award, BadgeAlert,
+  Users, HardHat, AlertTriangle, Award, BadgeAlert,
   BarChart3, Building, PieChart, RefreshCw, Sparkles, Bot, Zap,
   X, CheckCircle, CheckCheck, ChevronUp, ChevronDown, ArrowRight,
-  Lightbulb, ClipboardList, Plus, TrendingUp, Check
+  Lightbulb, ClipboardList, Plus, TrendingUp, Check,
+  ArrowRightLeft, Sliders, MapPin, Building2, UserCheck
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip,
@@ -16,10 +17,10 @@ import {
 } from 'recharts';
 import {
   Contractor, DailyManpowerAudit, AIManpowerRecommendation,
-  ProjectProfile
+  ProjectProfile, isOfficeOrExecutive, isIndividualStaffOrEngineer
 } from '../types';
+import { useTheme } from '../context/ThemeContext';
 import WorkforceMessengerRoster from './WorkforceMessengerRoster';
-import SubcontractorRollCallAudits from './SubcontractorRollCallAudits';
 
 export interface LaborWorkforceArtisanTradesProps {
   contractors: Contractor[];
@@ -49,19 +50,18 @@ export interface LaborWorkforceArtisanTradesProps {
   onLogAuditClick: () => void;
   onVerifyRollCall?: (contractorId: string) => void;
   notify: (msg: string) => void;
-  /** Forces an initial sub-tab. Used by Finance to land directly on Audits. */
+  /** Forces an initial sub-tab. */
   initialTab?: WorkforceTabId;
   readOnly?: boolean;
   isFinance?: boolean;
   hideTabs?: boolean;
 }
 
-export type WorkforceTabId = 'directory' | 'analytics' | 'audits';
+export type WorkforceTabId = 'directory' | 'analytics';
 
 const TABS: { id: WorkforceTabId; label: string; icon: React.ElementType }[] = [
   { id: 'directory', label: 'Personnel Directory & Roster', icon: Users },
   { id: 'analytics', label: 'Workforce Allocation & Analytics', icon: BarChart3 },
-  { id: 'audits', label: 'Subcontractor Roll-Call Audits', icon: ShieldCheck },
 ];
 
 export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesProps> = ({
@@ -97,11 +97,97 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
   isFinance = false,
   hideTabs = false,
 }) => {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const [activeSubTab, setActiveSubTab] = useState<WorkforceTabId>(initialTab ?? 'directory');
   const [reallocatingId, setReallocatingId] = useState<string | null>(null);
   const [recommendationQueue, setRecommendationQueue] = useState<AIManpowerRecommendation[]>([]);
   const [appliedTransfersHistory, setAppliedTransfersHistory] = useState<AIManpowerRecommendation[]>([]);
   const [expandedRecIds, setExpandedRecIds] = useState<Record<string, boolean>>({});
+  const [showAllRecCards, setShowAllRecCards] = useState<boolean>(false);
+
+  // Manual Workforce Allocation & Transfer Console State (Coupled with Live Charts)
+  const [manualWorkerId, setManualWorkerId] = useState<string>(() => contractors[0]?.id || '');
+  const [manualSite, setManualSite] = useState<string>('');
+  const [manualZone, setManualZone] = useState<string>('General Area');
+  const [manualCount, setManualCount] = useState<number>(1);
+  const [isManualTransferring, setIsManualTransferring] = useState<boolean>(false);
+
+  const selectedManualWorker = contractors.find(c => c.id === manualWorkerId) || contractors[0];
+
+  useEffect(() => {
+    if (selectedManualWorker) {
+      setManualSite(selectedManualWorker.activeProjectSite || '');
+      setManualZone(selectedManualWorker.assignedZone || 'General Area');
+      const isIndiv = isIndividualStaffOrEngineer(selectedManualWorker) || isOfficeOrExecutive(selectedManualWorker);
+      setManualCount(isIndiv ? 1 : (selectedManualWorker.activeManpower || 1));
+    }
+  }, [selectedManualWorker?.id]);
+
+  const handleExecuteManualTransfer = async (targetSite: string, targetZone?: string, count?: number) => {
+    if (!selectedManualWorker) return;
+    setIsManualTransferring(true);
+
+    const cleanSite = targetSite.trim();
+    const cleanZone = (targetZone !== undefined ? targetZone : manualZone).trim();
+    const isIndiv = isIndividualStaffOrEngineer(selectedManualWorker) || isOfficeOrExecutive(selectedManualWorker);
+    const cleanCount = isIndiv ? 1 : Math.max(1, count !== undefined ? count : (Number(manualCount) || 1));
+
+    const updated: Contractor = {
+      ...selectedManualWorker,
+      activeProjectSite: cleanSite || undefined,
+      assignedZone: cleanZone || undefined,
+      activeManpower: cleanCount
+    };
+
+    if (onUpdateContractor) {
+      onUpdateContractor(updated);
+    }
+    if (onUpdateContractors) {
+      onUpdateContractors(contractors.map(c => c.id === updated.id ? updated : c));
+    }
+
+    try {
+      if (cleanSite && projects && projects.length > 0) {
+        const selectedProject = projects.find(p => p.name.toLowerCase() === cleanSite.toLowerCase());
+        if (selectedProject) {
+          await fetch(`/api/projects/${selectedProject.id}/workers`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ workerId: selectedManualWorker.id, action: 'add' })
+          });
+
+          if (onUpdateProject) {
+            const current = selectedProject.assignedContractorIds || [];
+            if (!current.includes(selectedManualWorker.id)) {
+              onUpdateProject(selectedProject.id, {
+                assignedContractorIds: [...current, selectedManualWorker.id],
+                assignedWorkersCount: (selectedProject.assignedWorkersCount || 0) + 1
+              });
+            }
+          }
+        }
+      } else {
+        if (selectedManualWorker.activeProjectSite) {
+          const prevProject = projects.find(p => p.name.toLowerCase() === selectedManualWorker.activeProjectSite?.toLowerCase());
+          if (prevProject) {
+            await fetch(`/api/projects/${prevProject.id}/workers`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ workerId: selectedManualWorker.id, action: 'remove' })
+            }).catch(() => {});
+          }
+        }
+      }
+
+      notify(`Transferred ${selectedManualWorker.name} to ${cleanSite || 'General Standby Pool'}`);
+    } catch (err) {
+      console.error('Error applying manual transfer:', err);
+      notify(`Transfer saved locally.`);
+    } finally {
+      setIsManualTransferring(false);
+    }
+  };
 
   const toggleExpandRec = (id: string) => {
     setExpandedRecIds(prev => ({ ...prev, [id]: !prev[id] }));
@@ -153,16 +239,16 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
 
   const inHouseRatio = Math.round((inHouseCount / Math.max(1, inHouseCount + outsourcedCount)) * 100);
 
-  const isDedicatedAuditView = hideTabs || (readOnly && initialTab === 'audits') || (isFinance && initialTab === 'audits');
+  const isDedicatedAuditView = hideTabs;
 
   return (
     <div className="space-y-6">
-      
+
       {/* Top Header & Tab Switcher - Hidden in dedicated audit view */}
       {!isDedicatedAuditView && (
         <>
           {/* Top Header */}
-          <div className="bg-slate-950 border border-slate-800 rounded-lg p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-2">
                 <Users className="w-5 h-5 text-amber-400" />
@@ -178,38 +264,44 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
           </div>
 
           {/* Top-Level Tab Switcher */}
-          <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto">
-        {TABS.map(tab => {
-          const isActive = activeSubTab === tab.id;
-          const IconComponent = tab.icon;
-          const count = tab.id === 'directory' ? totalManpower : tab.id === 'audits' ? manpowerAudits.length : undefined;
+          <div className={`flex items-center gap-2 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-2 overflow-x-auto`}>
+            {TABS.map(tab => {
+              const isActive = activeSubTab === tab.id;
+              const IconComponent = tab.icon;
+              const count = tab.id === 'directory' ? totalManpower : undefined;
 
-          return (
-            <button
-              key={tab.id}
-              onClick={() => setActiveSubTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold font-mono transition-all cursor-pointer whitespace-nowrap ${
-                isActive
-                  ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-xs'
-                  : 'text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent'
-              }`}
-            >
-              <IconComponent className={`w-4 h-4 ${isActive ? 'text-teal-400' : 'text-slate-400'}`} />
-              <span>{tab.label}</span>
-              {count !== undefined && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                  isActive
-                    ? 'bg-teal-500/25 text-teal-200'
-                    : 'bg-slate-800 text-slate-400'
-                }`}>
-                  {count}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-      </>
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveSubTab(tab.id)}
+                  className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-semibold font-mono transition-all cursor-pointer whitespace-nowrap ${isActive
+                      ? isDark
+                        ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30 shadow-xs'
+                        : 'bg-slate-900 text-white shadow-xs border border-slate-900'
+                      : isDark
+                        ? 'text-slate-400 hover:text-white hover:bg-slate-900 border border-transparent'
+                        : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100 border border-transparent'
+                    }`}
+                >
+                  <IconComponent className={`w-4 h-4 ${isActive ? (isDark ? 'text-teal-400' : 'text-amber-400') : (isDark ? 'text-slate-400' : 'text-slate-500')}`} />
+                  <span>{tab.label}</span>
+                  {count !== undefined && (
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${isActive
+                        ? isDark
+                          ? 'bg-teal-500/25 text-teal-200'
+                          : 'bg-slate-800 text-slate-200'
+                        : isDark
+                          ? 'bg-slate-800 text-slate-400'
+                          : 'bg-slate-200 text-slate-700'
+                      }`}>
+                      {count}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </>
       )}
 
       {/* ------------------------------------------------------------- */}
@@ -228,6 +320,10 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
             onUpdateContractor={onUpdateContractor}
             onUpdateContractors={onUpdateContractors}
             onUpdateProject={onUpdateProject}
+            onSwitchToAllocationTab={(workerId?: string) => {
+              setActiveSubTab('analytics');
+              if (workerId) setManualWorkerId(workerId);
+            }}
             notify={notify}
           />
         </div>
@@ -240,7 +336,7 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
         <div className="space-y-6 animate-fadeIn">
           {/* Executive Analytics KPI Cards */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-1">
               <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
                 <span className="uppercase">TOTAL FIELD PERSONNEL</span>
                 <HardHat className="w-4 h-4 text-teal-400" />
@@ -249,87 +345,98 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                 <span>{totalManpower}</span>
                 <span className="text-xs text-slate-400 font-normal">Laborers</span>
               </div>
-              <span className="text-[10px] text-teal-400 block font-mono">{contractors.length} Registered Entities</span>
+              <span className="text-[10px] text-slate-400 block font-mono">{contractors.length} Registered Entities</span>
             </div>
 
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-1">
               <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
                 <span className="uppercase">IN-HOUSE CORE STAFF</span>
                 <Users className="w-4 h-4 text-emerald-400" />
               </div>
-              <div className="text-2xl font-bold font-mono text-emerald-300 flex items-baseline gap-1.5">
+              <div className="text-2xl font-bold font-mono text-white flex items-baseline gap-1.5">
                 <span>{inHouseCount}</span>
                 <span className="text-xs text-slate-400 font-normal">Permanent</span>
               </div>
-              <span className="text-[10px] text-emerald-400/80 block font-mono">{inHouseRatio}% of Total Workforce</span>
+              <span className="text-[10px] text-slate-400 block font-mono">{inHouseRatio}% of Total Workforce</span>
             </div>
 
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-1">
               <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
                 <span className="uppercase">OUTSOURCED CREWS</span>
                 <Building className="w-4 h-4 text-amber-400" />
               </div>
-              <div className="text-2xl font-bold font-mono text-amber-300 flex items-baseline gap-1.5">
+              <div className="text-2xl font-bold font-mono text-white flex items-baseline gap-1.5">
                 <span>{outsourcedCount}</span>
                 <span className="text-xs text-slate-400 font-normal">Contractors</span>
               </div>
-              <span className="text-[10px] text-amber-400/80 block font-mono">Specialized Trade Partners</span>
+              <span className="text-[10px] text-slate-400 block font-mono">Specialized Trade Partners</span>
             </div>
 
-            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-1">
+            <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-1">
               <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
                 <span className="uppercase">ACTIVE SITE DEPLOYMENTS</span>
                 <Award className="w-4 h-4 text-teal-400" />
               </div>
-              <div className="text-2xl font-bold font-mono text-teal-300 flex items-baseline gap-1.5">
+              <div className="text-2xl font-bold font-mono text-white flex items-baseline gap-1.5">
                 <span>{deployedFieldContractors.length}</span>
                 <span className="text-xs text-slate-400 font-normal">Active Teams</span>
               </div>
-              <span className="text-[10px] text-teal-400/90 block font-mono">Mapped to Commercial Sites</span>
+              <span className="text-[10px] text-slate-400 block font-mono">Mapped to Commercial Sites</span>
             </div>
           </div>
 
           {/* Visual Workforce Analytics Charts */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            
+
             {/* Chart 1: Manpower Headcount Deployed per Commercial Project */}
-            <div className="bg-slate-900 border border-slate-800 rounded-xl p-4.5 shadow-xs space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-2.5">
+            <div className={`${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200/80 shadow-xs'} border rounded-xl p-4.5 space-y-3`}>
+              <div className={`flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b ${isDark ? 'border-slate-800/80' : 'border-slate-100'} pb-2.5`}>
                 <div>
-                  <h4 className="text-xs font-bold text-white flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-teal-400" />
+                  <h4 className={`text-xs font-bold ${isDark ? 'text-white' : 'text-slate-900'} flex items-center gap-2`}>
+                    <BarChart3 className={`w-4 h-4 ${isDark ? 'text-teal-400' : 'text-blue-600'}`} />
                     Labor Allocation by Commercial Site
                   </h4>
-                  <p className="text-[11px] text-slate-400">Physical workforce distribution across active project sites</p>
+                  <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Physical workforce distribution across active project sites</p>
                 </div>
-                <span className="text-[10px] font-mono bg-teal-950/80 border border-teal-800/80 text-teal-300 px-2.5 py-0.5 rounded-full font-bold">
+                <span className={`text-[10px] font-mono ${isDark ? 'bg-teal-950/80 border-teal-800/80 text-teal-300' : 'bg-blue-50 border-blue-200 text-blue-700'} border px-2.5 py-0.5 rounded-full font-bold`}>
                   {projectLaborChartData.reduce((sum, p) => sum + p.workers, 0)} Total Assigned
                 </span>
               </div>
 
               {projectLaborChartData.length === 0 ? (
                 <div className="h-52 flex flex-col items-center justify-center text-slate-500 space-y-2 text-center p-4">
-                  <Building className="w-8 h-8 text-slate-600" />
-                  <span className="text-xs font-semibold text-slate-400">No Commercial Sites Registered</span>
-                  <span className="text-[11px] text-slate-600">Register a commercial project site to track labor distribution.</span>
+                  <Building className="w-8 h-8 text-slate-400" />
+                  <span className={`text-xs font-semibold ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>No Commercial Sites Registered</span>
+                  <span className={`text-[11px] ${isDark ? 'text-slate-600' : 'text-slate-400'}`}>Register a commercial project site to track labor distribution.</span>
                 </div>
               ) : (
                 <>
                   <div className="h-52 w-full pt-1">
                     <ResponsiveContainer width="100%" height="100%">
                       <ReBarChart data={projectLaborChartData} margin={{ top: 10, right: 10, left: -15, bottom: 25 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                        <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} interval={0} angle={-15} textAnchor="end" />
-                        <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
+                        <defs>
+                          <linearGradient id="blueAllocBarGrad" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.95} />
+                            <stop offset="100%" stopColor="#0284c7" stopOpacity={0.8} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          stroke={isDark ? '#1e293b' : '#e2e8f0'}
+                          strokeOpacity={isDark ? 0.8 : 0.5}
+                          vertical={false}
+                        />
+                        <XAxis dataKey="name" stroke={isDark ? '#64748b' : '#94a3b8'} fontSize={11} tickLine={false} interval={0} angle={-15} textAnchor="end" />
+                        <YAxis stroke={isDark ? '#64748b' : '#94a3b8'} fontSize={11} tickLine={false} />
                         <Tooltip
                           content={({ active, payload }) => {
                             if (active && payload && payload.length) {
                               const data = payload[0].payload;
                               return (
-                                <div className="bg-slate-900 border border-slate-700 p-3 rounded-xl shadow-xl text-xs space-y-1 font-sans pointer-events-none select-none">
-                                  <div className="font-bold text-white">{data.fullName}</div>
-                                  <div className="text-teal-400 font-mono font-bold">{data.workers} Active Workers</div>
-                                  <div className="text-slate-300 font-mono">Completion: {data.progress}%</div>
+                                <div className={`${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-xl'} border p-3 rounded-xl text-xs space-y-1 font-sans pointer-events-none select-none`}>
+                                  <div className="font-bold">{data.fullName}</div>
+                                  <div className={`${isDark ? 'text-teal-400' : 'text-blue-600'} font-mono font-bold`}>{data.workers} Active Workers</div>
+                                  <div className={`${isDark ? 'text-slate-300' : 'text-slate-600'} font-mono`}>Completion: {data.progress}%</div>
                                   <div className="text-[10px] text-slate-400 font-mono uppercase">{data.status}</div>
                                 </div>
                               );
@@ -337,28 +444,21 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                             return null;
                           }}
                         />
-                        <Bar dataKey="workers" radius={[6, 6, 0, 0]}>
-                          {projectLaborChartData.map((_entry, index) => (
-                            <Cell 
-                              key={`cell-${index}`} 
-                              fill={['#14b8a6', '#3b82f6', '#8b5cf6', '#f59e0b', '#10b981', '#06b6d4'][index % 6]} 
-                            />
-                          ))}
-                        </Bar>
+                        <Bar dataKey="workers" fill="url(#blueAllocBarGrad)" radius={[6, 6, 0, 0]} />
                       </ReBarChart>
                     </ResponsiveContainer>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-800/80 text-[11px]">
+                  <div className={`grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t ${isDark ? 'border-slate-800/80' : 'border-slate-100'} text-[11px]`}>
                     {projectLaborChartData.slice(0, 4).map((p, i) => (
-                      <div key={i} className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-2.5 space-y-1">
-                        <div className="font-bold text-white truncate text-xs">{p.name}</div>
+                      <div key={i} className={`${isDark ? 'bg-slate-900/60 border-slate-800/80' : 'bg-slate-50 border-slate-200/80'} border rounded-xl p-2.5 space-y-1`}>
+                        <div className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} truncate text-xs`}>{p.name}</div>
                         <div className="flex items-center justify-between font-mono text-[10px]">
-                          <span className="text-teal-400 font-bold">{p.workers} Crew</span>
+                          <span className={`${isDark ? 'text-teal-400' : 'text-blue-600'} font-bold`}>{p.workers} Crew</span>
                           <span className="text-slate-400">{p.progress}%</span>
                         </div>
-                        <div className="w-full h-1 bg-slate-800 rounded-full overflow-hidden">
-                          <div className="h-full bg-teal-400 rounded-full" style={{ width: `${p.progress}%` }}></div>
+                        <div className={`w-full h-1 ${isDark ? 'bg-slate-800' : 'bg-slate-200'} rounded-full overflow-hidden`}>
+                          <div className={`h-full ${isDark ? 'bg-teal-400' : 'bg-blue-600'} rounded-full`} style={{ width: `${p.progress}%` }}></div>
                         </div>
                       </div>
                     ))}
@@ -516,7 +616,7 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                       </RePieChart>
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                      <span className="text-xl font-black font-mono text-emerald-400">
+                      <span className="text-xl font-black font-mono text-white">
                         {inHouseRatio}%
                       </span>
                       <span className="text-[10px] text-slate-400 uppercase font-mono tracking-wider">In-House</span>
@@ -524,28 +624,226 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 md:col-span-2 text-xs">
-                    <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4 space-y-1.5">
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-1.5">
                       <div className="flex items-center gap-1.5 font-bold text-white">
                         <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
                         <span>CTVill In-House Core</span>
                       </div>
-                      <div className="text-2xl font-black font-mono text-emerald-300">{inHouseCount} Staff</div>
+                      <div className="text-2xl font-black font-mono text-white">{inHouseCount} Staff</div>
                       <p className="text-[11px] text-slate-400 leading-relaxed">Permanent Engineers, Foremen & Core Skilled Trades directly under company payroll.</p>
                     </div>
 
-                    <div className="bg-slate-900/60 border border-slate-800/80 rounded-xl p-4 space-y-1.5">
+                    <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4 space-y-1.5">
                       <div className="flex items-center gap-1.5 font-bold text-white">
                         <span className="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
                         <span>Outsourced Trade Partners</span>
                       </div>
-                      <div className="text-2xl font-black font-mono text-amber-300">{outsourcedCount} Workers</div>
+                      <div className="text-2xl font-black font-mono text-white">{outsourcedCount} Workers</div>
                       <p className="text-[11px] text-slate-400 leading-relaxed">Specialized Subcontractors, MEPFS Teams & Manpower Suppliers deployed per milestone.</p>
                     </div>
                   </div>
                 </div>
               )}
             </div>
+          </div>
 
+          {/* ------------------------------------------------------------- */}
+          {/* MANUAL WORKFORCE ALLOCATION & SITE TRANSFER COMMAND STATION   */}
+          {/* Coupled directly with the live monitoring charts above        */}
+          {/* ------------------------------------------------------------- */}
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3.5">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 bg-teal-500/10 border border-teal-500/30 rounded-xl text-teal-400">
+                  <ArrowRightLeft className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white flex items-center gap-2">
+                    Manual Labor Allocation &amp; Site Transfer Command
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    Directly reassign personnel and specialized crews across commercial sites. Distribution charts above sync in real time.
+                  </p>
+                </div>
+              </div>
+              <span className="text-xs font-mono bg-teal-950/80 border border-teal-800 text-teal-300 px-3 py-1 rounded-full font-bold self-start sm:self-center shrink-0 flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-teal-400 animate-pulse"></span>
+                <span>Live Sync Active</span>
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+              {/* Left Column: Personnel / Trade Selection */}
+              <div className="lg:col-span-5 bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-400 font-bold uppercase tracking-wider">Step 1: Select Personnel / Crew</span>
+                  <span className="text-teal-400">{contractors.length} in Roster</span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-mono text-slate-400 block">
+                    Choose Worker to Reallocate:
+                  </label>
+                  <select
+                    value={manualWorkerId}
+                    onChange={(e) => setManualWorkerId(e.target.value)}
+                    className="w-full bg-slate-900 border border-slate-800 focus:border-teal-500 rounded-xl px-3 py-2 text-xs text-white focus:outline-none cursor-pointer"
+                  >
+                    {contractors.map(c => (
+                      <option key={c.id} value={c.id}>
+                        {c.name} — {c.roleTitle || c.specialty || 'Artisan'} ({c.activeProjectSite || 'Standby'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Selected Worker Info Snapshot */}
+                {selectedManualWorker && (
+                  <div className="p-3 bg-slate-900/90 border border-slate-800/80 rounded-xl space-y-2 text-xs font-mono">
+                    <div className="flex items-center justify-between">
+                      <span className="text-white font-bold">{selectedManualWorker.name}</span>
+                      <span className="text-teal-400 text-[11px] font-bold">
+                        {isOfficeOrExecutive(selectedManualWorker) 
+                          ? 'Corporate' 
+                          : isIndividualStaffOrEngineer(selectedManualWorker) 
+                            ? '1 Professional' 
+                            : `${selectedManualWorker.activeManpower || 1} Crew`}
+                      </span>
+                    </div>
+
+                    <div className="text-[11px] text-slate-400 truncate">
+                      {selectedManualWorker.roleTitle || selectedManualWorker.specialty || 'General Trade'} • {selectedManualWorker.company}
+                    </div>
+
+                    <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500">Current Assignment:</span>
+                      <span className="text-teal-300 font-bold bg-teal-950/70 border border-teal-800/60 px-2 py-0.5 rounded-md">
+                        📍 {selectedManualWorker.activeProjectSite || 'General Standby Pool'}
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right Column: Reallocation & Destination Action */}
+              <div className="lg:col-span-7 bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3.5">
+                <div className="flex items-center justify-between text-xs font-mono">
+                  <span className="text-slate-400 font-bold uppercase tracking-wider">Step 2: Choose Destination &amp; Deploy</span>
+                  <span className="text-slate-500">{projects.length} Registered Sites</span>
+                </div>
+
+                {/* 1-Click Fast Destination Buttons */}
+                <div className="space-y-1.5">
+                  <label className="text-[11px] font-mono text-slate-400 block">
+                    1-Click Target Destination:
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {projects.map(p => {
+                      const isCurrent = (selectedManualWorker?.activeProjectSite || '').toLowerCase() === p.name.toLowerCase();
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            setManualSite(p.name);
+                            handleExecuteManualTransfer(p.name);
+                          }}
+                          disabled={isManualTransferring}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
+                            isCurrent
+                              ? 'bg-teal-950 border border-teal-600 text-teal-300 font-bold'
+                              : 'bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white'
+                          }`}
+                        >
+                          <MapPin className="w-3 h-3 text-teal-400" />
+                          <span>{p.name}</span>
+                          {isCurrent && <Check className="w-3 h-3 text-teal-400 ml-1" />}
+                        </button>
+                      );
+                    })}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setManualSite('');
+                        handleExecuteManualTransfer('');
+                      }}
+                      disabled={isManualTransferring}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono transition-all flex items-center gap-1.5 cursor-pointer ${
+                        !selectedManualWorker?.activeProjectSite || selectedManualWorker.activeProjectSite.toLowerCase().includes('standby')
+                          ? 'bg-slate-800 border border-slate-600 text-white font-bold'
+                          : 'bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white'
+                      }`}
+                    >
+                      <span>Standby Pool</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Detailed Parameters Row */}
+                <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 text-xs pt-1">
+                  <div className="sm:col-span-5 space-y-1">
+                    <label className="text-[11px] font-mono text-slate-400 block">
+                      Target Project
+                    </label>
+                    <select
+                      value={manualSite}
+                      onChange={(e) => setManualSite(e.target.value)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white font-sans focus:border-teal-500 focus:outline-none"
+                    >
+                      <option value="">-- General Standby Pool --</option>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-4 space-y-1">
+                    <label className="text-[11px] font-mono text-slate-400 block">
+                      Work Zone / Area
+                    </label>
+                    <input
+                      type="text"
+                      value={manualZone}
+                      onChange={(e) => setManualZone(e.target.value)}
+                      placeholder="e.g. Ground Floor, Level 2"
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white font-sans focus:border-teal-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-3 space-y-1">
+                    <label className="text-[11px] font-mono text-slate-400 block">
+                      Crew Size
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={100}
+                      value={manualCount}
+                      onChange={(e) => setManualCount(Number(e.target.value) || 1)}
+                      disabled={isIndividualStaffOrEngineer(selectedManualWorker) || isOfficeOrExecutive(selectedManualWorker)}
+                      className="w-full bg-slate-900 border border-slate-800 rounded-lg px-2.5 py-1.5 text-white font-sans focus:border-teal-500 focus:outline-none disabled:opacity-50"
+                    />
+                  </div>
+                </div>
+
+                {/* Transfer Action Button */}
+                <div className="flex items-center justify-between pt-2">
+                  <span className="text-[11px] text-slate-500 font-mono">
+                    Updates commercial_projects roster &amp; charts immediately
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleExecuteManualTransfer(manualSite, manualZone, manualCount)}
+                    disabled={isManualTransferring}
+                    className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-md disabled:opacity-50"
+                  >
+                    <ArrowRightLeft className="w-3.5 h-3.5" />
+                    <span>{isManualTransferring ? 'Reallocating...' : 'Reallocate Manpower'}</span>
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* AI Workforce Optimization Engine */}
@@ -567,9 +865,16 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                         : 'Queue Balanced'}
                     </span>
                     {recommendationQueue.length > 3 && (
-                      <span className="text-[10px] font-mono text-slate-400 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-full">
-                        Showing 3 of {recommendationQueue.length} (Deck Auto-Replenishes)
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowAllRecCards(!showAllRecCards)}
+                        className="text-[10px] font-mono text-indigo-300 hover:text-white bg-slate-900 hover:bg-indigo-950/80 border border-indigo-700/60 px-2.5 py-0.5 rounded-full transition-colors cursor-pointer flex items-center gap-1"
+                        title={showAllRecCards ? 'Switch to compact view' : 'Expand all cards'}
+                      >
+                        {showAllRecCards 
+                          ? `Showing All ${recommendationQueue.length} (Click to Collapse)` 
+                          : `Showing 3 of ${recommendationQueue.length} (Click to View All)`}
+                      </button>
                     )}
                   </div>
                   <p className="text-xs text-slate-400 mt-0.5">
@@ -595,9 +900,9 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
               </div>
             )}
 
-            {/* Visual Transfer Flow Cards (Top 3 from Dynamic Queue) */}
+            {/* Visual Transfer Flow Cards (Top 3 or All from Dynamic Queue) */}
             {(() => {
-              const visibleCards = recommendationQueue.slice(0, 3);
+              const visibleCards = showAllRecCards ? recommendationQueue : recommendationQueue.slice(0, 3);
 
               // Helper for concise optimization category tags
               const getCategoryTag = (rec: AIManpowerRecommendation) => {
@@ -709,8 +1014,8 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                         const isExpanded = Boolean(expandedRecIds[rec.id]);
 
                         return (
-                          <div 
-                            key={rec.id} 
+                          <div
+                            key={rec.id}
                             className="bg-slate-950/80 border border-slate-800 hover:border-slate-700 rounded-xl overflow-hidden transition-all text-xs"
                           >
                             <div className="p-3 sm:p-3.5 flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -816,6 +1121,30 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                     </div>
                   )}
 
+                  {!showAllRecCards && recommendationQueue.length > 3 && (
+                    <div className="pt-1 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setShowAllRecCards(true)}
+                        className="text-xs font-mono font-medium text-indigo-300 hover:text-white bg-slate-950/80 hover:bg-slate-900 border border-indigo-900/60 hover:border-indigo-700 px-4 py-2 rounded-xl transition cursor-pointer flex items-center gap-1.5 mx-auto"
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-indigo-400" />
+                        <span>Show all {recommendationQueue.length} recommendations in deck</span>
+                      </button>
+                    </div>
+                  )}
+                  {showAllRecCards && recommendationQueue.length > 3 && (
+                    <div className="pt-1 text-center">
+                      <button
+                        type="button"
+                        onClick={() => setShowAllRecCards(false)}
+                        className="text-xs font-mono font-medium text-slate-400 hover:text-slate-200 bg-slate-950/80 hover:bg-slate-900 border border-slate-800 px-4 py-1.5 rounded-xl transition cursor-pointer mx-auto"
+                      >
+                        Collapse to top 3 cards
+                      </button>
+                    </div>
+                  )}
+
                   {/* Applied Transfers History Drawer */}
                   {appliedTransfersHistory.length > 0 && (
                     <div className="pt-3 border-t border-slate-800/80">
@@ -842,8 +1171,8 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                             const workerDisplay = rec.workerName || rec.contractorName;
 
                             return (
-                              <div 
-                                key={rec.id} 
+                              <div
+                                key={rec.id}
                                 className="bg-emerald-950/15 border border-emerald-500/40 rounded-xl p-3 space-y-2 text-xs"
                               >
                                 <div className="flex items-center justify-between">
@@ -880,21 +1209,6 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
             })()}
           </div>
         </div>
-      )}
-
-      {/* ------------------------------------------------------------- */}
-      {/* SUB-TAB 3: SUBCONTRACTOR ROLL-CALL AUDITS                     */}
-      {/* ------------------------------------------------------------- */}
-      {activeSubTab === 'audits' && (
-        <SubcontractorRollCallAudits
-          manpowerAudits={manpowerAudits}
-          projects={projects}
-          contractors={contractors}
-          readOnly={readOnly}
-          isFinance={isFinance}
-          onLogAuditClick={readOnly || isFinance ? undefined : onLogAuditClick}
-          notify={notify}
-        />
       )}
 
     </div>

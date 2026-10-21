@@ -8,11 +8,13 @@ import {
   Users, UserPlus, HardHat, DollarSign, Search, Edit3, Trash2, 
   Check, X, Plus, ShieldCheck, Building2, RefreshCw, CheckCircle2, AlertCircle, Lock 
 } from 'lucide-react';
-import { ProjectProfile, SiteWorker, UserSession } from '../types';
+import { ProjectProfile, SiteWorker, UserSession, Contractor } from '../types';
 import { normalizeRole, UserRole } from '../utils/rbac';
+import { useTheme } from '../context/ThemeContext';
 
 interface WorkerMasterlistManagerProps {
   projects: ProjectProfile[];
+  contractors?: Contractor[];
   session?: UserSession | any;
   onRefreshData?: () => void;
   onNotify?: (msg: string) => void;
@@ -20,10 +22,40 @@ interface WorkerMasterlistManagerProps {
 
 export default function WorkerMasterlistManager({
   projects,
+  contractors = [],
   session,
   onRefreshData
 }: WorkerMasterlistManagerProps) {
-  const [workers, setWorkers] = useState<SiteWorker[]>([]);
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
+  // Helper to convert contractors to SiteWorker model
+  const mapContractorsToWorkers = (list: Contractor[]): SiteWorker[] => {
+    return (list || []).map(c => {
+      const parts = (c.name || '').trim().split(' ');
+      const fName = parts[0] || '';
+      const lName = parts.slice(1).join(' ') || '';
+      const rate = Number(c.dailyRate) || 600;
+      const otRate = Number(((rate / 8) * 1.25).toFixed(2));
+      return {
+        id: c.id,
+        name: c.name,
+        firstName: fName,
+        lastName: lName,
+        position: c.roleTitle || c.specialty || 'General Trade',
+        trade: c.specialty || c.roleTitle || 'General Trade',
+        dailyRate: rate,
+        hourlyOtRate: otRate,
+        status: (c.status || 'Active').toLowerCase() === 'active' ? 'Active' : (c.status || 'Active'),
+        assignedProjectId: c.assignedProjectId,
+        assignments: c.activeProjectSite ? [{ projectId: c.assignedProjectId || '', projectName: c.activeProjectSite, status: 'Active' }] : [],
+        assignedProjectIds: c.assignedProjectId ? [c.assignedProjectId] : []
+      };
+    });
+  };
+
+  const [workers, setWorkers] = useState<SiteWorker[]>(() => 
+    contractors && contractors.length > 0 ? mapContractorsToWorkers(contractors) : []
+  );
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedFilterPosition, setSelectedFilterPosition] = useState<string>('ALL');
@@ -67,16 +99,33 @@ export default function WorkerMasterlistManager({
     }
   }, [dailyRate]);
 
-  // Load Workers
+  // Sync from contractors prop if available and workers empty
+  useEffect(() => {
+    if (contractors && contractors.length > 0 && workers.length === 0) {
+      setWorkers(mapContractorsToWorkers(contractors));
+    }
+  }, [contractors]);
+
+  // Load Workers from backend with graceful fallback
   const fetchWorkers = async () => {
     setIsLoading(true);
     try {
       const res = await fetch('/api/workers');
       if (res.ok) {
-        setWorkers(await res.json());
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setWorkers(data);
+          return;
+        }
+      }
+      if (contractors && contractors.length > 0) {
+        setWorkers(mapContractorsToWorkers(contractors));
       }
     } catch (e) {
       console.error('Error fetching workers:', e);
+      if (contractors && contractors.length > 0) {
+        setWorkers(mapContractorsToWorkers(contractors));
+      }
     } finally {
       setIsLoading(false);
     }
@@ -309,10 +358,10 @@ export default function WorkerMasterlistManager({
       </div>
 
       {/* Workers Table */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+      <div className={`${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200/80 shadow-xs'} border rounded-xl overflow-hidden flex flex-col flex-1`}>
+        <div className={`p-4 border-b ${isDark ? 'border-slate-800' : 'border-slate-100'} flex items-center justify-between`}>
           <div className="flex items-center gap-2">
-            <h2 className="text-sm font-bold text-white">
+            <h2 className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
               {statusFilter === 'ACTIVE' 
                 ? 'Active Labor Workforce' 
                 : statusFilter === 'INACTIVE' 
@@ -320,14 +369,14 @@ export default function WorkerMasterlistManager({
                 : 'Total Labor Workforce Masterlist'} ({filteredWorkers.length} workers)
             </h2>
           </div>
-          <div className="text-[11px] text-slate-400 font-mono">
+          <div className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'} font-mono`}>
             Default OT Formula: (Daily Rate / 8) • 1.25
           </div>
         </div>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="bg-slate-950/70 text-slate-400 uppercase text-[10px] tracking-wider border-b border-slate-800 font-semibold">
+            <thead className={`${isDark ? 'bg-slate-950/70 text-slate-400 border-slate-800' : 'bg-slate-50 text-slate-600 border-slate-200'} uppercase text-[10px] tracking-wider border-b font-semibold`}>
               <tr>
                 <th className="py-3 px-4">#</th>
                 <th className="py-3 px-4">Worker Full Name</th>
@@ -339,31 +388,31 @@ export default function WorkerMasterlistManager({
                 <th className="py-3 px-4 text-center">Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60">
+            <tbody className={`divide-y ${isDark ? 'divide-slate-800/60' : 'divide-slate-200'}`}>
               {filteredWorkers.map((w, idx) => (
-                <tr key={w.id} className="hover:bg-slate-800/40 transition-colors">
+                <tr key={w.id} className={`${isDark ? 'hover:bg-slate-800/40' : 'hover:bg-slate-50/80'} transition-colors`}>
                   <td className="py-3 px-4 font-mono text-slate-500">{idx + 1}</td>
                   
                   {/* Name */}
                   <td className="py-3 px-4">
-                    <div className="font-bold text-white">{w.name}</div>
+                    <div className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>{w.name}</div>
                     <div className="text-[10px] text-slate-500 font-mono">{w.id}</div>
                   </td>
 
                   {/* Position */}
                   <td className="py-3 px-4">
-                    <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-300 text-[11px] font-medium">
+                    <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${isDark ? 'bg-slate-800 text-slate-300' : 'bg-slate-100 text-slate-700'}`}>
                       {w.position}
                     </span>
                   </td>
 
                   {/* Daily Rate */}
-                  <td className="py-3 px-4 text-right font-mono text-slate-200 font-bold">
+                  <td className={`py-3 px-4 text-right font-mono ${isDark ? 'text-slate-200 font-bold' : 'text-slate-900 font-semibold'}`}>
                     ₱{w.dailyRate.toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </td>
 
                   {/* OT Rate */}
-                  <td className="py-3 px-4 text-right font-mono text-amber-400 font-bold">
+                  <td className={`py-3 px-4 text-right font-mono ${isDark ? 'text-amber-400 font-bold' : 'text-slate-900 font-semibold'}`}>
                     ₱{w.hourlyOtRate.toLocaleString('en-US', { minimumFractionDigits: 2 })}/hr
                   </td>
 
@@ -376,10 +425,14 @@ export default function WorkerMasterlistManager({
                           <button
                             key={proj.id}
                             onClick={() => handleToggleProjectAssignment(w.id, proj.id, isAssigned)}
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors cursor-pointer border ${
+                            className={`px-1.5 py-0.5 rounded transition-colors cursor-pointer border ${
                               isAssigned
-                                ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
-                                : 'bg-slate-950 text-slate-500 border-slate-800 hover:text-slate-300'
+                                ? isDark
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-mono text-[10px]'
+                                  : 'bg-amber-500/15 text-amber-900 border border-amber-500/30 font-medium text-[11px]'
+                                : isDark
+                                  ? 'bg-slate-950 text-slate-500 border-slate-800 hover:text-slate-300 font-mono text-[10px]'
+                                  : 'bg-slate-100 text-slate-500 border-slate-200 hover:text-slate-800 font-mono text-[10px]'
                             }`}
                             title={isAssigned ? `Assigned to ${proj.name}. Click to unassign.` : `Click to assign to ${proj.name}.`}
                           >

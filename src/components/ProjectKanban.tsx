@@ -167,23 +167,21 @@ export default function ProjectKanban({
   return (
     <div className="space-y-4">
       {/* Header & Controls */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-xl space-y-3.5">
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs space-y-3">
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-emerald-400" />
-                Project Task Board (Kanban WBS)
-              </h2>
-              <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 text-xs px-2.5 py-0.5 rounded-full font-mono font-semibold">
-                {filteredTasks.length} {filteredTasks.length === 1 ? 'Task' : 'Tasks'}
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold tracking-wider uppercase">
+                Work Breakdown Structure
               </span>
-              <span className="inline-flex items-center gap-1 text-[11px] text-emerald-300 bg-emerald-950/70 border border-emerald-700/60 px-2 py-0.5 rounded-md font-mono">
-                <Zap className="w-3 h-3 text-emerald-400 animate-pulse" />
-                Gantt Auto-Sync (100% → Completed)
-              </span>
+              <span className="text-xs text-slate-400">Field Execution Sprints & Work Orders</span>
             </div>
-            <p className="text-xs text-slate-400 mt-1">
+            <h2 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-emerald-400" />
+              <span>Project Task Board (Kanban WBS)</span>
+              <span className="text-xs font-normal text-slate-400 font-mono">({filteredTasks.length} tasks)</span>
+            </h2>
+            <p className="text-slate-400 text-xs mt-0.5">
               Field execution sprints and contractor assignments. Tasks with 100% progress automatically transition to Completed.
             </p>
           </div>
@@ -191,13 +189,13 @@ export default function ProjectKanban({
           {/* Action buttons */}
           <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end">
             {/* View Density Toggle */}
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-0.5">
+            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
               <button
                 type="button"
                 onClick={() => setViewDensity('compact')}
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-all cursor-pointer ${
                   viewDensity === 'compact'
-                    ? 'bg-emerald-600 text-white shadow-xs'
+                    ? 'bg-slate-800 text-emerald-300 shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
                 title="Compact view (fits more cards without scrolling)"
@@ -208,9 +206,9 @@ export default function ProjectKanban({
               <button
                 type="button"
                 onClick={() => setViewDensity('detailed')}
-                className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-all cursor-pointer ${
                   viewDensity === 'detailed'
-                    ? 'bg-emerald-600 text-white shadow-xs'
+                    ? 'bg-slate-800 text-emerald-300 shadow-xs'
                     : 'text-slate-400 hover:text-white'
                 }`}
                 title="Detailed view (full scope and checklist preview)"
@@ -228,7 +226,7 @@ export default function ProjectKanban({
                     onClearAllTasks();
                   }
                 }}
-                className="flex items-center gap-1.5 bg-slate-800 hover:bg-rose-950/70 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-700/50 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
                 title="Clear all tasks from the board"
               >
                 <Trash2 className="w-3.5 h-3.5" />
@@ -253,7 +251,7 @@ export default function ProjectKanban({
             <select
               value={selectedProjectId}
               onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer truncate"
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer truncate"
             >
               <option value="ALL">🏢 All Commercial Sites ({tasks.length})</option>
               {projects.map((p) => {
@@ -272,7 +270,7 @@ export default function ProjectKanban({
             <select
               value={selectedPhase}
               onChange={(e) => setSelectedPhase(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer truncate"
+              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer truncate"
             >
               <option value="ALL">📑 All WBS Phases / Milestones</option>
               {availablePhases.map((phase) => (
@@ -287,7 +285,7 @@ export default function ProjectKanban({
           <select
             value={filterPriority}
             onChange={(e) => setFilterPriority(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
           >
             <option value="ALL">All Priorities</option>
             <option value="CRITICAL">Critical Priority</option>
@@ -300,7 +298,7 @@ export default function ProjectKanban({
           <select
             value={filterCategory}
             onChange={(e) => setFilterCategory(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer"
+            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
           >
             <option value="ALL">All Trade Categories</option>
             <option value="CIVIL_WORKS">Civil Works & Structure</option>
@@ -316,39 +314,41 @@ export default function ProjectKanban({
             placeholder="Search tasks, WBS, crew..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
           />
         </div>
 
         {/* Live Metrics Ribbon */}
-        <div className="flex flex-wrap items-center gap-2 pt-1 text-[11px]">
-          <span className="text-slate-400 font-medium">Quick Scope:</span>
-          <span className="bg-slate-800 text-slate-300 px-2 py-0.5 rounded-md font-mono">
-            Total: <strong className="text-white">{stats.total}</strong>
-          </span>
-          <span className="bg-blue-950/70 border border-blue-900/60 text-blue-300 px-2 py-0.5 rounded-md font-mono">
-            To Do: <strong className="text-white">{stats.todo}</strong>
-          </span>
-          <span className="bg-amber-950/70 border border-amber-900/60 text-amber-300 px-2 py-0.5 rounded-md font-mono">
-            In Progress: <strong className="text-white">{stats.inProgress}</strong>
-          </span>
-          <span className="bg-emerald-950/70 border border-emerald-900/60 text-emerald-300 px-2 py-0.5 rounded-md font-mono">
-            Completed: <strong className="text-emerald-400 font-bold">{stats.completed}</strong>
-          </span>
-          {stats.blocked > 0 && (
-            <span className="bg-rose-950/70 border border-rose-900/60 text-rose-300 px-2 py-0.5 rounded-md font-mono">
-              Blocked: <strong className="text-rose-400">{stats.blocked}</strong>
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/80 text-xs font-mono">
+          <div className="flex items-center gap-2 flex-wrap text-[11px]">
+            <span className="text-slate-400 font-sans">Quick Scope:</span>
+            <span className="bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-lg text-slate-400">
+              Total: <strong className="text-white ml-1">{stats.total}</strong>
             </span>
-          )}
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-slate-400">Board Completion:</span>
-            <div className="w-20 bg-slate-800 h-2 rounded-full overflow-hidden border border-slate-700">
+            <span className="bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-lg text-slate-400">
+              To Do: <strong className="text-white ml-1">{stats.todo}</strong>
+            </span>
+            <span className="bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-lg text-slate-400">
+              In Progress: <strong className="text-white ml-1">{stats.inProgress}</strong>
+            </span>
+            <span className="bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-lg text-slate-400">
+              Completed: <strong className="text-white ml-1">{stats.completed}</strong>
+            </span>
+            {stats.blocked > 0 && (
+              <span className="bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-lg text-slate-400">
+                Blocked: <strong className="text-white ml-1">{stats.blocked}</strong>
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2 font-mono">
+            <span className="text-slate-400 font-sans text-xs">Board Completion:</span>
+            <div className="w-20 bg-slate-800 h-1.5 rounded-full overflow-hidden border border-slate-700/50">
               <div 
                 className="bg-emerald-500 h-full transition-all duration-300"
                 style={{ width: `${stats.avgProgress}%` }}
               />
             </div>
-            <span className="font-mono font-bold text-emerald-400">{stats.avgProgress}%</span>
+            <span className="font-bold text-white text-xs">{stats.avgProgress}%</span>
           </div>
         </div>
       </div>

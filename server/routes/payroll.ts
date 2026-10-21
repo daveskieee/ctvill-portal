@@ -34,22 +34,6 @@ export async function ensureHistoricalPayrollRuns() {
         id = REPLACE(id, '2020', '2026')
       WHERE period_start < '2025-01-01'
     `);
-
-    // 2. Ensure historical seed record for active project PRJ-4693
-    const projRes = await pool.query("SELECT id FROM commercial_projects WHERE id = 'PRJ-4693' OR name ILIKE '%2-Storey%' LIMIT 1");
-    const projId = projRes.rows[0]?.id || 'PRJ-4693';
-
-    const checkRes = await pool.query("SELECT COUNT(*) FROM payroll_runs WHERE project_id = $1", [projId]);
-    if (parseInt(checkRes.rows[0].count, 10) === 0) {
-      const histRunId = `PAY-${projId.slice(-4)}-20260914-20260921`;
-      await pool.query(`
-        INSERT INTO payroll_runs 
-        (id, project_id, period_start, period_end, status, total_gross, total_deductions, total_net, approved_by_user_id, created_at, updated_at)
-        VALUES 
-        ($1, $2, '2026-09-14'::date, '2026-09-21'::date, 'FINALIZED', 46270.33, 0.00, 46270.33, 'usr-finance-controller', '2026-09-21 17:00:00+08', '2026-09-21 17:00:00+08')
-        ON CONFLICT (id) DO NOTHING
-      `, [histRunId, projId]);
-    }
   } catch (err) {
     console.error('Error ensuring historical payroll runs:', err);
   }
@@ -201,26 +185,40 @@ payrollRouter.get('/runs/:id', requireRole(['FINANCE', 'ADMIN', 'ENGINEER']), as
       totalDeductions: Number(run.total_deductions || 0),
       totalNet: Number(run.total_net || 0),
       approvedByUserId: run.approved_by_user_id,
-      approvedByName: run.approved_by_name || 'Finance Department',
+      workerCount: itemsRes.rows.length,
       createdAt: run.created_at,
-      items: itemsRes.rows.map(item => ({
-        id: item.id,
-        workerId: item.worker_id,
-        workerName: `${item.first_name} ${item.last_name}`.trim(),
-        position: item.position,
-        dailyRate: Number(item.daily_rate),
-        hourlyOtRate: Number(item.hourly_ot_rate),
-        daysWorked: Number(item.days_worked),
-        otHours: Number(item.ot_hours),
-        grossPay: Number(item.gross_pay),
-        totalDeductions: Number(item.total_deductions),
-        netPay: Number(item.net_pay)
-      })),
+      items: itemsRes.rows.map(item => {
+        const dailyRate = Number(item.daily_rate || 0);
+        const hourlyOtRate = Number(item.hourly_ot_rate || 0);
+        const daysWorked = Number(item.days_worked || 0);
+        const otHours = Number(item.ot_hours || 0);
+        const grossPay = Number(item.gross_pay || 0);
+        const basePay = Number(item.base_pay || (daysWorked * dailyRate));
+        const otPay = Number(item.ot_pay || Math.max(0, grossPay - basePay));
+        const totalDeductions = Number(item.total_deductions || 0);
+        const netPay = Number(item.net_pay || (grossPay - totalDeductions));
+
+        return {
+          id: item.id,
+          workerId: item.worker_id,
+          workerName: (item.name || `${item.first_name || ''} ${item.last_name || ''}`).trim() || 'Artisan',
+          position: item.position || 'Artisan',
+          dailyRate,
+          hourlyOtRate,
+          daysWorked,
+          otHours,
+          basePay,
+          otPay,
+          grossPay,
+          totalDeductions,
+          netPay
+        };
+      }),
       cashAdvances: advancesRes.rows.map(ca => ({
         id: ca.id,
         workerId: ca.worker_id,
-        workerName: `${ca.first_name} ${ca.last_name}`.trim(),
-        amount: Number(ca.amount),
+        workerName: `${ca.first_name || ''} ${ca.last_name || ''}`.trim(),
+        amount: Number(ca.amount || 0),
         dateIssued: ca.date_issued,
         notes: ca.notes
       }))
@@ -292,15 +290,10 @@ const handleCalculateDraft = async (req: Request, res: Response) => {
       AND LOWER(w.status) = 'active'
       AND (c."employmentType" IS NULL OR c."employmentType" != 'OUTSOURCED')
       AND (c."activeManpower" IS NULL OR c."activeManpower" <= 1)
-      AND (c."workforceCategory" IS NULL OR c."workforceCategory" != 'TRADE_CREW')
       AND NOT (
-        LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%manpower supply%'
-        OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%subcontractor%'
-        OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%trade crew%'
-        OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%crew%'
-        OR LOWER(COALESCE(w.name, '')) LIKE '%manpower supply%'
-        OR LOWER(COALESCE(w.name, '')) LIKE '%trade crew%'
-        OR LOWER(COALESCE(c.name, '')) LIKE '%manpower supply%'
+        LOWER(COALESCE(c.company, '')) LIKE '%manpower supply%'
+        OR LOWER(COALESCE(c.company, '')) LIKE '%subcontractor%'
+        OR (LOWER(COALESCE(w.position, '')) = 'manpower supply' AND c."employmentType" = 'OUTSOURCED')
       )
       ORDER BY 1 ASC
     `, [attendanceQuery.projectId, attendanceQuery.date.$gte, attendanceQuery.date.$lte]);

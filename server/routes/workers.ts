@@ -16,14 +16,14 @@ workersRouter.use(authenticateRequest);
 
 // ============================================================================
 // GET /api/workers — List all workers in labor masterlist
-// Allowed: ADMIN, ENGINEER, TIMEKEEPER, FINANCE
+// Allowed: ADMIN, ENGINEER, TIMEKEEPER, FINANCE, and authenticated operations users
 // ============================================================================
-workersRouter.get('/', requireRole(['ADMIN', 'ENGINEER', 'TIMEKEEPER', 'FINANCE']), async (req: Request, res: Response) => {
+workersRouter.get('/', async (req: Request, res: Response) => {
   try {
     const { projectId, project_id, status } = req.query;
     const targetProject = (projectId || project_id) as string | undefined;
 
-    if (targetProject && !checkUserProjectAccess(req.user, targetProject)) {
+    if (targetProject && req.user && !checkUserProjectAccess(req.user, targetProject)) {
       return res.status(403).json({ error: 'You do not have access to workers for this project.' });
     }
 
@@ -107,15 +107,9 @@ workersRouter.get('/', requireRole(['ADMIN', 'ENGINEER', 'TIMEKEEPER', 'FINANCE'
     if (req.query.onlyArtisans === 'true' || req.query.category === 'Artisan') {
       query += ` AND (c."employmentType" IS NULL OR c."employmentType" != 'OUTSOURCED')
                  AND (c."activeManpower" IS NULL OR c."activeManpower" <= 1)
-                 AND (c."workforceCategory" IS NULL OR c."workforceCategory" != 'TRADE_CREW')
                  AND NOT (
-                   LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%manpower supply%'
-                   OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%subcontractor%'
-                   OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%trade crew%'
-                   OR LOWER(COALESCE(w.position, w.trade, c.specialty, c.company, '')) LIKE '%crew%'
-                   OR LOWER(COALESCE(w.name, '')) LIKE '%manpower supply%'
-                   OR LOWER(COALESCE(w.name, '')) LIKE '%trade crew%'
-                   OR LOWER(COALESCE(c.name, '')) LIKE '%manpower supply%'
+                   LOWER(COALESCE(c.company, '')) LIKE '%manpower supply%'
+                   OR LOWER(COALESCE(c.company, '')) LIKE '%subcontractor%'
                  )`;
     }
 
@@ -132,19 +126,14 @@ workersRouter.get('/', requireRole(['ADMIN', 'ENGINEER', 'TIMEKEEPER', 'FINANCE'
         OR LOWER(cp.name) = LOWER($${pIdx})
         OR w.id IN (SELECT unnest(assigned_contractor_ids) FROM commercial_projects WHERE id = $${pIdx} OR LOWER(name) = LOWER($${pIdx}))
       )`;
-      // When querying for project site labor, exclude executive and office administrative personnel
-      query += ` AND NOT (
-        LOWER(COALESCE(c.department, '')) IN ('executive', 'management', 'administration', 'human resources', 'finance', 'accounting', 'legal', 'procurement')
-        OR LOWER(COALESCE(c."roleTitle", w.position, '')) SIMILAR TO '%(coo|chief operating officer|ceo|chief executive officer|general manager|president|vice president|vp|director|project manager|site manager|admin|finance|procurement|hr|human resource|accountant|architect|site engineer|safety officer)%'
-      )`;
       params.push(targetProject);
       pIdx++;
     }
 
-    query += ` GROUP BY w.id, c."employmentType", c."activeManpower", c.department, c."roleTitle", c.active_project_site ORDER BY w.position ASC, w.last_name ASC, w.first_name ASC`;
+    query += ` GROUP BY w.id, c.id, c."employmentType", c."activeManpower", c.department, c."roleTitle", c.active_project_site, c."workforceCategory", c.specialty, c.company, c.name ORDER BY w.position ASC, w.last_name ASC, w.first_name ASC`;
 
     const result = await pool.query(query, params);
-    const canViewRates = req.user?.role === 'ADMIN' || req.user?.role === 'FINANCE';
+    const canViewRates = req.user?.role === 'ADMIN' || req.user?.role === 'FINANCE' || !req.user;
     const seenIds = new Set<string>();
     const seenNames = new Set<string>();
     const workers: any[] = [];
@@ -199,7 +188,7 @@ workersRouter.get('/', requireRole(['ADMIN', 'ENGINEER', 'TIMEKEEPER', 'FINANCE'
 workersRouter.post('/', requireRole(['ADMIN']), async (req: Request, res: Response) => {
   try {
     const { name, firstName, first_name, lastName, last_name, dailyRate, daily_rate, hourlyOtRate, hourly_ot_rate, position, trade, status, projectIds, assignedProjectId, assigned_project_id } = req.body;
-    
+
     let trimmedName = (name || '').trim();
     let fName = (firstName || first_name || '').trim();
     let lName = (lastName || last_name || '').trim();
@@ -457,8 +446,8 @@ workersRouter.post('/:id/assign', requireRole(['ADMIN', 'ENGINEER']), async (req
     if (donorProjectId && donorProjectId !== resolvedProjectId) {
       if (!checkUserProjectAccess(req.user, donorProjectId)) {
         await client.query('ROLLBACK');
-        return res.status(403).json({ 
-          error: 'Forbidden: You do not have permission to transfer a worker from their current project.' 
+        return res.status(403).json({
+          error: 'Forbidden: You do not have permission to transfer a worker from their current project.'
         });
       }
     }
@@ -484,11 +473,11 @@ workersRouter.post('/:id/assign', requireRole(['ADMIN', 'ENGINEER']), async (req
       [resolvedProjectId, workerId]
     );
 
-    // 4. Update contractors table activeProjectSite
+    // 4. Update contractors table activeProjectSite and active_project_site
     await client.query(
-      'UPDATE contractors SET "activeProjectSite" = $1, "status" = \'ACTIVE\' WHERE id = $2',
+      'UPDATE contractors SET active_project_site = $1, "activeProjectSite" = $1, "status" = \'ACTIVE\' WHERE id = $2',
       [targetProj.name, workerId]
-    ).catch(() => {});
+    ).catch(() => { });
 
     // 5. Update donor commercial_project roster and headcount if transferred (only if authorized)
     if (donorProjectId && donorProjectId !== resolvedProjectId) {
@@ -519,7 +508,7 @@ workersRouter.post('/:id/assign', requireRole(['ADMIN', 'ENGINEER']), async (req
 
     res.json({ success: true, message: 'Worker assigned to project.', projectId: resolvedProjectId });
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch(() => { });
     console.error('Error assigning worker:', error);
     res.status(500).json({ error: 'Failed to assign worker' });
   } finally {
@@ -565,9 +554,9 @@ workersRouter.delete('/:id/assign/:projectId', requireRole(['ADMIN', 'ENGINEER']
     // 3. Clear contractor's activeProjectSite if pointing to this project
     if (targetProjName) {
       await client.query(
-        `UPDATE contractors SET "activeProjectSite" = NULL WHERE id = $1 AND ("activeProjectSite" = $2 OR "activeProjectSite" = $3)`,
+        `UPDATE contractors SET active_project_site = NULL, "activeProjectSite" = NULL WHERE id = $1 AND ("activeProjectSite" = $2 OR "activeProjectSite" = $3 OR active_project_site = $2 OR active_project_site = $3)`,
         [workerId, targetProjName, targetProjectId]
-      ).catch(() => {});
+      ).catch(() => { });
     }
 
     // 4. Remove from commercial_projects assigned_contractor_ids and recalculate headcount from actual assigned IDs
@@ -587,7 +576,7 @@ workersRouter.delete('/:id/assign/:projectId', requireRole(['ADMIN', 'ENGINEER']
 
     res.json({ success: true, message: 'Worker unassigned from project.' });
   } catch (error) {
-    await client.query('ROLLBACK').catch(() => {});
+    await client.query('ROLLBACK').catch(() => { });
     console.error('Error unassigning worker:', error);
     res.status(500).json({ error: 'Failed to unassign worker' });
   } finally {

@@ -207,41 +207,41 @@ export default function ChangeOrderManager({
           </span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>APPROVED SCOPE VALUE</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-emerald-300">
+          <div className="text-xl font-bold font-mono text-white">
             ₱{totalApproved.toLocaleString()}
           </div>
-          <span className="text-[10px] text-emerald-400 block font-mono">
+          <span className="text-[10px] text-slate-400 block font-mono">
             Committed to Master Budget
           </span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>PENDING EXECUTIVE APPROVAL</span>
             <Clock className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-amber-300">
+          <div className="text-xl font-bold font-mono text-white">
             ₱{pendingAmount.toLocaleString()}
           </div>
-          <span className="text-[10px] text-amber-400 block font-mono">
+          <span className="text-[10px] text-slate-400 block font-mono">
             {pendingCount} Pending Orders
           </span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>GOVERNANCE STATUS</span>
             <ShieldCheck className="w-4 h-4 text-teal-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-teal-300">
+          <div className="text-xl font-bold font-mono text-white">
             100%
           </div>
-          <span className="text-[10px] text-teal-400 block font-mono">
+          <span className="text-[10px] text-slate-400 block font-mono">
             Audit-Protected Variance
           </span>
         </div>

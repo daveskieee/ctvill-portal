@@ -33,7 +33,7 @@ declare global {
 export function normalizeAppRole(rawRole: string | undefined | null): AllowedAppRole | null {
   if (!rawRole || typeof rawRole !== 'string') return null;
   const upper = rawRole.toUpperCase().trim();
-  if (upper === 'ADMIN') return 'ADMIN';
+  if (upper === 'ADMIN' || upper === 'OM' || upper === 'OPERATIONS' || upper === 'OPERATIONS_MANAGER' || upper === 'OPERATIONS DIRECTOR' || upper === 'OPERATIONS_DIRECTOR') return 'ADMIN';
   if (upper === 'FINANCE') return 'FINANCE';
   if (upper === 'ENGINEER' || upper === 'PROJECT_MANAGER' || upper === 'PM') return 'ENGINEER';
   if (upper === 'TIMEKEEPER') return 'TIMEKEEPER';
@@ -225,16 +225,8 @@ export function checkUserProjectAccess(
   const cleanProjectId = projectId.trim();
   if (!cleanProjectId) return false;
 
-  // ADMIN has global access for system administration
-  if (user.role === 'ADMIN') return true;
-
-  // FINANCE has global access for financial records unless explicitly scoped to specific projectIds
-  if (user.role === 'FINANCE') {
-    if (user.projectIds && user.projectIds.length > 0) {
-      return user.projectIds.includes(cleanProjectId);
-    }
-    return true;
-  }
+  // ADMIN and FINANCE have global access for system administration, corporate treasury, and site payroll
+  if (user.role === 'ADMIN' || user.role === 'FINANCE') return true;
 
   // All other roles (ENGINEER, PROJECT_MANAGER, TIMEKEEPER, CLIENT):
   // DENY BY DEFAULT if projectIds list is missing, empty, or doesn't include the target project

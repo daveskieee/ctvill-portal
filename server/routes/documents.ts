@@ -124,9 +124,34 @@ documentsRouter.get('/', async (req: Request, res: Response) => {
   }
 });
 
+export const MAX_DOCUMENT_SIZE_BYTES = 50 * 1024 * 1024; // 50 MB database limit
+export const MAX_DOCUMENT_SIZE_LABEL = '50 MB';
+
+export function parseFileSizeToBytes(sizeStr?: string): number {
+  if (!sizeStr) return 0;
+  const match = sizeStr.match(/([\d.]+)\s*(MB|KB|GB|B)/i);
+  if (!match) return 0;
+  const num = parseFloat(match[1]);
+  const unit = match[2].toUpperCase();
+  if (unit === 'GB') return num * 1024 * 1024 * 1024;
+  if (unit === 'MB') return num * 1024 * 1024;
+  if (unit === 'KB') return num * 1024;
+  return num;
+}
+
 // POST /api/documents
 documentsRouter.post('/documents', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { title, category, fileUrl, fileSize, version, status, uploadedBy, notes } = req.body;
+
+  // Validate maximum database limit (50 MB)
+  const sizeInBytes = parseFileSizeToBytes(fileSize);
+  const payloadUrlBytes = typeof fileUrl === 'string' ? Buffer.byteLength(fileUrl, 'utf8') : 0;
+  if (sizeInBytes > MAX_DOCUMENT_SIZE_BYTES || payloadUrlBytes > MAX_DOCUMENT_SIZE_BYTES) {
+    return res.status(413).json({
+      error: `File payload exceeds maximum database capacity of ${MAX_DOCUMENT_SIZE_LABEL} (52,428,800 bytes). Please compress or optimize the document.`
+    });
+  }
+
   try {
     const doc = await prisma.projectDocument.create({
       data: {
@@ -151,6 +176,16 @@ documentsRouter.post('/documents', requireRole(['ADMIN', 'ENGINEER']), async (re
 
 documentsRouter.post('/', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { title, category, fileUrl, fileSize, version, status, notes } = req.body;
+
+  // Validate maximum database limit (50 MB)
+  const sizeInBytes = parseFileSizeToBytes(fileSize);
+  const payloadUrlBytes = typeof fileUrl === 'string' ? Buffer.byteLength(fileUrl, 'utf8') : 0;
+  if (sizeInBytes > MAX_DOCUMENT_SIZE_BYTES || payloadUrlBytes > MAX_DOCUMENT_SIZE_BYTES) {
+    return res.status(413).json({
+      error: `File payload exceeds maximum database capacity of ${MAX_DOCUMENT_SIZE_LABEL} (52,428,800 bytes). Please compress or optimize the document.`
+    });
+  }
+
   try {
     const doc = await prisma.projectDocument.create({
       data: {

@@ -13,13 +13,13 @@ export interface LandParcel {
   acquisitionDate: string;
 }
 
-export type SlotStatus = 
-  | 'Available' 
-  | 'Reserved' 
-  | 'Under Contract' 
-  | 'Developing' 
-  | 'Titling Phase' 
-  | 'Turnover Ready' 
+export type SlotStatus =
+  | 'Available'
+  | 'Reserved'
+  | 'Under Contract'
+  | 'Developing'
+  | 'Titling Phase'
+  | 'Turnover Ready'
   | 'Handed Over'
   | 'Sold';
 
@@ -154,7 +154,7 @@ export interface ProcessAuditLog {
   createdAt: string;
 }
 
-export type CTVillDepartment = 
+export type CTVillDepartment =
   | 'Executive Leadership'
   | 'Design & Pre-Construction'
   | 'Project Management & Construction'
@@ -240,29 +240,29 @@ export function isOfficeOrExecutive(c: Partial<Contractor>): boolean {
   if (role.includes('safety') || role.includes('ehso')) return false;
 
   if (
-    dept.includes('executive') || 
-    dept.includes('corporate') || 
-    dept.includes('office') || 
-    dept.includes('finance') || 
-    dept.includes('accounting') || 
-    dept.includes('human resources') || 
-    dept.includes('hr') || 
-    dept.includes('legal') || 
-    dept.includes('procurement') || 
-    dept.includes('sales') || 
+    dept.includes('executive') ||
+    dept.includes('corporate') ||
+    dept.includes('office') ||
+    dept.includes('finance') ||
+    dept.includes('accounting') ||
+    dept.includes('human resources') ||
+    dept.includes('hr') ||
+    dept.includes('legal') ||
+    dept.includes('procurement') ||
+    dept.includes('sales') ||
     dept.includes('marketing')
   ) {
     return true;
   }
   if (
-    role.includes('coo') || 
-    role.includes('ceo') || 
-    role.includes('chief') || 
-    role.includes('director') || 
-    role.includes('finance') || 
-    role.includes('hr') || 
-    role.includes('accounting') || 
-    role.includes('clerk') || 
+    role.includes('coo') ||
+    role.includes('ceo') ||
+    role.includes('chief') ||
+    role.includes('director') ||
+    role.includes('finance') ||
+    role.includes('hr') ||
+    role.includes('accounting') ||
+    role.includes('clerk') ||
     role.includes('admin')
   ) {
     return true;
@@ -276,12 +276,12 @@ export function isIndividualStaffOrEngineer(c: Partial<Contractor>): boolean {
   if (isOfficeOrExecutive(c)) return true;
   const role = (c.roleTitle || c.specialty || '').toLowerCase();
   if (
-    role.includes('engineer') || 
-    role.includes('architect') || 
-    role.includes('project manager') || 
-    role.includes('safety officer') || 
-    role.includes('surveyor') || 
-    role.includes('qa/qc') || 
+    role.includes('engineer') ||
+    role.includes('architect') ||
+    role.includes('project manager') ||
+    role.includes('safety officer') ||
+    role.includes('surveyor') ||
+    role.includes('qa/qc') ||
     role.includes('inspector')
   ) {
     return true;
@@ -475,6 +475,7 @@ export interface ProjectTask {
   priority: TaskPriority;
   status: TaskStatus;
   progress?: number;
+  duration?: number;
   dueDate?: string;
   startDate?: string;
   estimatedHours?: number;
@@ -580,14 +581,14 @@ export interface CADParseResult {
 
 // --- CORE MODULE EXTENSIONS ---
 
-export type PermitType = 
-  | 'LGU_BUILDING_PERMIT' 
-  | 'BARANGAY_CLEARANCE' 
-  | 'PEZA_FITOUT_PERMIT' 
-  | 'FSIC_FIRE_SAFETY' 
-  | 'DOLE_CSHP' 
-  | 'OCCUPANCY_PERMIT' 
-  | 'SANITARY_CLEARANCE' 
+export type PermitType =
+  | 'LGU_BUILDING_PERMIT'
+  | 'BARANGAY_CLEARANCE'
+  | 'PEZA_FITOUT_PERMIT'
+  | 'FSIC_FIRE_SAFETY'
+  | 'DOLE_CSHP'
+  | 'OCCUPANCY_PERMIT'
+  | 'SANITARY_CLEARANCE'
   | 'OTHER';
 
 export interface GovernmentPermit {
@@ -615,6 +616,9 @@ export interface ScheduleEvent {
   projectName?: string;
   title: string;
   description?: string;
+  date?: string;
+  type?: 'Meeting' | 'Inspection' | 'Milestone' | 'Deadline' | string;
+  source?: string;
   eventType: ScheduleEventType;
   eventDate: string;
   startTime?: string;
@@ -637,6 +641,9 @@ export interface ProjectProfile {
   budget: number;
   fundsCollected: number;
   progressPercentage: number;
+  cpmProgress?: number;
+  overallProgress?: number;
+  progress?: number;
   status: 'PLANNING' | 'IN_PROGRESS' | 'PUNCHLIST_QA' | 'HANDED_OVER' | 'COMPLETED';
   targetHandoverDate: string;
   startDate: string;

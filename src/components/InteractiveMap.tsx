@@ -794,7 +794,7 @@ export default function InteractiveMap({
 
               {/* AI LOT COST & VALUATION CARD */}
               {selectedSlotValuation && (
-                <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
+                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-2.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-1.5 text-xs font-bold text-slate-200">
                       <Bot className="w-4 h-4 text-purple-400" />
@@ -806,15 +806,15 @@ export default function InteractiveMap({
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="bg-slate-950/80 p-2 rounded-lg border border-purple-900/40">
+                    <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800">
                       <span className="text-[9px] text-slate-400 font-mono block">BREAK-EVEN COGS</span>
                       <strong className="text-white font-mono text-xs">₱{selectedSlotValuation.breakEvenCost.toLocaleString()}</strong>
-                      <span className="text-[9px] text-slate-500 block font-mono">₱{selectedSlotValuation.breakEvenPricePerSqm}/sqm</span>
+                      <span className="text-[9px] text-slate-400 block font-mono">₱{selectedSlotValuation.breakEvenPricePerSqm}/sqm</span>
                     </div>
-                    <div className="bg-slate-950/80 p-2 rounded-lg border border-purple-900/40">
-                      <span className="text-[9px] text-purple-400 font-mono block font-bold">AI SUGGESTED PRICE</span>
-                      <strong className="text-emerald-400 font-mono text-xs">₱{selectedSlotValuation.suggestedBasePrice.toLocaleString()}</strong>
-                      <span className="text-[9px] text-emerald-500 block font-mono">₱{selectedSlotValuation.suggestedPricePerSqm}/sqm</span>
+                    <div className="bg-slate-900/80 p-2 rounded-lg border border-slate-800">
+                      <span className="text-[9px] text-slate-400 font-mono block font-bold">AI SUGGESTED PRICE</span>
+                      <strong className="text-white font-mono text-xs">₱{selectedSlotValuation.suggestedBasePrice.toLocaleString()}</strong>
+                      <span className="text-[9px] text-slate-400 block font-mono">₱{selectedSlotValuation.suggestedPricePerSqm}/sqm</span>
                     </div>
                   </div>
 
@@ -1073,40 +1073,40 @@ export default function InteractiveMap({
               
               {/* Financial Feasibility Executive KPIs */}
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-1">
-                  <span className="text-[10px] font-mono font-bold text-slate-400 block uppercase">TOTAL PROJECT OUTLAY</span>
+                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                  <span className="text-[10px] font-mono font-bold text-slate-400 block uppercase tracking-wider">TOTAL PROJECT OUTLAY</span>
                   <strong className="text-white font-mono text-base block">₱{aiFeasibility.totalProjectOutlay.toLocaleString()}</strong>
-                  <span className="text-[10px] text-slate-500">All Expenses + Buffer</span>
+                  <span className="text-[10px] text-slate-400">All Expenses + Buffer</span>
                 </div>
 
-                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-1">
-                  <span className="text-[10px] font-mono font-bold text-amber-400 block uppercase">BREAK-EVEN / SQM</span>
-                  <strong className="text-amber-300 font-mono text-base block">₱{aiFeasibility.baselineCostPerSqm.toFixed(2)}</strong>
-                  <span className="text-[10px] text-slate-500">Min. Cost of Goods</span>
+                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                  <span className="text-[10px] font-mono font-bold text-slate-400 block uppercase tracking-wider">BREAK-EVEN / SQM</span>
+                  <strong className="text-white font-mono text-base block">₱{aiFeasibility.baselineCostPerSqm.toFixed(2)}</strong>
+                  <span className="text-[10px] text-slate-400">Min. Cost of Goods</span>
                 </div>
 
-                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-1">
-                  <span className="text-[10px] font-mono font-bold text-blue-400 block uppercase">AVG. TARGET PRICE / SQM</span>
-                  <strong className="text-blue-300 font-mono text-base block">₱{aiFeasibility.averageSuggestedPricePerSqm.toFixed(2)}</strong>
-                  <span className="text-[10px] text-slate-500">Weighted Average</span>
+                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                  <span className="text-[10px] font-mono font-bold text-slate-400 block uppercase tracking-wider">AVG. TARGET PRICE / SQM</span>
+                  <strong className="text-white font-mono text-base block">₱{aiFeasibility.averageSuggestedPricePerSqm.toFixed(2)}</strong>
+                  <span className="text-[10px] text-slate-400">Weighted Average</span>
                 </div>
 
-                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-1">
-                  <span className="text-[10px] font-mono font-bold text-emerald-400 block uppercase">PROJECTED GROSS SALES</span>
-                  <strong className="text-emerald-300 font-mono text-base block">₱{aiFeasibility.totalProjectedGrossRevenue.toLocaleString()}</strong>
-                  <span className="text-[10px] text-slate-500">{aiFeasibility.lotsEvaluated} Lots Inventory</span>
+                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                  <span className="text-[10px] font-mono font-bold text-slate-400 block uppercase tracking-wider">PROJECTED GROSS SALES</span>
+                  <strong className="text-white font-mono text-base block">₱{aiFeasibility.totalProjectedGrossRevenue.toLocaleString()}</strong>
+                  <span className="text-[10px] text-slate-400">{aiFeasibility.lotsEvaluated} Lots Inventory</span>
                 </div>
 
-                <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3.5 space-y-1">
-                  <span className="text-[10px] font-mono font-bold text-teal-400 block uppercase">PROJECTED NET PROFIT</span>
-                  <strong className="text-teal-300 font-mono text-base block">₱{aiFeasibility.totalProjectedNetProfit.toLocaleString()}</strong>
-                  <span className="text-[10px] text-teal-500">After All Expenses</span>
+                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                  <span className="text-[10px] font-mono font-bold text-slate-400 block uppercase tracking-wider">PROJECTED NET PROFIT</span>
+                  <strong className="text-white font-mono text-base block">₱{aiFeasibility.totalProjectedNetProfit.toLocaleString()}</strong>
+                  <span className="text-[10px] text-slate-400">After All Expenses</span>
                 </div>
 
-                <div className="bg-slate-900/90 border border-purple-800/80 bg-purple-950/20 rounded-2xl p-3.5 space-y-1">
-                  <span className="text-[10px] font-mono font-bold text-purple-300 block uppercase">PROJECTED ROI %</span>
-                  <strong className="text-purple-300 font-mono text-base block">{aiFeasibility.projectedROI}%</strong>
-                  <span className="text-[10px] text-purple-400 font-bold">Target Margin: {aiTargetMargin}%</span>
+                <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
+                  <span className="text-[10px] font-mono font-bold text-slate-400 block uppercase tracking-wider">PROJECTED ROI %</span>
+                  <strong className="text-white font-mono text-base block">{aiFeasibility.projectedROI}%</strong>
+                  <span className="text-[10px] text-slate-400">Target Margin: {aiTargetMargin}%</span>
                 </div>
               </div>
 

@@ -39,29 +39,70 @@ projectsRouter.get('/geocoding/lookup', async (req: Request, res: Response) => {
 // GET /api/projects — Scoped to authorized projects for non-admin/finance users
 projectsRouter.get('/projects', async (req: Request, res: Response) => {
   try {
-    let dbProjectsQuery = 'SELECT * FROM commercial_projects ORDER BY created_at ASC';
+    const selectProjectsSql = `
+      SELECT 
+        p.*,
+        COALESCE(
+          (
+            SELECT ROUND(
+              SUM(
+                (CASE 
+                  WHEN t.status = 'COMPLETED' OR t.progress >= 1.0 THEN 100.0 
+                  WHEN t.progress > 0 AND t.progress <= 1.0 THEN t.progress * 100.0 
+                  ELSE COALESCE(t.progress, 0.0) 
+                END) * GREATEST(COALESCE(t.duration, 1), 1)
+              ) 
+              / NULLIF(SUM(GREATEST(COALESCE(t.duration, 1), 1)), 0)
+            )
+            FROM project_tasks t 
+            WHERE t."projectId" = p.id
+          ), 
+          p.progress_percentage, 
+          0
+        ) AS progress,
+        COALESCE(
+          (
+            SELECT ROUND(
+              SUM(
+                (CASE 
+                  WHEN t.status = 'COMPLETED' OR t.progress >= 1.0 THEN 100.0 
+                  WHEN t.progress > 0 AND t.progress <= 1.0 THEN t.progress * 100.0 
+                  ELSE COALESCE(t.progress, 0.0) 
+                END) * GREATEST(COALESCE(t.duration, 1), 1)
+              ) 
+              / NULLIF(SUM(GREATEST(COALESCE(t.duration, 1), 1)), 0)
+            )
+            FROM project_tasks t 
+            WHERE t."projectId" = p.id
+          ), 
+          p.progress_percentage, 
+          0
+        ) AS "cpmProgress"
+      FROM commercial_projects p
+    `;
+    let dbProjectsQuery = `${selectProjectsSql} ORDER BY p.created_at ASC`;
     const params: any[] = [];
-    if (req.user?.role !== 'ADMIN' && req.user?.role !== 'FINANCE') {
-      if (!req.user?.projectIds || req.user.projectIds.length === 0) {
+    if (req.user && req.user.role !== 'ADMIN' && req.user.role !== 'FINANCE') {
+      if (!req.user.projectIds || req.user.projectIds.length === 0) {
         return res.json([]);
       }
-      dbProjectsQuery = 'SELECT * FROM commercial_projects WHERE id = ANY($1) ORDER BY created_at ASC';
+      dbProjectsQuery = `${selectProjectsSql} WHERE p.id = ANY($1) ORDER BY p.created_at ASC`;
       params.push(req.user.projectIds);
     }
     // Pre-aggregate labor expenses from finalized or paid payroll runs (distinguishing paid vs approved)
     const laborRes = await pool.query(
       `SELECT 
          project_id, 
-         COALESCE(SUM(CASE WHEN status = 'PAID' THEN total_gross ELSE 0 END), 0) as paid_labor,
-         COALESCE(SUM(CASE WHEN status = 'FINALIZED' THEN total_gross ELSE 0 END), 0) as approved_labor,
-         COALESCE(SUM(total_gross), 0) as total_labor
+         COALESCE(SUM(CASE WHEN UPPER(TRIM(status)) IN ('LOCKED & ARCHIVED', 'FINALIZED', 'ARCHIVED', 'PAID', 'DISBURSED') THEN COALESCE(total_net, total_gross) ELSE 0 END), 0) as paid_labor,
+         COALESCE(SUM(CASE WHEN UPPER(TRIM(status)) IN ('APPROVED', 'PENDING') THEN COALESCE(total_net, total_gross) ELSE 0 END), 0) as approved_labor,
+         COALESCE(SUM(COALESCE(total_net, total_gross)), 0) as total_labor
        FROM payroll_runs 
-       WHERE status IN ('FINALIZED', 'PAID') 
+       WHERE UPPER(TRIM(status)) IN ('LOCKED & ARCHIVED', 'FINALIZED', 'ARCHIVED', 'PAID', 'DISBURSED', 'APPROVED', 'PENDING') 
        GROUP BY project_id`
     ).catch(() => ({ rows: [] }));
     const laborMap = new Map<string, { paid: number; approved: number; total: number }>();
     for (const r of laborRes.rows) {
-      laborMap.set(r.project_id, {
+      laborMap.set(String(r.project_id).trim(), {
         paid: Number(r.paid_labor || 0),
         approved: Number(r.approved_labor || 0),
         total: Number(r.total_labor || 0)
@@ -72,21 +113,48 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
     const subRes = await pool.query(
       `SELECT 
          project_site, 
-         COALESCE(SUM(CASE WHEN status = 'PAID' THEN COALESCE(disbursed_amount, approved_amount, billed_amount) ELSE 0 END), 0) as paid_sub,
-         COALESCE(SUM(CASE WHEN status = 'APPROVED' THEN COALESCE(approved_amount, billed_amount) ELSE 0 END), 0) as approved_sub,
+         COALESCE(SUM(CASE WHEN UPPER(TRIM(status)) IN ('PAID', 'DISBURSED', 'PAID / DISBURSED') THEN COALESCE(disbursed_amount, approved_amount, billed_amount) ELSE 0 END), 0) as paid_sub,
+         COALESCE(SUM(CASE WHEN UPPER(TRIM(status)) IN ('APPROVED', 'PENDING', 'PENDING_APPROVAL') THEN COALESCE(approved_amount, billed_amount) ELSE 0 END), 0) as approved_sub,
          COALESCE(SUM(COALESCE(disbursed_amount, approved_amount, billed_amount)), 0) as total_sub
        FROM subcontractor_payables 
-       WHERE status IN ('APPROVED', 'PAID') 
+       WHERE UPPER(TRIM(status)) IN ('PAID', 'DISBURSED', 'PAID / DISBURSED', 'APPROVED', 'PENDING', 'PENDING_APPROVAL') 
        GROUP BY project_site`
     ).catch(() => ({ rows: [] }));
     const subMap = new Map<string, { paid: number; approved: number; total: number }>();
     for (const r of subRes.rows) {
-      subMap.set(String(r.project_site).trim().toLowerCase(), {
+      subMap.set(String(r.project_site).trim(), {
         paid: Number(r.paid_sub || 0),
         approved: Number(r.approved_sub || 0),
         total: Number(r.total_sub || 0)
       });
     }
+
+    const findMatchingEntry = (map: Map<string, { paid: number; approved: number; total: number }>, p: { id: string; name?: string }) => {
+      const pIdLower = (p.id || '').trim().toLowerCase();
+      const pNameLower = (p.name || '').trim().toLowerCase();
+      const pIdDigits = pIdLower.replace(/[^0-9]/g, '');
+
+      // 1. Direct key matches
+      for (const [key, val] of map.entries()) {
+        const kLower = key.trim().toLowerCase();
+        if (kLower === pIdLower || kLower === pNameLower) return val;
+      }
+      // 2. Digits code matches (e.g. 4127 matches PRJ-4127 / PAY-4127)
+      if (pIdDigits) {
+        for (const [key, val] of map.entries()) {
+          const kDigits = key.trim().toLowerCase().replace(/[^0-9]/g, '');
+          if (kDigits && kDigits === pIdDigits) return val;
+        }
+      }
+      // 3. Substring site name match
+      if (pNameLower) {
+        for (const [key, val] of map.entries()) {
+          const kLower = key.trim().toLowerCase();
+          if (kLower && (pNameLower.includes(kLower) || kLower.includes(pNameLower))) return val;
+        }
+      }
+      return { paid: 0, approved: 0, total: 0 };
+    };
 
     const dbProjects = await pool.query(dbProjectsQuery, params);
     const projects = await Promise.all((dbProjects.rows || []).map(async (p) => {
@@ -103,31 +171,37 @@ projectsRouter.get('/projects', async (req: Request, res: Response) => {
           .catch(err => console.warn(`Failed to backfill coords for project ${p.id}:`, err));
       }
 
-      const laborInfo = laborMap.get(p.id) || { paid: 0, approved: 0, total: 0 };
-      const subInfo = subMap.get((p.name || '').trim().toLowerCase()) || subMap.get(p.id.toLowerCase()) || { paid: 0, approved: 0, total: 0 };
+      const laborInfo = findMatchingEntry(laborMap, p);
+      const subInfo = findMatchingEntry(subMap, p);
       const paidExp = Number((laborInfo.paid + subInfo.paid).toFixed(2));
       const approvedExp = Number((laborInfo.approved + subInfo.approved).toFixed(2));
       const totalExp = Number((laborInfo.total + subInfo.total).toFixed(2));
 
-      return {
-        id: p.id,
-        name: p.name,
-        clientName: p.client_name || '',
-        description: p.description || '',
-        location: p.location || '',
-        budget: Number(p.budget || 0),
-        fundsCollected: Number(p.funds_collected || 0),
-        laborExpenses: laborInfo.total,
-        paidLaborExpenses: laborInfo.paid,
-        approvedLaborExpenses: laborInfo.approved,
-        subcontractorExpenses: subInfo.total,
-        paidSubcontractorExpenses: subInfo.paid,
-        approvedSubcontractorExpenses: subInfo.approved,
-        paidExpenses: paidExp,
-        approvedExpenses: approvedExp,
-        totalExpenses: totalExp,
-        progressPercentage: Number(p.progress_percentage || 0),
-        status: (Number(p.progress_percentage || 0) > 0 && p.status === 'PLANNING') ? 'IN_PROGRESS' : (p.status || 'IN_PROGRESS'),
+        const computedProgress = Number(p.cpmProgress ?? p.progress ?? p.progress_percentage ?? 0);
+        const resolvedStatus = (computedProgress > 0 && (p.status === 'PLANNING' || !p.status)) ? 'IN_PROGRESS' : (p.status || 'IN_PROGRESS');
+
+        return {
+          id: p.id,
+          name: p.name,
+          clientName: p.client_name || '',
+          description: p.description || '',
+          location: p.location || '',
+          budget: Number(p.budget || 0),
+          fundsCollected: Number(p.funds_collected || 0),
+          laborExpenses: laborInfo.total,
+          paidLaborExpenses: laborInfo.paid,
+          approvedLaborExpenses: laborInfo.approved,
+          subcontractorExpenses: subInfo.total,
+          paidSubcontractorExpenses: subInfo.paid,
+          approvedSubcontractorExpenses: subInfo.approved,
+          paidExpenses: paidExp,
+          approvedExpenses: approvedExp,
+          totalExpenses: totalExp,
+          progressPercentage: computedProgress,
+          cpmProgress: computedProgress,
+          overallProgress: computedProgress,
+          progress: computedProgress,
+          status: resolvedStatus,
         targetHandoverDate: p.target_handover_date ? (p.target_handover_date instanceof Date ? p.target_handover_date.toISOString().split('T')[0] : String(p.target_handover_date).split('T')[0]) : '2026-12-31',
         startDate: p.start_date ? (p.start_date instanceof Date ? p.start_date.toISOString().split('T')[0] : String(p.start_date).split('T')[0]) : '2026-01-01',
         assignedWorkersCount: Number(p.assigned_workers_count || 0),
@@ -342,7 +416,7 @@ projectsRouter.patch('/projects/:id', requireRole(['ADMIN', 'ENGINEER']), async 
     }
     if (budget !== undefined) { updates.push(`budget = $${idx++}`); values.push(Number(budget) || 0); }
     if (fundsCollected !== undefined) { updates.push(`funds_collected = $${idx++}`); values.push(Number(fundsCollected) || 0); }
-    if (progressPercentage !== undefined) { updates.push(`progress_percentage = $${idx++}`); values.push(Number(progressPercentage) || 0); }
+    // Note: progress_percentage is strictly driven by CPM Gantt task completion and locked from manual modification
     if (status !== undefined) { updates.push(`status = $${idx++}`); values.push(status); }
     if (targetHandoverDate !== undefined) { updates.push(`target_handover_date = $${idx++}`); values.push(targetHandoverDate || null); }
     if (startDate !== undefined) { updates.push(`start_date = $${idx++}`); values.push(startDate || null); }
@@ -365,8 +439,69 @@ projectsRouter.patch('/projects/:id', requireRole(['ADMIN', 'ENGINEER']), async 
     broadcastChange('projects');
     invalidateAllDataCache();
 
-    const pRes = await pool.query('SELECT * FROM commercial_projects WHERE id = $1', [id]);
+    // Query updated project with computed CPM progress and live ledger disbursements
+    const pRes = await pool.query(`
+      SELECT 
+        p.*,
+        COALESCE(
+          (
+            SELECT ROUND(
+              SUM(
+                (CASE 
+                  WHEN t.status = 'COMPLETED' OR t.progress >= 1.0 THEN 100.0 
+                  WHEN t.progress > 0 AND t.progress <= 1.0 THEN t.progress * 100.0 
+                  ELSE COALESCE(t.progress, 0.0) 
+                END) * GREATEST(COALESCE(t.duration, 1), 1)
+              ) 
+              / NULLIF(SUM(GREATEST(COALESCE(t.duration, 1), 1)), 0)
+            )
+            FROM project_tasks t 
+            WHERE t."projectId" = p.id
+          ), 
+          p.progress_percentage, 
+          0
+        ) AS cpm_progress
+      FROM commercial_projects p
+      WHERE p.id = $1
+    `, [id]);
     const p = pRes.rows[0] || {};
+
+    // Get live actual labor & subcontractor paid expenses
+    const laborRes = await pool.query(
+      `SELECT 
+         COALESCE(SUM(CASE WHEN UPPER(TRIM(status)) IN ('LOCKED & ARCHIVED', 'FINALIZED', 'ARCHIVED', 'PAID', 'DISBURSED') THEN COALESCE(total_net, total_gross) ELSE 0 END), 0) as paid_labor,
+         COALESCE(SUM(CASE WHEN UPPER(TRIM(status)) IN ('APPROVED', 'PENDING') THEN COALESCE(total_net, total_gross) ELSE 0 END), 0) as approved_labor,
+         COALESCE(SUM(COALESCE(total_net, total_gross)), 0) as total_labor
+       FROM payroll_runs 
+       WHERE (project_id = $1 OR project_id ILIKE '%' || $2 || '%')
+         AND UPPER(TRIM(status)) IN ('LOCKED & ARCHIVED', 'FINALIZED', 'ARCHIVED', 'PAID', 'DISBURSED', 'APPROVED', 'PENDING')`,
+      [id, id.replace(/[^0-9]/g, '') || id]
+    ).catch(() => ({ rows: [] }));
+    const lRow = laborRes.rows[0] || {};
+    const paidLabor = Number(lRow.paid_labor || 0);
+    const approvedLabor = Number(lRow.approved_labor || 0);
+    const totalLabor = Number(lRow.total_labor || 0);
+
+    const subRes = await pool.query(
+      `SELECT 
+         COALESCE(SUM(CASE WHEN UPPER(TRIM(status)) IN ('PAID', 'DISBURSED', 'PAID / DISBURSED') THEN COALESCE(disbursed_amount, approved_amount, billed_amount) ELSE 0 END), 0) as paid_sub,
+         COALESCE(SUM(CASE WHEN UPPER(TRIM(status)) IN ('APPROVED', 'PENDING', 'PENDING_APPROVAL') THEN COALESCE(approved_amount, billed_amount) ELSE 0 END), 0) as approved_sub,
+         COALESCE(SUM(COALESCE(disbursed_amount, approved_amount, billed_amount)), 0) as total_sub
+       FROM subcontractor_payables 
+       WHERE (LOWER(TRIM(project_site)) = LOWER(TRIM($1)) OR LOWER(TRIM(project_site)) = LOWER(TRIM($2)) OR project_site ILIKE '%' || $1 || '%')
+         AND UPPER(TRIM(status)) IN ('PAID', 'DISBURSED', 'PAID / DISBURSED', 'APPROVED', 'PENDING', 'PENDING_APPROVAL')`,
+      [p.name || '', id]
+    ).catch(() => ({ rows: [] }));
+    const sRow = subRes.rows[0] || {};
+    const paidSub = Number(sRow.paid_sub || 0);
+    const approvedSub = Number(sRow.approved_sub || 0);
+    const totalSub = Number(sRow.total_sub || 0);
+
+    const paidExp = Number((paidLabor + paidSub).toFixed(2));
+    const approvedExp = Number((approvedLabor + approvedSub).toFixed(2));
+    const totalExp = Number((totalLabor + totalSub).toFixed(2));
+
+    const computedProgress = Number(p.cpm_progress ?? p.progress_percentage ?? 0);
     const updatedProject = {
       id: p.id || id,
       name: p.name || '',
@@ -375,7 +510,19 @@ projectsRouter.patch('/projects/:id', requireRole(['ADMIN', 'ENGINEER']), async 
       location: p.location || '',
       budget: Number(p.budget || 0),
       fundsCollected: Number(p.funds_collected || 0),
-      progressPercentage: Number(p.progress_percentage || 0),
+      laborExpenses: totalLabor,
+      paidLaborExpenses: paidLabor,
+      approvedLaborExpenses: approvedLabor,
+      subcontractorExpenses: totalSub,
+      paidSubcontractorExpenses: paidSub,
+      approvedSubcontractorExpenses: approvedSub,
+      paidExpenses: paidExp,
+      approvedExpenses: approvedExp,
+      totalExpenses: totalExp,
+      progressPercentage: computedProgress,
+      cpmProgress: computedProgress,
+      overallProgress: computedProgress,
+      progress: computedProgress,
       status: p.status || 'IN_PROGRESS',
       targetHandoverDate: p.target_handover_date ? (p.target_handover_date instanceof Date ? p.target_handover_date.toISOString().split('T')[0] : String(p.target_handover_date).split('T')[0]) : '2026-12-31',
       startDate: p.start_date ? (p.start_date instanceof Date ? p.start_date.toISOString().split('T')[0] : String(p.start_date).split('T')[0]) : '2026-01-01',
@@ -499,16 +646,31 @@ projectsRouter.patch('/projects/:id/weather-suspension', requireRole(['ADMIN', '
       [isSuspended, id]
     );
 
+    // Halt active CPM tasks when Force Majeure is declared
+    if (isSuspended) {
+      await prisma.projectTask.updateMany({
+        where: { projectId: id, status: 'IN_PROGRESS' },
+        data: { status: 'BLOCKED' }
+      });
+      broadcastChange('tasks');
+    }
+
+    const actorId = req.user?.id || 'usr-pm';
+    const actorRole = req.user?.role || 'ENGINEER';
+    const actorName = req.user?.name || 'Project Manager';
+    const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
+    const nowIso = new Date().toISOString();
+
     await prisma.processAuditLog.create({
       data: {
         entityType: 'CIVIL_WORKS',
         entityId: id,
         action: isSuspended ? 'WEATHER_SUSPENSION_ACTIVATED' : 'WEATHER_SUSPENSION_LIFTED',
-        actorName: req.user?.name || 'Project Manager',
-        actorRole: req.user?.role || 'ENGINEER',
+        actorName,
+        actorRole,
         details: isSuspended
-          ? `Work Suspended due to Weather (Force Majeure): ${reason || 'Adverse weather on site'}. Timeline flagged for schedule delays.`
-          : 'Weather suspension lifted. Regular site operations resumed.',
+          ? `Work Suspended due to Weather (Force Majeure): ${reason || 'Adverse weather on site'}. Timeline flagged for schedule delays. Active CPM tasks halted to BLOCKED status. [User: ${actorId}, Role: ${actorRole}, IP: ${clientIp}, Timestamp: ${nowIso}]`
+          : `Weather suspension lifted. Regular site operations resumed. [User: ${actorId}, Role: ${actorRole}, IP: ${clientIp}, Timestamp: ${nowIso}]`,
       }
     }).catch(() => {});
 
@@ -559,8 +721,8 @@ projectsRouter.delete('/projects/:id', requireRole(['ADMIN']), async (req: Reque
 projectsRouter.get('/tasks-list', async (req: Request, res: Response) => {
   try {
     let whereClause: any = {};
-    if (req.user?.role !== 'ADMIN' && req.user?.role !== 'FINANCE') {
-      if (!req.user?.projectIds || req.user.projectIds.length === 0) {
+    if (req.user && req.user.role !== 'ADMIN' && req.user.role !== 'FINANCE') {
+      if (!req.user.projectIds || req.user.projectIds.length === 0) {
         return res.json([]);
       }
       whereClause.projectId = { in: req.user.projectIds };
@@ -590,6 +752,7 @@ projectsRouter.get('/tasks-list', async (req: Request, res: Response) => {
         priority: t.priority || 'MEDIUM',
         status: taskStatus,
         progress: p,
+        duration: typeof t.duration === 'number' ? t.duration : (Number(t.duration) || 0),
         dueDate: t.dueDate ? t.dueDate.toISOString().split('T')[0] : (t.endDate ? t.endDate.toISOString().split('T')[0] : ''),
         startDate: t.startDate ? t.startDate.toISOString().split('T')[0] : '',
         estimatedHours: (t.duration || 1) * 8,
@@ -765,14 +928,18 @@ projectsRouter.patch('/tasks/:id', requireRole(['ADMIN', 'ENGINEER']), async (re
     if (task.projectId) {
       const allTasks = await prisma.projectTask.findMany({ where: { projectId: task.projectId } });
       if (allTasks.length > 0) {
-        const milestones = allTasks.filter(t => t.type === 'milestone' || t.duration === 0);
-        const items = milestones.length > 0 ? milestones : allTasks;
-        const sumProgress = items.reduce((acc, curr) => {
-          let p = curr.progress || 0;
-          if (p > 0 && p <= 1) p = p * 100;
-          return acc + p;
+        const totalDuration = allTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
+        const weightedProgress = allTasks.reduce((acc, curr) => {
+          let p = 0;
+          if (curr.status === 'COMPLETED' || (typeof curr.progress === 'number' && curr.progress >= 1.0)) {
+            p = 1.0;
+          } else {
+            const raw = typeof curr.progress === 'number' ? curr.progress : 0;
+            p = raw > 1.0 ? raw / 100 : raw;
+          }
+          return acc + (p * Math.max(1, curr.duration || 1));
         }, 0);
-        const avgProgress = Math.round(sumProgress / items.length);
+        const avgProgress = totalDuration > 0 ? Math.round((weightedProgress / totalDuration) * 100) : 0;
         const existingProj = await prisma.commercialProject.findUnique({ where: { id: task.projectId } });
         const shouldAdvanceStatus = avgProgress > 0 && (!existingProj?.status || existingProj.status === 'PLANNING');
         await prisma.commercialProject.update({
@@ -784,6 +951,26 @@ projectsRouter.patch('/tasks/:id', requireRole(['ADMIN', 'ENGINEER']), async (re
           }
         }).catch(() => {});
         broadcastChange('projects');
+      }
+
+      if (data.status === 'COMPLETED' || (data.progress !== undefined && Number(data.progress) >= 1.0)) {
+        const actorId = req.user?.id || 'usr-pm';
+        const actorRole = req.user?.role || 'ENGINEER';
+        const actorName = req.user?.name || 'Project Manager';
+        const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
+        const nowIso = new Date().toISOString();
+
+        await prisma.processAuditLog.create({
+          data: {
+            entityType: 'CIVIL_WORKS',
+            entityId: task.id,
+            action: 'MILESTONE_COMPLETED',
+            actorName,
+            actorRole,
+            details: `Task/Milestone "${task.text || task.title}" marked COMPLETED on project ${task.projectId}. [User: ${actorId}, Role: ${actorRole}, IP: ${clientIp}, Timestamp: ${nowIso}]`,
+          }
+        }).catch(() => {});
+        broadcastChange('auditLogs');
       }
     }
 
@@ -859,8 +1046,247 @@ projectsRouter.delete('/tasks/:id', requireRole(['ADMIN', 'ENGINEER']), async (r
 });
 
 // ============================================================================
-// SCHEDULE EVENTS REST API
+// SCHEDULE & UNIFIED CALENDAR EVENTS REST API
 // ============================================================================
+
+// GET /api/calendar/events — Aggregates live dates across:
+// 1. Manual / Coordination Events (schedule_events)
+// 2. Master CPM Gantt & Milestones (project_tasks)
+// 3. Milestone Billing Due Dates (installment_ledgers)
+// 4. Project Target Handovers (commercial_projects)
+// 5. Government Permits & Clearances (government_permits)
+projectsRouter.get(['/calendar/events', '/projects/calendar/events'], async (req: Request, res: Response) => {
+  try {
+    const rawProjectId = (req.query.projectId as string || '').trim();
+    const isAll = !rawProjectId || rawProjectId === 'ALL';
+
+    // Resolve target project ID and name if a specific filter is provided
+    let targetProjId = rawProjectId;
+    let targetProjName = rawProjectId;
+
+    if (!isAll) {
+      const pMatch = await pool.query(
+        'SELECT id, name FROM commercial_projects WHERE id = $1 OR LOWER(name) = LOWER($1) OR name ILIKE $2 LIMIT 1',
+        [rawProjectId, `%${rawProjectId}%`]
+      );
+      if (pMatch.rows.length > 0) {
+        targetProjId = pMatch.rows[0].id;
+        targetProjName = pMatch.rows[0].name;
+      }
+    }
+
+    // 1. Manual / Coordination Events
+    let scheduleSql = 'SELECT * FROM schedule_events';
+    const scheduleParams: any[] = [];
+    if (!isAll) {
+      scheduleSql += ' WHERE project_id = $1 OR project_id = $2 OR project_name ILIKE $1 OR project_name ILIKE $2 OR project_name ILIKE $3';
+      scheduleParams.push(targetProjId, targetProjName, `%${targetProjName}%`);
+    }
+    scheduleSql += ' ORDER BY event_date ASC, start_time ASC';
+
+    const scheduleRes = await pool.query(scheduleSql, scheduleParams);
+    const manualEvents = (scheduleRes.rows || []).map((e: any) => {
+      const dateStr = e.event_date ? (e.event_date instanceof Date ? e.event_date.toISOString().split('T')[0] : String(e.event_date).split('T')[0]) : new Date().toISOString().split('T')[0];
+      const rawType = (e.event_type || 'MEETING').toUpperCase();
+      let normType: 'Meeting' | 'Inspection' | 'Milestone' | 'Deadline' = 'Meeting';
+      if (rawType === 'INSPECTION') normType = 'Inspection';
+      else if (rawType === 'MILESTONE') normType = 'Milestone';
+      else if (rawType === 'DEADLINE') normType = 'Deadline';
+
+      return {
+        id: e.id,
+        title: e.title || 'Coordination Meeting',
+        date: dateStr,
+        type: normType,
+        eventType: normType.toUpperCase(),
+        eventDate: dateStr,
+        projectId: e.project_id || '',
+        projectName: e.project_name || 'Master Operations',
+        source: 'Manual / Coordination',
+        startTime: e.start_time || '09:00',
+        endTime: e.end_time || '10:00',
+        location: e.location || 'Site Office',
+        attendees: e.attendees || '',
+        notes: e.notes || '',
+        status: e.status || 'SCHEDULED'
+      };
+    });
+
+    // 2. Master CPM Gantt & Milestones
+    let taskSql = `
+      SELECT t.id, t.text, t.title, t.status, t.type, t."startDate", t."endDate", t."dueDate", t.duration, t.progress, t."milestonePhase", t.category,
+             p.id as project_id, p.name as project_name, p.location as project_location
+      FROM project_tasks t
+      LEFT JOIN commercial_projects p ON t."projectId" = p.id
+      WHERE (t."endDate" IS NOT NULL OR t."dueDate" IS NOT NULL OR t."startDate" IS NOT NULL)
+    `;
+    const taskParams: any[] = [];
+    if (!isAll) {
+      taskSql += ` AND (t."projectId" = $1 OR t."projectId" = $2 OR p.name ILIKE $1 OR p.name ILIKE $2 OR p.name ILIKE $3)`;
+      taskParams.push(targetProjId, targetProjName, `%${targetProjName}%`);
+    }
+    taskSql += ` ORDER BY COALESCE(t."endDate", t."dueDate", t."startDate") ASC`;
+
+    const tasksRes = await pool.query(taskSql, taskParams);
+    const cpmEvents = (tasksRes.rows || []).map((t: any) => {
+      const rawDate = t.endDate || t.dueDate || t.startDate;
+      const dateStr = rawDate instanceof Date ? rawDate.toISOString().split('T')[0] : String(rawDate).split('T')[0];
+      const isCompleted = t.status === 'COMPLETED' || (t.progress !== null && Number(t.progress) >= 1.0);
+      const text = (t.text || t.title || 'CPM Milestone').trim();
+      const textLower = text.toLowerCase();
+
+      let normType: 'Milestone' | 'Inspection' = 'Milestone';
+      if (textLower.includes('inspect') || textLower.includes('testing') || textLower.includes('qa') || textLower.includes('audit')) {
+        normType = 'Inspection';
+      } else {
+        normType = 'Milestone';
+      }
+
+      return {
+        id: `cpm-${t.id}`,
+        title: text,
+        date: dateStr,
+        type: normType,
+        eventType: normType.toUpperCase(),
+        eventDate: dateStr,
+        projectId: t.project_id || '',
+        projectName: t.project_name || 'Commercial Site',
+        source: 'Master CPM Gantt',
+        startTime: '08:00',
+        endTime: '17:00',
+        location: t.project_location || 'Jobsite',
+        attendees: 'Site Engineer & Artisan Trades',
+        notes: `Phase: ${t.milestonePhase || 'Field Execution'}. Progress: ${Math.round((Number(t.progress) || 0) * 100)}%. Duration: ${t.duration || 1} day(s).`,
+        status: isCompleted ? 'COMPLETED' : 'SCHEDULED'
+      };
+    });
+
+    // 3. Milestone Billing Due Dates
+    let billingSql = `
+      SELECT il.id, il."dueDate", il."amountDue", il.status,
+             cp."packageType", u.name as client_name,
+             p.id as project_id, p.name as project_name
+      FROM installment_ledgers il
+      JOIN client_packages cp ON il."clientPackageId" = cp.id
+      JOIN users u ON cp."userId" = u.id
+      LEFT JOIN commercial_projects p ON (cp."packageType" ILIKE p.name OR cp."packageType" ILIKE CONCAT('%', p.name, '%'))
+      WHERE il.status != 'PAID' AND il."dueDate" IS NOT NULL
+    `;
+    const billingParams: any[] = [];
+    if (!isAll) {
+      billingSql += ` AND (p.id = $1 OR p.name ILIKE $1 OR cp."packageType" ILIKE $1 OR cp."packageType" ILIKE $2 OR cp."packageType" ILIKE $3)`;
+      billingParams.push(targetProjId, targetProjName, `%${targetProjName}%`);
+    }
+    billingSql += ` ORDER BY il."dueDate" ASC`;
+
+    const billingsRes = await pool.query(billingSql, billingParams);
+    const billingEvents = (billingsRes.rows || []).map((b: any) => {
+      const dateStr = b.dueDate instanceof Date ? b.dueDate.toISOString().split('T')[0] : String(b.dueDate).split('T')[0];
+      const amountStr = Number(b.amountDue || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return {
+        id: `billing-${b.id}`,
+        title: `Billing Due: ${b.client_name || 'Client'} (₱${amountStr})`,
+        date: dateStr,
+        type: 'Deadline' as const,
+        eventType: 'DEADLINE',
+        eventDate: dateStr,
+        projectId: b.project_id || '',
+        projectName: b.project_name || b.packageType || 'Commercial Fit-Out',
+        source: 'Milestone Billing',
+        startTime: '10:00',
+        endTime: '17:00',
+        location: 'Finance Treasury Desk',
+        attendees: `${b.client_name || 'Client'}, Finance Officer`,
+        notes: `Milestone installment receivable of ₱${amountStr}. Payment requires verified deposit slip / wire confirmation.`,
+        status: 'SCHEDULED'
+      };
+    });
+
+    // 4. Project Target Handovers
+    let handoverSql = `
+      SELECT id, name, target_handover_date, client_name, location, budget, status
+      FROM commercial_projects
+      WHERE target_handover_date IS NOT NULL
+    `;
+    const handoverParams: any[] = [];
+    if (!isAll) {
+      handoverSql += ` AND (id = $1 OR id = $2 OR name ILIKE $1 OR name ILIKE $2 OR name ILIKE $3)`;
+      handoverParams.push(targetProjId, targetProjName, `%${targetProjName}%`);
+    }
+    handoverSql += ` ORDER BY target_handover_date ASC`;
+
+    const handoversRes = await pool.query(handoverSql, handoverParams);
+    const handoverEvents = (handoversRes.rows || []).map((h: any) => {
+      const dateStr = h.target_handover_date instanceof Date ? h.target_handover_date.toISOString().split('T')[0] : String(h.target_handover_date).split('T')[0];
+      return {
+        id: `handover-${h.id}`,
+        title: `Project Handover: ${h.name}`,
+        date: dateStr,
+        type: 'Milestone' as const,
+        eventType: 'MILESTONE',
+        eventDate: dateStr,
+        projectId: h.id,
+        projectName: h.name,
+        source: 'Project Handover',
+        startTime: '10:00',
+        endTime: '16:00',
+        location: h.location || 'Site Office',
+        attendees: `${h.client_name || 'Client'}, Project Manager, Operations Director`,
+        notes: `Contractual turnover and handover completion for ${h.name}. Contract Price: ₱${Number(h.budget || 0).toLocaleString()}.`,
+        status: h.status === 'COMPLETED' ? 'COMPLETED' : 'SCHEDULED'
+      };
+    });
+
+    // 5. Government Permits & Clearances
+    let permitSql = `
+      SELECT id, project_id, project_name, permit_name, permit_type, issuing_agency, reference_no, expiry_date, status, notes
+      FROM government_permits
+      WHERE expiry_date IS NOT NULL
+    `;
+    const permitParams: any[] = [];
+    if (!isAll) {
+      permitSql += ` AND (project_id = $1 OR project_id = $2 OR project_name ILIKE $1 OR project_name ILIKE $2 OR project_name ILIKE $3)`;
+      permitParams.push(targetProjId, targetProjName, `%${targetProjName}%`);
+    }
+    permitSql += ` ORDER BY expiry_date ASC`;
+
+    const permitsRes = await pool.query(permitSql, permitParams);
+    const permitEvents = (permitsRes.rows || []).map((pm: any) => {
+      const dateStr = pm.expiry_date instanceof Date ? pm.expiry_date.toISOString().split('T')[0] : String(pm.expiry_date).split('T')[0];
+      return {
+        id: `permit-${pm.id}`,
+        title: `Permit Expiry: ${pm.permit_name || pm.permit_type} (${pm.reference_no || pm.id})`,
+        date: dateStr,
+        type: 'Deadline' as const,
+        eventType: 'DEADLINE',
+        eventDate: dateStr,
+        projectId: pm.project_id || '',
+        projectName: pm.project_name || 'Commercial Site',
+        source: 'Statutory Permit',
+        startTime: '09:00',
+        endTime: '17:00',
+        location: pm.issuing_agency || 'City Hall / PEZA Office',
+        attendees: 'Compliance Officer, Site PM',
+        notes: `Statutory permit renewal deadline for ${pm.permit_name} (${pm.permit_type}). Agency: ${pm.issuing_agency}. Status: ${pm.status}.`,
+        status: pm.status === 'EXPIRED' ? 'CANCELLED' : 'SCHEDULED'
+      };
+    });
+
+    // Merge all 5 sources and sort by date ascending
+    const allAggregatedEvents = [
+      ...manualEvents,
+      ...cpmEvents,
+      ...billingEvents,
+      ...handoverEvents,
+      ...permitEvents
+    ].sort((a, b) => a.date.localeCompare(b.date));
+
+    res.json(allAggregatedEvents);
+  } catch (error) {
+    console.error('Error aggregating calendar events:', error);
+    res.status(500).json({ error: 'Internal Server Error fetching calendar events' });
+  }
+});
 
 // GET /api/schedule
 projectsRouter.get('/schedule', async (req: Request, res: Response) => {

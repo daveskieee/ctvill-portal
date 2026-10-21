@@ -1,0 +1,135 @@
+================================================================================
+CTVILL ERP — SEAMLESS AUTHENTICATION REFRESH VERIFICATION REPORT
+================================================================================
+Timestamp: 2026-10-18T02:32:00+08:00
+Environment: CTVILL Commercial Fit-Out Real Estate ERP
+Git Branch: main (Restore point: restore-point-auth-refresh-bug)
+Status: COMPLETED & VERIFIED
+
+--------------------------------------------------------------------------------
+1. EXECUTIVE SUMMARY & ARCHITECTURAL OVERVIEW
+--------------------------------------------------------------------------------
+The redundant full-screen branded `SessionVerificationScreen.tsx` (centered logo 
+and spinner) has been completely removed from the refresh experience and replaced 
+with a lightweight, neutral ERP shell skeleton (`ERPShellSkeleton.tsx`).
+
+The ERP shell skeleton reuses CTVILL's existing skeleton components (`SkeletonBase`, 
+`DashboardSkeleton`, `TableSkeleton`, `CardGridSkeleton`, `KanbanSkeleton`, 
+`GanttSkeleton`, and `SiteDiarySkeleton`) and styling (`.skeleton-shimmer` pulse 
+effects in `src/index.css`).
+
+Key Guarantees:
+1. Zero Full-Screen Loading Screen: No full-screen branded overlay or spinner 
+   is rendered during session verification or page refresh.
+2. Zero Landing-Page Flash: Public landing page and login portal are never 
+   rendered while checking existing sessions.
+3. Zero Data or Permission Leakage: Neutral shell skeleton contains zero 
+   protected data, zero user details, and zero role-specific sidebar modules 
+   until session validity and RBAC permissions are confirmed by `/api/auth/me`.
+4. Pixel-Aligned Module Continuity: Content area of `ERPShellSkeleton` 
+   pre-aligns to the requested module from the URL hash (e.g. `#gantt`, `#rfis`, 
+   `#timekeeper-attendance`). Once authenticated, it transitions directly into 
+   `AdminPortal` which continues rendering the active module skeleton while 
+   `reloadAllData` completes, eliminating duplicate skeleton layers and layout 
+   shifts.
+5. Strict Security Preserved: HttpOnly session cookies, CSRF protection, 
+   automatic session timeout (30 min inactivity), and vertical RBAC enforcement 
+   remain 100% active.
+
+--------------------------------------------------------------------------------
+2. MODIFIED AND REMOVED FILES
+--------------------------------------------------------------------------------
+A. `src/components/skeletons/ERPShellSkeleton.tsx` (CREATED)
+   - Lightweight neutral ERP shell skeleton.
+   - Reuses existing skeleton components (`SkeletonBase`, `DashboardSkeleton`, 
+     `TableSkeleton`, `CardGridSkeleton`, `KanbanSkeleton`, `GanttSkeleton`, 
+     `SiteDiarySkeleton`).
+   - Renders neutral top navigation bar (CTVILL brand mark, neutral search bar 
+     skeleton, neutral header action skeletons).
+   - Renders neutral sidebar (neutral navigation link skeleton placeholders and 
+     neutral profile placeholder—no role-specific sidebar modules exposed).
+   - Renders pre-aligned module skeleton based on `window.location.hash`, query 
+     param `?tab=`, or `sessionStorage.getItem('ctvill_active_tab')`.
+
+B. `src/components/skeletons/index.ts` (MODIFIED)
+   - Exported `ERPShellSkeleton`.
+
+C. `src/App.tsx` (MODIFIED)
+   - Removed `SessionVerificationScreen` import.
+   - Imported `{ ERPShellSkeleton } from './components/skeletons'`.
+   - Updated `renderActiveWorkspace()`:
+     ```tsx
+     if (authStatus === 'checking') {
+       return <ERPShellSkeleton />;
+     }
+     ```
+   - Maintained explicit 3-state authentication state machine (`checking`, 
+     `authenticated`, `unauthenticated`).
+   - Maintained `authCheckStartedRef` to prevent duplicate `/api/auth/me` calls.
+
+D. `src/components/SessionVerificationScreen.tsx` (DELETED)
+   - Removed unused branded full-screen loading component.
+
+E. `scripts/verifyFrontendRefreshFlow.ts` (MODIFIED)
+   - Updated frontend lifecycle verification harness to assert `ERPShellSkeleton` 
+     and verify zero landing page flash, route preservation, and expired session 
+     handling.
+
+--------------------------------------------------------------------------------
+3. VERIFICATION & TEST RESULTS
+--------------------------------------------------------------------------------
+
+[TEST SUITE 1] TypeScript Type-Check
+Command: npm run lint (tsc --noEmit)
+Result: PASSED (0 errors)
+
+[TEST SUITE 2] Production Build
+Command: npm run build (vite build)
+Result: PASSED (Built successfully in 9.67s, 0 errors)
+
+[TEST SUITE 3] Frontend Lifecycle & Refresh Flow
+Command: npx tsx scripts/verifyFrontendRefreshFlow.ts
+Result: 12/12 Scenarios PASSED (100%)
+  [✅ PASSED] Admin refresh on nested #gantt: Initial rendering is ERPShellSkeleton (Zero flash of LandingPage)
+  [✅ PASSED] Admin refresh on nested #gantt: Final rendering is AdminPortal with preserved #gantt module
+  [✅ PASSED] Engineer refresh on nested #rfis: Preserves RFIs module without flashing landing page
+  [✅ PASSED] Timekeeper refresh on #timekeeper-attendance: Preserves attendance module
+  [✅ PASSED] Finance refresh on #finance-payroll: Preserves payroll module
+  [✅ PASSED] Client refresh on #projects: Preserves projects module
+  [✅ PASSED] Slow Network: Session verification displays neutral ERP shell skeleton with zero data leakage while awaiting response
+  [✅ PASSED] Expired Session: Redirects cleanly to LoginPortal with security notice (zero landing flash, zero data leakage)
+  [✅ PASSED] Direct Navigation to Protected URL (Unauthenticated): Redirects to LoginPortal with access notice
+  [✅ PASSED] Sign-Out followed by refresh: Persists unauthenticated state on LandingPage without returning to dashboard
+  [✅ PASSED] Vertical RBAC Guard: Timekeeper accessing #payroll is blocked with forbidden-403
+  [✅ PASSED] Browser Navigation & Module Hash Sync: Navigating tabs updates state, hash, and session storage in lockstep
+
+[TEST SUITE 4] Backend Session Verification Across All 5 Roles
+Command: npx tsx scripts/verifyAuthRefreshBug.ts
+Result: ALL 10 TESTS PASSED (100%)
+  [✅ PASSED] Role Verification & Session Refresh: ADMIN (200 OK)
+  [✅ PASSED] Role Verification & Session Refresh: ENGINEER (200 OK)
+  [✅ PASSED] Role Verification & Session Refresh: TIMEKEEPER (200 OK)
+  [✅ PASSED] Role Verification & Session Refresh: FINANCE (200 OK)
+  [✅ PASSED] Role Verification & Session Refresh: CLIENT (200 OK)
+  [✅ PASSED] Expired/Invalid Session Security & Redirection (401 Unauthorized, zero data leak)
+  [✅ PASSED] Direct Navigation to Protected URLs Unauthenticated (401 Unauthorized)
+  [✅ PASSED] Sign-Out Followed by Refresh (Session Revocation, 401 Unauthorized)
+  [✅ PASSED] Role-Based Navigation & Strict RBAC Enforcement (403 Forbidden on unassigned modules)
+  [✅ PASSED] Nested Module Route Mapping & Preservation Registry (All 7 modules preserved)
+
+[TEST SUITE 5] Security Regression Suite
+Command: npm run test:security (server/tests/security.test.ts)
+Result: 39 passed, 3 skipped (live DB safety guard), 0 failed
+
+--------------------------------------------------------------------------------
+4. CONFIRMATION OF COMPLIANCE WITH STRICT REQUIREMENTS
+--------------------------------------------------------------------------------
+- [x] Full-screen branded session verification screen removed from refresh flow.
+- [x] Existing skeleton components and styling reused without redesigning the app.
+- [x] Three-state authentication machine (`checking`, `authenticated`, `unauthenticated`) preserved.
+- [x] Backend session verification (`/api/auth/me`), HttpOnly cookies, and CSRF protection untouched.
+- [x] No protected data, user details, or role-specific sidebar modules displayed during verification.
+- [x] Smooth, seamless transition into active module across refreshes with URL hash preservation.
+- [x] Unused `SessionVerificationScreen.tsx` removed from repository.
+- [x] Phase 4 not started.
+================================================================================

@@ -193,6 +193,17 @@ engineeringRouter.get('/documents', async (req: Request, res: Response) => {
 // POST /api/documents
 engineeringRouter.post('/documents', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
   const { title, category, fileUrl, fileSize, version, status, uploadedBy, notes } = req.body;
+  
+  // Validate maximum database limit (50 MB)
+  const { parseFileSizeToBytes, MAX_DOCUMENT_SIZE_BYTES, MAX_DOCUMENT_SIZE_LABEL } = await import('./documents');
+  const sizeInBytes = parseFileSizeToBytes(fileSize);
+  const payloadUrlBytes = typeof fileUrl === 'string' ? Buffer.byteLength(fileUrl, 'utf8') : 0;
+  if (sizeInBytes > MAX_DOCUMENT_SIZE_BYTES || payloadUrlBytes > MAX_DOCUMENT_SIZE_BYTES) {
+    return res.status(413).json({
+      error: `File payload exceeds maximum database capacity of ${MAX_DOCUMENT_SIZE_LABEL} (52,428,800 bytes). Please compress or optimize the document.`
+    });
+  }
+
   try {
     const doc = await prisma.projectDocument.create({
       data: {
@@ -353,6 +364,17 @@ engineeringRouter.patch('/change-orders/:id', requireRole(['ADMIN', 'FINANCE', '
     const { id } = req.params;
     const { status, approvedAmount, approvedBy } = req.body;
 
+    // PM / Site Engineer restriction: Cannot approve change order fund releases >= ₱1,000,000
+    if (status === 'APPROVED' && (req.user?.role === 'ENGINEER' || req.user?.role === 'PROJECT_MANAGER')) {
+      const currentOrder = await prisma.changeOrder.findUnique({ where: { id } });
+      const targetAmount = approvedAmount !== undefined && approvedAmount !== null ? Number(approvedAmount) : Number(currentOrder?.requestedAmount || 0);
+      if (targetAmount >= 1000000) {
+        return res.status(403).json({
+          error: 'Requires Corporate Executive Sign-Off: Site Engineers and Project Managers cannot approve change order fund releases ≥ ₱1,000,000.'
+        });
+      }
+    }
+
     const data: any = {};
     if (status !== undefined) data.status = status;
     if (approvedAmount !== undefined) data.approvedAmount = approvedAmount === null ? null : Number(approvedAmount);
@@ -362,6 +384,30 @@ engineeringRouter.patch('/change-orders/:id', requireRole(['ADMIN', 'FINANCE', '
       where: { id },
       data
     });
+
+    // Append to centralized Process Audit Log
+    try {
+      const actorId = req.user?.id || 'usr-eng';
+      const actorRole = req.user?.role || 'ENGINEER';
+      const actorName = req.user?.name || approvedBy || 'Authorized Officer';
+      const clientIp = req.ip || req.socket.remoteAddress || '127.0.0.1';
+      const nowIso = new Date().toISOString();
+      const amountStr = Number(updated.approvedAmount || updated.requestedAmount || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+      await prisma.processAuditLog.create({
+        data: {
+          entityType: 'CIVIL_WORKS',
+          entityId: id,
+          action: `CHANGE_ORDER_${status || 'UPDATED'}`,
+          actorName,
+          actorRole,
+          details: `Change order ${updated.orderNumber} ("${updated.title}") transitioned to ${status || 'UPDATED'}. Amount: ₱${amountStr}. [User: ${actorId}, Role: ${actorRole}, IP: ${clientIp}, Timestamp: ${nowIso}]`,
+        }
+      });
+      broadcastChange('auditLogs');
+    } catch (auditErr: any) {
+      console.warn('Process audit log error for change order patch:', auditErr?.message);
+    }
 
     broadcastChange('changeOrders');
     invalidateAllDataCache();

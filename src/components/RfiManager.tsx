@@ -4,9 +4,9 @@
  */
 
 import React, { useState } from 'react';
-import { 
-  HelpCircle, Plus, CheckCircle2, Clock, AlertTriangle, 
-  Search, Filter, ShieldCheck, User, Calendar, X, Check, 
+import {
+  HelpCircle, Plus, CheckCircle2, Clock, AlertTriangle,
+  Search, Filter, ShieldCheck, User, Calendar, X, Check,
   ArrowRight, Building2, FileText, Send, MessageSquare, Download, Printer
 } from 'lucide-react';
 import { ProjectRFI, ProjectProfile } from '../types';
@@ -32,7 +32,7 @@ export default function RfiManager({
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [priorityFilter, setPriorityFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
-  
+
   // Modals
   const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
   const [selectedRfi, setSelectedRfi] = useState<ProjectRFI | null>(null);
@@ -207,31 +207,31 @@ export default function RfiManager({
           <span className="text-[10px] text-slate-400 block font-mono">Engineering Queries</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>OPEN / UNDER REVIEW</span>
             <Clock className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-amber-300">{openCount}</div>
-          <span className="text-[10px] text-amber-400 block font-mono">Awaiting Architect Response</span>
+          <div className="text-xl font-bold font-mono text-white">{openCount}</div>
+          <span className="text-[10px] text-slate-400 block font-mono">Awaiting Architect Response</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>ANSWERED & RESOLVED</span>
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-emerald-300">{answeredCount}</div>
-          <span className="text-[10px] text-emerald-400 block font-mono">Drawing Clarifications Closed</span>
+          <div className="text-xl font-bold font-mono text-white">{answeredCount}</div>
+          <span className="text-[10px] text-slate-400 block font-mono">Drawing Clarifications Closed</span>
         </div>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
+        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>CRITICAL BLOCKERS</span>
             <AlertTriangle className="w-4 h-4 text-rose-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-rose-400">{criticalCount}</div>
-          <span className="text-[10px] text-rose-400 block font-mono">High-Priority Site Hold</span>
+          <div className="text-xl font-bold font-mono text-white">{criticalCount}</div>
+          <span className="text-[10px] text-slate-400 block font-mono">High-Priority Site Hold</span>
         </div>
       </div>
 
@@ -245,11 +245,10 @@ export default function RfiManager({
               <button
                 key={st}
                 onClick={() => setStatusFilter(st)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer shrink-0 ${
-                  statusFilter === st
+                className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer shrink-0 ${statusFilter === st
                     ? 'bg-amber-500 text-slate-950 font-black'
                     : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-                }`}
+                  }`}
               >
                 {st === 'UNDER_REVIEW' ? 'UNDER REVIEW' : st}
               </button>
@@ -262,11 +261,10 @@ export default function RfiManager({
               <button
                 key={pr}
                 onClick={() => setPriorityFilter(pr)}
-                className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold transition-all cursor-pointer shrink-0 ${
-                  priorityFilter === pr
+                className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold transition-all cursor-pointer shrink-0 ${priorityFilter === pr
                     ? 'bg-amber-500 text-slate-950 font-black'
                     : 'text-slate-500 hover:text-slate-300'
-                }`}
+                  }`}
               >
                 {pr}
               </button>
@@ -353,24 +351,22 @@ export default function RfiManager({
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${
-                            rfi.priority === 'CRITICAL'
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${rfi.priority === 'CRITICAL'
                               ? 'bg-rose-950/80 text-rose-300 border-rose-800'
                               : rfi.priority === 'HIGH'
-                              ? 'bg-amber-950/80 text-amber-300 border-amber-800'
-                              : 'bg-slate-800 text-slate-300 border-slate-700'
-                          }`}
+                                ? 'bg-amber-950/80 text-amber-300 border-amber-800'
+                                : 'bg-slate-800 text-slate-300 border-slate-700'
+                            }`}
                         >
                           {rfi.priority}
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-center">
                         <span
-                          className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border ${
-                            rfi.status === 'ANSWERED' || rfi.status === 'CLOSED'
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border ${rfi.status === 'ANSWERED' || rfi.status === 'CLOSED'
                               ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800'
                               : 'bg-amber-950/80 text-amber-400 border-amber-800 animate-pulse'
-                          }`}
+                            }`}
                         >
                           {rfi.status}
                         </span>
@@ -415,8 +411,8 @@ export default function RfiManager({
                 <HelpCircle className="w-5 h-5 text-blue-400" />
                 Raise Request for Information (RFI)
               </h4>
-              <button 
-                onClick={() => setShowSubmitModal(false)} 
+              <button
+                onClick={() => setShowSubmitModal(false)}
                 className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -546,8 +542,8 @@ export default function RfiManager({
                 <Send className="w-5 h-5 text-emerald-400" />
                 Technical Resolution for {answerRfiModal.rfiNumber}
               </h4>
-              <button 
-                onClick={() => setAnswerRfiModal(null)} 
+              <button
+                onClick={() => setAnswerRfiModal(null)}
                 className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
@@ -618,11 +614,10 @@ export default function RfiManager({
             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
               <div className="flex items-center gap-2">
                 <span className="font-mono text-blue-400 font-bold">{selectedRfi.rfiNumber}</span>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${
-                  selectedRfi.status === 'ANSWERED' || selectedRfi.status === 'CLOSED'
+                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${selectedRfi.status === 'ANSWERED' || selectedRfi.status === 'CLOSED'
                     ? 'bg-emerald-950 text-emerald-300'
                     : 'bg-amber-950 text-amber-300'
-                }`}>
+                  }`}>
                   {selectedRfi.status}
                 </span>
               </div>

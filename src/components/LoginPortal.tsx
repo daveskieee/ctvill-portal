@@ -274,7 +274,6 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
               </button>
 
 
-
             </form>
           </div>
         </div>
