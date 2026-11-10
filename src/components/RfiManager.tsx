@@ -5,12 +5,11 @@
 
 import React, { useState } from 'react';
 import {
-  HelpCircle, Plus, CheckCircle2, Clock, AlertTriangle,
-  Search, Filter, ShieldCheck, User, Calendar, X, Check,
-  ArrowRight, Building2, FileText, Send, MessageSquare, Download, Printer
+  Plus, CheckCircle2, Clock, AlertTriangle, Search,
+  ShieldCheck, Building2, FileText, Check, X, Truck,
+  Package, ShoppingCart, ClipboardCheck, ArrowRight
 } from 'lucide-react';
 import { ProjectRFI, ProjectProfile } from '../types';
-import { exportToCsv, printRegisterTable } from '../utils/exportUtils';
 
 interface RfiManagerProps {
   rfis: ProjectRFI[];
@@ -21,653 +20,745 @@ interface RfiManagerProps {
   onAnswerRfi?: (id: string, answer: string, status?: ProjectRFI['status']) => Promise<void> | void;
 }
 
+interface MaterialPurchaseRequest {
+  id: string;
+  projectName: string;
+  materialType: string;
+  quantity: number;
+  unit: string;
+  estimatedCostPhp: number;
+  urgency: 'NORMAL' | 'URGENT' | 'CRITICAL';
+  requestedBy: string;
+  purposePhase: string;
+  dateRequested: string;
+  approvalStatus: 'PENDING' | 'APPROVED' | 'DENIED';
+  approvedBy?: string;
+  deliveryStatus?: 'Scheduled' | 'Accepted' | 'Delayed';
+  supplierName?: string;
+  etaDate?: string;
+}
+
+const DEFAULT_MATERIAL_CATALOG = [
+  'Portland Cement Type 1 (40kg Bags)',
+  'Deformed Reinforcing Steel Bars (16mm / 12mm / 10mm)',
+  'Concrete Hollow Blocks (CHB 4" & 6")',
+  'Phenolic Board Formworks (1/2" & 3/4")',
+  'Washed Sand & Crushed Gravel Aggregates (cu.m)',
+  'Ready-Mix Concrete (4,000 PSI Pumpcrete)',
+  '60x60 Homogeneous Floor Tiles & Tile Adhesive',
+  'Gypsum Board & Metal Furring (Ceiling Works)',
+  'Marine Plywood & Kiln-Dried Lumber (Carpentry)',
+  'Elastomeric & Latex Architectural Paint (Gallons)',
+  'THHN Copper Wires & uPVC Electrical Conduits',
+  'PPR Cold/Hot Water Pipes & Sanitary PVC Fittings'
+];
+
 export default function RfiManager({
-  rfis = [],
   projects = [],
-  isAdmin = true,
-  userRole = 'ADMIN',
   onSubmitRfi,
   onAnswerRfi
 }: RfiManagerProps) {
-  const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [priorityFilter, setPriorityFilter] = useState<string>('ALL');
+  const [activeSubTab, setActiveSubTab] = useState<'requests' | 'approvals' | 'deliveries'>('requests');
+  const [materialCatalog, setMaterialCatalog] = useState<string[]>(DEFAULT_MATERIAL_CATALOG);
+  const [showAddCatalogModal, setShowAddCatalogModal] = useState<boolean>(false);
+  const [newCatalogItemName, setNewCatalogItemName] = useState<string>('');
+
+  // Form states for submitting a new Material / Purchase Request
+  const [selectedProjectName, setSelectedProjectName] = useState<string>(
+    projects[0]?.name || 'Commercial Fit-Out Site'
+  );
+  const [selectedMaterial, setSelectedMaterial] = useState<string>(DEFAULT_MATERIAL_CATALOG[0]);
+  const [quantity, setQuantity] = useState<number>(150);
+  const [unit, setUnit] = useState<string>('bags');
+  const [estimatedCost, setEstimatedCost] = useState<number>(42000);
+  const [urgency, setUrgency] = useState<'NORMAL' | 'URGENT' | 'CRITICAL'>('URGENT');
+  const [purposePhase, setPurposePhase] = useState<string>('Concreting Works — Footing & Columns');
+  const [supplierName, setSupplierName] = useState<string>('Holcim / Metro Builders Supply');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [toastBanner, setToastBanner] = useState<string | null>(null);
 
-  // Modals
-  const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
-  const [selectedRfi, setSelectedRfi] = useState<ProjectRFI | null>(null);
-  const [answerRfiModal, setAnswerRfiModal] = useState<ProjectRFI | null>(null);
-
-  // Submit Form
-  const [formSubject, setFormSubject] = useState('');
-  const [formProject, setFormProject] = useState(projects[0]?.name || 'NexBridge Software Hub');
-  const [formQuestion, setFormQuestion] = useState('');
-  const [formSuggested, setFormSuggested] = useState('');
-  const [formDrawingRef, setFormDrawingRef] = useState('');
-  const [formPriority, setFormPriority] = useState<ProjectRFI['priority']>('MEDIUM');
-  const [formAssignee, setFormAssignee] = useState('Ar. Jonathan Dela Cruz');
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Answer Form
-  const [answerText, setAnswerText] = useState('');
-  const [answerStatus, setAnswerStatus] = useState<ProjectRFI['status']>('ANSWERED');
-  const [isAnswering, setIsAnswering] = useState(false);
-
-  const filteredRfis = rfis.filter(r => {
-    if (statusFilter !== 'ALL' && r.status !== statusFilter) return false;
-    if (priorityFilter !== 'ALL' && r.priority !== priorityFilter) return false;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      return (
-        r.rfiNumber.toLowerCase().includes(q) ||
-        r.subject.toLowerCase().includes(q) ||
-        r.question.toLowerCase().includes(q) ||
-        (r.drawingRef && r.drawingRef.toLowerCase().includes(q)) ||
-        (r.submittedBy && r.submittedBy.toLowerCase().includes(q))
-      );
+  const [requests, setRequests] = useState<MaterialPurchaseRequest[]>([
+    {
+      id: 'PR-2026-001',
+      projectName: projects[0]?.name || 'NexBridge Software Hub',
+      materialType: 'Portland Cement Type 1 (40kg Bags)',
+      quantity: 250,
+      unit: 'bags',
+      estimatedCostPhp: 67500,
+      urgency: 'URGENT',
+      requestedBy: 'Engr. Carlos Mendoza (Site Engineer)',
+      purposePhase: 'Concreting Works — Footing & Ground Columns',
+      dateRequested: '2026-11-06',
+      approvalStatus: 'PENDING',
+      supplierName: 'Holcim Philippines Industrial Supply',
+      etaDate: '2026-11-11'
+    },
+    {
+      id: 'PR-2026-002',
+      projectName: projects[0]?.name || 'NexBridge Software Hub',
+      materialType: 'Deformed Reinforcing Steel Bars (16mm / 12mm / 10mm)',
+      quantity: 180,
+      unit: 'lengths',
+      estimatedCostPhp: 94500,
+      urgency: 'CRITICAL',
+      requestedBy: 'Engr. Carlos Mendoza (Site Engineer)',
+      purposePhase: 'Reinforcing Bar — 2nd Floor Beam & Slab Cage',
+      dateRequested: '2026-11-07',
+      approvalStatus: 'PENDING',
+      supplierName: 'Pag-Asa Steel Works Corp.',
+      etaDate: '2026-11-12'
+    },
+    {
+      id: 'PR-2026-003',
+      projectName: projects[1]?.name || projects[0]?.name || 'Commercial Fit-Out Site',
+      materialType: 'Concrete Hollow Blocks (CHB 4" & 6")',
+      quantity: 1500,
+      unit: 'pcs',
+      estimatedCostPhp: 33000,
+      urgency: 'NORMAL',
+      requestedBy: 'Engr. Ricardo Ramos (Project Manager)',
+      purposePhase: 'Masonry Works — Interior Partition Walls',
+      dateRequested: '2026-11-04',
+      approvalStatus: 'APPROVED',
+      approvedBy: 'Engr. Ricardo Ramos (Head Engineer)',
+      deliveryStatus: 'Accepted',
+      supplierName: 'Luzon Concrete Aggregates Inc.',
+      etaDate: '2026-11-07'
+    },
+    {
+      id: 'PR-2026-004',
+      projectName: projects[0]?.name || 'NexBridge Software Hub',
+      materialType: 'Phenolic Board Formworks (1/2" & 3/4")',
+      quantity: 65,
+      unit: 'sheets',
+      estimatedCostPhp: 55250,
+      urgency: 'URGENT',
+      requestedBy: 'Engr. Carlos Mendoza (Site Engineer)',
+      purposePhase: 'Formworks — Suspended Slab & Beam Soffits',
+      dateRequested: '2026-11-05',
+      approvalStatus: 'APPROVED',
+      approvedBy: 'Engr. Ricardo Ramos (Head Engineer)',
+      deliveryStatus: 'Scheduled',
+      supplierName: 'CW Home Depot Commercial Pro',
+      etaDate: '2026-11-10'
     }
-    return true;
+  ]);
+
+  const showToast = (msg: string) => {
+    setToastBanner(msg);
+    setTimeout(() => setToastBanner(null), 3500);
+  };
+
+  const handleAddMaterialToCatalog = () => {
+    const clean = newCatalogItemName.trim();
+    if (!clean) return;
+    if (!materialCatalog.includes(clean)) {
+      setMaterialCatalog(prev => [clean, ...prev]);
+    }
+    setSelectedMaterial(clean);
+    setNewCatalogItemName('');
+    setShowAddCatalogModal(false);
+    showToast(`Added "${clean}" to Material & Request Type catalog.`);
+  };
+
+  const handleCreatePurchaseRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const newId = `PR-2026-${String(requests.length + 1).padStart(3, '0')}`;
+    const newReq: MaterialPurchaseRequest = {
+      id: newId,
+      projectName: selectedProjectName,
+      materialType: selectedMaterial,
+      quantity: Math.max(1, Number(quantity) || 1),
+      unit: unit.trim() || 'units',
+      estimatedCostPhp: Math.max(0, Number(estimatedCost) || 0),
+      urgency,
+      requestedBy: 'Engr. Carlos Mendoza (Site Engineer)',
+      purposePhase: purposePhase.trim() || 'General Construction Phase',
+      dateRequested: new Date().toISOString().split('T')[0],
+      approvalStatus: 'PENDING',
+      supplierName: supplierName.trim() || 'Approved Vendor',
+      etaDate: new Date(Date.now() + 4 * 86400000).toISOString().split('T')[0]
+    };
+
+    setRequests(prev => [newReq, ...prev]);
+    showToast(`Material Request ${newId} (${selectedMaterial}) submitted to Approvals Inbox.`);
+
+    if (onSubmitRfi) {
+      try {
+        await onSubmitRfi({
+          rfiNumber: newId,
+          projectName: selectedProjectName,
+          subject: `${selectedMaterial} (${quantity} ${unit})`,
+          question: `Material request for ${purposePhase} — Est. ₱${estimatedCost.toLocaleString()}`,
+          priority: urgency === 'CRITICAL' ? 'CRITICAL' : urgency === 'URGENT' ? 'HIGH' : 'MEDIUM',
+          status: 'OPEN'
+        });
+      } catch {}
+    }
+  };
+
+  const handleDecision = async (reqId: string, decision: 'APPROVED' | 'DENIED') => {
+    setRequests(prev =>
+      prev.map(r =>
+        r.id === reqId
+          ? {
+              ...r,
+              approvalStatus: decision,
+              approvedBy: 'Engr. Ricardo Ramos (Head Engineer)',
+              deliveryStatus: decision === 'APPROVED' ? 'Scheduled' : undefined
+            }
+          : r
+      )
+    );
+    showToast(
+      decision === 'APPROVED'
+        ? `Request ${reqId} APPROVED and dispatched to Deliveries Tracker.`
+        : `Request ${reqId} marked as DENIED.`
+    );
+    if (onAnswerRfi) {
+      try {
+        await onAnswerRfi(reqId, `Procurement ${decision}`, decision === 'APPROVED' ? 'ANSWERED' : 'CLOSED');
+      } catch {}
+    }
+  };
+
+  const handleUpdateDeliveryStatus = (reqId: string, nextStatus: 'Scheduled' | 'Accepted' | 'Delayed') => {
+    setRequests(prev =>
+      prev.map(r => (r.id === reqId ? { ...r, deliveryStatus: nextStatus } : r))
+    );
+    showToast(`Delivery ${reqId} status updated to ${nextStatus}.`);
+  };
+
+  const pendingApprovals = requests.filter(r => r.approvalStatus === 'PENDING');
+  const approvedDeliveries = requests.filter(r => r.approvalStatus === 'APPROVED');
+  const filteredRequests = requests.filter(r => {
+    if (!searchQuery.trim()) return true;
+    const q = searchQuery.toLowerCase();
+    return (
+      r.id.toLowerCase().includes(q) ||
+      r.materialType.toLowerCase().includes(q) ||
+      r.projectName.toLowerCase().includes(q) ||
+      r.purposePhase.toLowerCase().includes(q)
+    );
   });
 
-  const totalRfis = rfis.length;
-  const openCount = rfis.filter(r => r.status === 'OPEN' || r.status === 'UNDER_REVIEW').length;
-  const answeredCount = rfis.filter(r => r.status === 'ANSWERED' || r.status === 'CLOSED').length;
-  const criticalCount = rfis.filter(r => r.priority === 'CRITICAL' && (r.status === 'OPEN' || r.status === 'UNDER_REVIEW')).length;
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formSubject.trim() || !formQuestion.trim()) return;
-
-    setIsSubmitting(true);
-    try {
-      const newRfi: Partial<ProjectRFI> = {
-        rfiNumber: `RFI-${new Date().getFullYear()}-${String(rfis.length + 1).padStart(3, '0')}`,
-        projectName: formProject,
-        subject: formSubject.trim(),
-        question: formQuestion.trim(),
-        suggestedSolution: formSuggested.trim() || undefined,
-        drawingRef: formDrawingRef.trim() || 'General Architectural Plans',
-        priority: formPriority,
-        assignedTo: formAssignee,
-        submittedBy: userRole === 'ADMIN' ? 'Operations Director' : 'Site Project Engineer',
-        status: 'OPEN'
-      };
-
-      if (onSubmitRfi) {
-        await onSubmitRfi(newRfi);
-      }
-
-      setFormSubject('');
-      setFormQuestion('');
-      setFormSuggested('');
-      setFormDrawingRef('');
-      setShowSubmitModal(false);
-    } catch (err) {
-      console.error('Failed to submit RFI:', err);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleConfirmAnswer = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!answerRfiModal || !answerText.trim()) return;
-
-    setIsAnswering(true);
-    try {
-      if (onAnswerRfi) {
-        await onAnswerRfi(answerRfiModal.id, answerText.trim(), answerStatus);
-      }
-      setAnswerRfiModal(null);
-      setAnswerText('');
-    } catch (err) {
-      console.error('Failed to answer RFI:', err);
-    } finally {
-      setIsAnswering(false);
-    }
-  };
-
-  const handleExportCsv = () => {
-    const headers = [
-      'RFI Number', 'Subject', 'Project Site', 'Priority', 'Status',
-      'Submitted By', 'Assigned Architect/Engineer', 'Drawing Ref',
-      'Due Date', 'Technical Question', 'Suggested Solution', 'Official Answer'
-    ];
-    const rows = filteredRfis.map(r => [
-      r.rfiNumber,
-      r.subject,
-      r.projectName,
-      r.priority,
-      r.status,
-      r.submittedBy,
-      r.assignedTo || '',
-      r.drawingRef || '',
-      r.dueDate || '',
-      r.question,
-      r.suggestedSolution || '',
-      r.answer || ''
-    ]);
-    exportToCsv('CTVill_Engineering_RFIs_Register', headers, rows);
-  };
-
-  const handlePrint = () => {
-    const headers = [
-      'RFI #', 'Subject', 'Project', 'Priority', 'Status', 'Submitted By', 'Drawing Ref', 'Due Date'
-    ];
-    const rows = filteredRfis.map(r => [
-      r.rfiNumber,
-      r.subject,
-      r.projectName,
-      r.priority,
-      r.status,
-      r.submittedBy,
-      r.drawingRef || 'General',
-      r.dueDate || 'Standard'
-    ]);
-    printRegisterTable('Engineering Request For Information (RFI) Register', 'Architectural Clarifications, MEPFS Coordination & Site Queries', headers, rows);
-  };
-
   return (
-    <div className="space-y-5 max-w-full min-w-0">
-      {/* Header Banner */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="w-2 h-2 rounded-full bg-blue-400"></span>
-            <span className="text-[10px] font-mono text-blue-400 font-bold uppercase tracking-wider">
-              ENGINEERING COORDINATION & CLARIFICATION
-            </span>
+    <div className="space-y-5">
+      {toastBanner && (
+        <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs font-medium flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{toastBanner}</span>
           </div>
-          <h3 className="text-base font-bold text-white flex items-center gap-2">
-            <HelpCircle className="w-5 h-5 text-blue-400" />
-            Request for Information (RFI) Register
-          </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            Formal technical inquiries between site foremen, project engineers, and lead architects to resolve drawing ambiguities before construction.
-          </p>
+          <button onClick={() => setToastBanner(null)} className="text-xs underline cursor-pointer">Dismiss</button>
         </div>
+      )}
 
-        <button
-          onClick={() => setShowSubmitModal(true)}
-          className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs flex items-center gap-2 cursor-pointer transition-colors self-start sm:self-auto shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Raise New RFI</span>
-        </button>
-      </div>
-
-      {/* KPI Cards */}
+      {/* Top KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
-          <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
-            <span>TOTAL RFIS LOGGED</span>
-            <MessageSquare className="w-4 h-4 text-blue-400" />
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4">
+          <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase">
+            <span>Total Requisitions</span>
+            <ShoppingCart className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-white">{totalRfis}</div>
-          <span className="text-[10px] text-slate-400 block font-mono">Engineering Queries</span>
+          <div className="text-xl font-bold font-mono text-white mt-1">{requests.length} Requests</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">{materialCatalog.length} Catalog Material Types</div>
         </div>
 
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
-          <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
-            <span>OPEN / UNDER REVIEW</span>
+        <div
+          onClick={() => setActiveSubTab('approvals')}
+          className="bg-slate-900/80 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/40 rounded-xl p-4 cursor-pointer transition"
+        >
+          <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase">
+            <span>Approvals Inbox</span>
             <Clock className="w-4 h-4 text-amber-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-white">{openCount}</div>
-          <span className="text-[10px] text-slate-400 block font-mono">Awaiting Architect Response</span>
+          <div className="text-xl font-bold font-mono text-amber-400 mt-1">{pendingApprovals.length} Pending</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Awaiting PM / Head Engineer Sign-off</div>
         </div>
 
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
-          <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
-            <span>ANSWERED & RESOLVED</span>
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+        <div
+          onClick={() => setActiveSubTab('deliveries')}
+          className="bg-slate-900/80 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/40 rounded-xl p-4 cursor-pointer transition"
+        >
+          <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase">
+            <span>Active Site Deliveries</span>
+            <Truck className="w-4 h-4 text-emerald-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-white">{answeredCount}</div>
-          <span className="text-[10px] text-slate-400 block font-mono">Drawing Clarifications Closed</span>
+          <div className="text-xl font-bold font-mono text-emerald-400 mt-1">{approvedDeliveries.length} Orders</div>
+          <div className="text-[11px] text-slate-400 mt-0.5">
+            {approvedDeliveries.filter(d => d.deliveryStatus === 'Accepted').length} Accepted on Site
+          </div>
         </div>
 
-        <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
-          <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
-            <span>CRITICAL BLOCKERS</span>
-            <AlertTriangle className="w-4 h-4 text-rose-400" />
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4">
+          <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase">
+            <span>Estimated PO Value</span>
+            <Package className="w-4 h-4 text-cyan-400" />
           </div>
-          <div className="text-xl font-bold font-mono text-white">{criticalCount}</div>
-          <span className="text-[10px] text-slate-400 block font-mono">High-Priority Site Hold</span>
+          <div className="text-xl font-bold font-mono text-white mt-1">
+            ₱{requests.reduce((s, r) => s + r.estimatedCostPhp, 0).toLocaleString()}
+          </div>
+          <div className="text-[11px] text-slate-400 mt-0.5">Across active commercial sites</div>
         </div>
       </div>
 
-      {/* Filter Controls */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-3 flex flex-col sm:flex-row items-center justify-between gap-3 max-w-full shadow-xs">
-        <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap max-w-full">
-          <div className="flex items-center gap-1.5 flex-wrap max-w-full">
-            <Filter className="w-4 h-4 text-slate-500 shrink-0" />
-            <span className="text-xs font-mono text-slate-500 uppercase shrink-0">Status:</span>
-            {['ALL', 'OPEN', 'UNDER_REVIEW', 'ANSWERED', 'CLOSED'].map((st) => (
-              <button
-                key={st}
-                onClick={() => setStatusFilter(st)}
-                className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer shrink-0 ${statusFilter === st
-                    ? 'bg-amber-500 text-slate-950 font-black'
-                    : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-                  }`}
-              >
-                {st === 'UNDER_REVIEW' ? 'UNDER REVIEW' : st}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex items-center gap-1.5 flex-wrap max-w-full">
-            <span className="text-xs font-mono text-slate-500 uppercase shrink-0">Priority:</span>
-            {['ALL', 'CRITICAL', 'HIGH', 'MEDIUM', 'LOW'].map((pr) => (
-              <button
-                key={pr}
-                onClick={() => setPriorityFilter(pr)}
-                className={`px-2 py-0.5 rounded text-[11px] font-mono font-bold transition-all cursor-pointer shrink-0 ${priorityFilter === pr
-                    ? 'bg-amber-500 text-slate-950 font-black'
-                    : 'text-slate-500 hover:text-slate-300'
-                  }`}
-              >
-                {pr}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2 w-full sm:w-auto">
-          <div className="relative w-full sm:w-64">
-            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-500" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search RFI #, subject, sheet..."
-              className="w-full bg-slate-900 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-500/50"
-            />
-          </div>
-
+      {/* Sub-Navigation Bar */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-1 gap-1">
           <button
-            onClick={handleExportCsv}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-            title="Export filtered RFIs to CSV"
+            type="button"
+            onClick={() => setActiveSubTab('requests')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+              activeSubTab === 'requests'
+                ? 'bg-amber-500 text-slate-950 font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
           >
-            <Download className="w-3.5 h-3.5 text-amber-400" />
-            <span className="hidden md:inline">Export CSV</span>
+            <ShoppingCart className="w-3.5 h-3.5" />
+            <span>1. Purchase & Material Requests</span>
           </button>
-
           <button
-            onClick={handlePrint}
-            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
-            title="Print or Save PDF report"
+            type="button"
+            onClick={() => setActiveSubTab('approvals')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+              activeSubTab === 'approvals'
+                ? 'bg-emerald-500 text-slate-950 font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
           >
-            <Printer className="w-3.5 h-3.5 text-slate-300" />
-            <span className="hidden md:inline">Print / PDF</span>
+            <ClipboardCheck className="w-3.5 h-3.5" />
+            <span>2. Approvals Inbox ({pendingApprovals.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('deliveries')}
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+              activeSubTab === 'deliveries'
+                ? 'bg-cyan-500 text-slate-950 font-bold'
+                : 'text-slate-400 hover:text-white'
+            }`}
+          >
+            <Truck className="w-3.5 h-3.5" />
+            <span>3. Deliveries Tracker ({approvedDeliveries.length})</span>
           </button>
         </div>
-      </div>
 
-      {/* RFI Table */}
-      <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden shadow-xs max-w-full">
-        <div className="overflow-x-auto overscroll-x-contain">
-          <table className="w-full text-left text-xs text-slate-300">
-            <thead className="bg-slate-900/90 text-slate-400 font-mono text-[11px] uppercase border-b border-slate-800">
-              <tr>
-                <th className="py-3.5 px-4 whitespace-nowrap">RFI Number</th>
-                <th className="py-3.5 px-4 whitespace-nowrap">Subject & Query</th>
-                <th className="py-3.5 px-4 whitespace-nowrap">Drawing Reference</th>
-                <th className="py-3.5 px-4 whitespace-nowrap">Assigned Architect/Engr</th>
-                <th className="py-3.5 px-4 text-center whitespace-nowrap">Priority</th>
-                <th className="py-3.5 px-4 text-center whitespace-nowrap">Status</th>
-                <th className="py-3.5 px-4 text-right whitespace-nowrap">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800/60 font-sans">
-              {filteredRfis.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="p-0">
-                    <div className="sticky left-0 w-full py-12 text-center text-slate-500 flex flex-col items-center justify-center">
-                      <HelpCircle className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                      <p className="text-sm font-medium">No RFIs found</p>
-                      <p className="text-xs text-slate-600 mt-0.5">Click "Raise New RFI" to log an engineering query.</p>
-                    </div>
-                  </td>
-                </tr>
-              ) : (
-                filteredRfis.map((rfi) => {
-                  return (
-                    <tr key={rfi.id} className="hover:bg-slate-900/50 transition-colors">
-                      <td className="py-3.5 px-4 font-mono font-bold text-blue-400">
-                        {rfi.rfiNumber}
-                      </td>
-                      <td className="py-3.5 px-4">
-                        <div className="font-bold text-white max-w-xs sm:max-w-md truncate">{rfi.subject}</div>
-                        <div className="text-[11px] text-slate-400 truncate max-w-xs sm:max-w-md mt-0.5">
-                          {rfi.question}
-                        </div>
-                      </td>
-                      <td className="py-3.5 px-4 font-mono text-slate-300 text-[11px]">
-                        {rfi.drawingRef || 'General Plans'}
-                      </td>
-                      <td className="py-3.5 px-4 text-slate-300 font-medium">
-                        {rfi.assignedTo || 'Lead Architect'}
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <span
-                          className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold border ${rfi.priority === 'CRITICAL'
-                              ? 'bg-rose-950/80 text-rose-300 border-rose-800'
-                              : rfi.priority === 'HIGH'
-                                ? 'bg-amber-950/80 text-amber-300 border-amber-800'
-                                : 'bg-slate-800 text-slate-300 border-slate-700'
-                            }`}
-                        >
-                          {rfi.priority}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-center">
-                        <span
-                          className={`px-2.5 py-1 rounded-full text-[10px] font-mono font-bold border ${rfi.status === 'ANSWERED' || rfi.status === 'CLOSED'
-                              ? 'bg-emerald-950/80 text-emerald-400 border-emerald-800'
-                              : 'bg-amber-950/80 text-amber-400 border-amber-800 animate-pulse'
-                            }`}
-                        >
-                          {rfi.status}
-                        </span>
-                      </td>
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => setSelectedRfi(rfi)}
-                            className="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 text-slate-300 rounded-lg text-xs font-medium transition cursor-pointer border border-slate-800"
-                          >
-                            View
-                          </button>
-                          {rfi.status !== 'CLOSED' && (
-                            <button
-                              onClick={() => {
-                                setAnswerRfiModal(rfi);
-                                setAnswerText(rfi.answer || '');
-                              }}
-                              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1"
-                            >
-                              <Send className="w-3 h-3" />
-                              <span>{rfi.answer ? 'Edit Answer' : 'Answer'}</span>
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
+        <div className="relative w-full sm:w-64">
+          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Filter material, PR#, site..."
+            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+          />
         </div>
       </div>
 
-      {/* Raise RFI Modal */}
-      {showSubmitModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4 animate-scaleUp">
-            <div className="p-6 pb-4 border-b border-slate-800 flex items-center justify-between">
-              <h4 className="text-base font-bold text-white flex items-center gap-2">
-                <HelpCircle className="w-5 h-5 text-blue-400" />
-                Raise Request for Information (RFI)
-              </h4>
-              <button
-                onClick={() => setShowSubmitModal(false)}
-                className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSubmit} className="space-y-3.5 text-xs">
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">RFI Subject</label>
-                <input
-                  type="text"
-                  required
-                  value={formSubject}
-                  onChange={(e) => setFormSubject(e.target.value)}
-                  placeholder="e.g., Transformer Clearance vs Overhead Chilled Water Line Conflict"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-blue-500"
-                />
+      {/* ===================================================================== */}
+      {/* TAB 1: PURCHASE & MATERIAL REQUESTS                                   */}
+      {/* ===================================================================== */}
+      {activeSubTab === 'requests' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {/* Left: Submit New Material / Purchase Request Form */}
+          <div className="lg:col-span-5">
+            <form
+              onSubmit={handleCreatePurchaseRequest}
+              className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-4 sticky top-6"
+            >
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Plus className="w-4 h-4 text-amber-400" />
+                    Submit Material / Purchase Request
+                  </h3>
+                  <p className="text-[11px] text-slate-400 mt-0.5">
+                    Site Engineer requisition form routed to PM Approvals Inbox
+                  </p>
+                </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Project Site</label>
-                  <select
-                    value={formProject}
-                    onChange={(e) => setFormProject(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-blue-500"
-                  >
-                    {projects.map((p) => (
-                      <option key={p.id} value={p.name}>{p.name}</option>
-                    ))}
-                  </select>
-                </div>
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Project Site</label>
+                <select
+                  value={selectedProjectName}
+                  onChange={(e) => setSelectedProjectName(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                >
+                  {projects.map(p => (
+                    <option key={p.id} value={p.name}>{p.name}</option>
+                  ))}
+                </select>
+              </div>
 
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[10px] font-mono uppercase text-slate-400">Material / Request Type *</label>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddCatalogModal(prev => !prev)}
+                    className="text-[10px] font-mono font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>+ Add Material / Request Type</span>
+                  </button>
+                </div>
+                <select
+                  value={selectedMaterial}
+                  onChange={(e) => setSelectedMaterial(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                >
+                  {materialCatalog.map(item => (
+                    <option key={item} value={item}>{item}</option>
+                  ))}
+                </select>
+
+                {showAddCatalogModal && (
+                  <div className="mt-2 p-2.5 rounded-xl bg-slate-950 border border-amber-500/40 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={newCatalogItemName}
+                      onChange={(e) => setNewCatalogItemName(e.target.value)}
+                      placeholder="e.g. Ready-Mix Concrete 5,000 PSI or Scaffolding Set..."
+                      className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddMaterialToCatalog}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer shrink-0"
+                    >
+                      Add Item
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-2.5">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Drawing Reference</label>
+                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Quantity *</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={quantity}
+                    onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Unit</label>
                   <input
                     type="text"
-                    required
-                    value={formDrawingRef}
-                    onChange={(e) => setFormDrawingRef(e.target.value)}
-                    placeholder="e.g., Sheet MEPFS-201 Grid C-4"
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-blue-500"
+                    value={unit}
+                    onChange={(e) => setUnit(e.target.value)}
+                    placeholder="bags / pcs / cu.m"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Est. Cost (₱)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={estimatedCost}
+                    onChange={(e) => setEstimatedCost(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:border-amber-500 focus:outline-none"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Priority Urgency</label>
+                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Urgency Level</label>
                   <select
-                    value={formPriority}
-                    onChange={(e) => setFormPriority(e.target.value as any)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-blue-500"
+                    value={urgency}
+                    onChange={(e) => setUrgency(e.target.value as any)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
                   >
-                    <option value="CRITICAL">CRITICAL (Site Hold)</option>
-                    <option value="HIGH">HIGH (Work in 48h)</option>
-                    <option value="MEDIUM">MEDIUM (Upcoming Phase)</option>
-                    <option value="LOW">LOW (Informational)</option>
+                    <option value="NORMAL">Normal (Standard Lead Time)</option>
+                    <option value="URGENT">Urgent (Within 48 Hours)</option>
+                    <option value="CRITICAL">Critical Path Blocker</option>
                   </select>
                 </div>
-
                 <div>
-                  <label className="block text-slate-300 font-semibold mb-1">Assigned Architect / Lead</label>
-                  <select
-                    value={formAssignee}
-                    onChange={(e) => setFormAssignee(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-blue-500 font-mono text-xs cursor-pointer"
-                  >
-                    <option value="Ar. Jonathan Dela Cruz">Ar. Jonathan Dela Cruz (Principal Architect & Design Lead)</option>
-                    <option value="Principal Architect Marco Alcantara">Principal Architect Marco Alcantara</option>
-                    <option value="Engr. Ricardo Ramos">Engr. Ricardo Ramos (Senior Project Manager)</option>
-                    <option value="Engr. Carlos Mendoza">Engr. Carlos Mendoza (Civil & Structural Lead)</option>
-                  </select>
+                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Preferred Supplier</label>
+                  <input
+                    type="text"
+                    value={supplierName}
+                    onChange={(e) => setSupplierName(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                  />
                 </div>
               </div>
 
               <div>
-                <label className="block text-slate-300 font-semibold mb-1">Technical Question / Ambiguity</label>
-                <textarea
-                  required
-                  rows={3}
-                  value={formQuestion}
-                  onChange={(e) => setFormQuestion(e.target.value)}
-                  placeholder="Detail the exact dimension conflict, MEP collision, or specification doubt on site..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-blue-500 leading-relaxed"
-                ></textarea>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Site Team Suggested Solution (Optional)</label>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Construction Phase & Purpose</label>
                 <input
                   type="text"
-                  value={formSuggested}
-                  onChange={(e) => setFormSuggested(e.target.value)}
-                  placeholder="e.g., Reroute 4-inch chilled line along Grid D soffit"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2 text-white focus:outline-none focus:border-blue-500"
+                  value={purposePhase}
+                  onChange={(e) => setPurposePhase(e.target.value)}
+                  placeholder="e.g. Concreting Works — Footing Pouring"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
                 />
               </div>
 
-              <div className="pt-2 flex justify-end gap-2 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowSubmitModal(false)}
-                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl font-bold cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isSubmitting}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl cursor-pointer flex items-center gap-1.5 shadow-md"
-                >
-                  {isSubmitting ? 'Submitting...' : 'Dispatch RFI'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Answer RFI Modal */}
-      {answerRfiModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4">
-            <div className="p-6 pb-4 border-b border-slate-800 flex items-center justify-between">
-              <h4 className="text-base font-bold text-white flex items-center gap-2">
-                <Send className="w-5 h-5 text-emerald-400" />
-                Technical Resolution for {answerRfiModal.rfiNumber}
-              </h4>
               <button
-                onClick={() => setAnswerRfiModal(null)}
-                className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
+                type="submit"
+                className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer transition shadow-md shadow-amber-500/10"
               >
-                <X className="w-5 h-5" />
+                Submit Material Requisition
               </button>
-            </div>
-
-            <div className="bg-slate-950 p-3 rounded-xl border border-slate-800 space-y-1.5 text-xs">
-              <div className="font-bold text-white">{answerRfiModal.subject}</div>
-              <p className="text-slate-400 leading-relaxed">{answerRfiModal.question}</p>
-              {answerRfiModal.suggestedSolution && (
-                <div className="text-[11px] text-blue-400 pt-1">
-                  💡 Suggested by site: {answerRfiModal.suggestedSolution}
-                </div>
-              )}
-            </div>
-
-            <form onSubmit={handleConfirmAnswer} className="space-y-3 text-xs">
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Architect / Lead Engineer Direct Response</label>
-                <textarea
-                  required
-                  rows={4}
-                  value={answerText}
-                  onChange={(e) => setAnswerText(e.target.value)}
-                  placeholder="State the approved architectural/structural instruction, revised dimension, or authorized specification change..."
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl p-3 text-white focus:outline-none focus:border-emerald-500 leading-relaxed"
-                ></textarea>
-              </div>
-
-              <div>
-                <label className="block text-slate-300 font-semibold mb-1">Update Status</label>
-                <select
-                  value={answerStatus}
-                  onChange={(e) => setAnswerStatus(e.target.value as any)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-emerald-500"
-                >
-                  <option value="ANSWERED">ANSWERED (Ready for Field Implementation)</option>
-                  <option value="CLOSED">CLOSED (Formally Signed Off)</option>
-                  <option value="UNDER_REVIEW">UNDER_REVIEW (Requires Structural Calculation)</option>
-                </select>
-              </div>
-
-              <div className="pt-2 flex justify-end gap-2 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setAnswerRfiModal(null)}
-                  className="px-4 py-2 bg-slate-800 text-slate-300 rounded-xl font-bold cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={isAnswering}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl cursor-pointer"
-                >
-                  {isAnswering ? 'Saving...' : 'Publish Answer'}
-                </button>
-              </div>
             </form>
           </div>
-        </div>
-      )}
 
-      {/* Details Modal */}
-      {selectedRfi && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <div className="flex items-center gap-2">
-                <span className="font-mono text-blue-400 font-bold">{selectedRfi.rfiNumber}</span>
-                <span className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold ${selectedRfi.status === 'ANSWERED' || selectedRfi.status === 'CLOSED'
-                    ? 'bg-emerald-950 text-emerald-300'
-                    : 'bg-amber-950 text-amber-300'
-                  }`}>
-                  {selectedRfi.status}
-                </span>
-              </div>
-              <button onClick={() => setSelectedRfi(null)} className="text-slate-500 hover:text-white cursor-pointer">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="space-y-3 text-xs">
-              <div>
-                <span className="text-slate-500 block text-[11px]">Subject</span>
-                <strong className="text-white text-sm">{selectedRfi.subject}</strong>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800/80">
-                <div>
-                  <span className="text-slate-500 block text-[11px]">Drawing Reference</span>
-                  <span className="text-slate-200 font-mono">{selectedRfi.drawingRef}</span>
-                </div>
-                <div>
-                  <span className="text-slate-500 block text-[11px]">Assigned Engineer</span>
-                  <span className="text-slate-200 font-medium">{selectedRfi.assignedTo}</span>
-                </div>
-              </div>
-
-              <div>
-                <span className="text-slate-500 block text-[11px]">Question Details</span>
-                <p className="text-slate-300 bg-slate-950 p-3 rounded-xl border border-slate-800/80 leading-relaxed">
-                  {selectedRfi.question}
-                </p>
-              </div>
-
-              {selectedRfi.answer && (
-                <div>
-                  <span className="text-emerald-400 font-bold block text-[11px]">Architectural Clarification / Answer</span>
-                  <p className="text-emerald-200 bg-emerald-950/40 p-3 rounded-xl border border-emerald-800/60 leading-relaxed">
-                    {selectedRfi.answer}
+          {/* Right: Active Material Requisitions List */}
+          <div className="lg:col-span-7 space-y-3">
+            {filteredRequests.map(req => (
+              <div
+                key={req.id}
+                className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800 text-amber-400">
+                      {req.id}
+                    </span>
+                    <span className="text-xs font-semibold text-slate-300">{req.projectName}</span>
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
+                      req.urgency === 'CRITICAL'
+                        ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                        : req.urgency === 'URGENT'
+                        ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                        : 'bg-slate-800 text-slate-400'
+                    }`}>
+                      {req.urgency}
+                    </span>
+                  </div>
+                  <h4 className="text-sm font-bold text-white">
+                    {req.materialType} — <span className="text-amber-400 font-mono">{req.quantity} {req.unit}</span>
+                  </h4>
+                  <p className="text-xs text-slate-400">
+                    {req.purposePhase} • Est. <span className="font-mono text-white font-semibold">₱{req.estimatedCostPhp.toLocaleString()}</span>
                   </p>
+                  <div className="text-[11px] text-slate-500 font-mono">
+                    Requested by {req.requestedBy} on {req.dateRequested}
+                  </div>
                 </div>
-              )}
-            </div>
 
-            <div className="flex justify-end pt-2 border-t border-slate-800">
-              <button
-                onClick={() => setSelectedRfi(null)}
-                className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold cursor-pointer"
-              >
-                Close
-              </button>
+                <div className="flex flex-col sm:items-end gap-2 shrink-0">
+                  <span className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold border ${
+                    req.approvalStatus === 'APPROVED'
+                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                      : req.approvalStatus === 'DENIED'
+                      ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                      : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                  }`}>
+                    {req.approvalStatus}
+                  </span>
+                  {req.approvalStatus === 'PENDING' && (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleDecision(req.id, 'APPROVED')}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                      >
+                        <Check className="w-3 h-3" />
+                        <span>Approve</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDecision(req.id, 'DENIED')}
+                        className="px-2.5 py-1 rounded-lg bg-rose-950/90 hover:bg-rose-900 text-rose-300 border border-rose-800 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                        <span>Deny</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 2: APPROVALS INBOX (ONE-CLICK APPROVE / DENY FOR PM & HEAD ENGR)  */}
+      {/* ===================================================================== */}
+      {activeSubTab === 'approvals' && (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <ClipboardCheck className="w-4 h-4 text-emerald-400" />
+                Project Manager & Head Engineer Approvals Inbox
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                One-click approval or denial of site material and equipment purchase requisitions
+              </p>
             </div>
+            <span className="text-xs font-mono px-2.5 py-1 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 font-bold">
+              {pendingApprovals.length} Awaiting Decision
+            </span>
+          </div>
+
+          {pendingApprovals.length === 0 ? (
+            <div className="py-12 text-center border border-dashed border-slate-800 rounded-xl">
+              <CheckCircle2 className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
+              <div className="text-sm font-bold text-white">All Purchase & Material Requests Reviewed</div>
+              <p className="text-xs text-slate-400 mt-1">There are 0 pending requisitions in the Approvals Inbox.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pendingApprovals.map(req => (
+                <div
+                  key={req.id}
+                  className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-mono font-bold text-amber-400">{req.id}</span>
+                      <span className="text-xs font-semibold text-white">{req.projectName}</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                        {req.urgency}
+                      </span>
+                    </div>
+                    <div className="text-sm font-bold text-white">
+                      {req.materialType} — {req.quantity} {req.unit} (₱{req.estimatedCostPhp.toLocaleString()})
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      Phase: {req.purposePhase} • Supplier: {req.supplierName}
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-500">
+                      Submitted by {req.requestedBy} ({req.dateRequested})
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => handleDecision(req.id, 'APPROVED')}
+                      className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-500/10"
+                    >
+                      <Check className="w-4 h-4" />
+                      <span>Approve Order</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDecision(req.id, 'DENIED')}
+                      className="px-4 py-2 rounded-xl bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                      <span>Deny</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* TAB 3: DELIVERIES TRACKER (SCHEDULED / ACCEPTED / DELAYED)            */}
+      {/* ===================================================================== */}
+      {activeSubTab === 'deliveries' && (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-2xl overflow-hidden">
+          <div className="p-4 border-b border-slate-800 flex items-center justify-between bg-slate-950/60">
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <Truck className="w-4 h-4 text-cyan-400" />
+                Jobsite Material Deliveries Tracker
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Real-time receiving status for approved purchase orders visible to Site Engineers
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-950 text-slate-400 font-mono text-[11px] uppercase border-b border-slate-800">
+                  <th className="py-3 px-4">PO / PR #</th>
+                  <th className="py-3 px-4">Project Site</th>
+                  <th className="py-3 px-4">Material & Quantity</th>
+                  <th className="py-3 px-3">Supplier & ETA</th>
+                  <th className="py-3 px-3">Approved By</th>
+                  <th className="py-3 px-3">Delivery Status</th>
+                  <th className="py-3 px-4 text-right">Site Receiving Action</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/70">
+                {approvedDeliveries.map(del => (
+                  <tr key={del.id} className="hover:bg-slate-800/40">
+                    <td className="py-3 px-4 font-mono font-bold text-cyan-400">{del.id}</td>
+                    <td className="py-3 px-4 font-semibold text-white">{del.projectName}</td>
+                    <td className="py-3 px-4">
+                      <div className="font-bold text-white">{del.materialType}</div>
+                      <div className="text-[11px] font-mono text-amber-400">
+                        {del.quantity} {del.unit} • ₱{del.estimatedCostPhp.toLocaleString()}
+                      </div>
+                    </td>
+                    <td className="py-3 px-3">
+                      <div className="text-slate-200">{del.supplierName}</div>
+                      <div className="text-[10px] font-mono text-slate-400">ETA: {del.etaDate || 'Scheduled'}</div>
+                    </td>
+                    <td className="py-3 px-3 text-slate-300 font-mono text-[11px]">
+                      {del.approvedBy || 'Head Engineer'}
+                    </td>
+                    <td className="py-3 px-3">
+                      <span className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-bold border ${
+                        del.deliveryStatus === 'Accepted'
+                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          : del.deliveryStatus === 'Delayed'
+                          ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                          : 'bg-sky-500/15 text-sky-400 border-sky-500/30'
+                      }`}>
+                        {del.deliveryStatus || 'Scheduled'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      <div className="inline-flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateDeliveryStatus(del.id, 'Scheduled')}
+                          className={`px-2 py-1 rounded text-[10px] font-mono cursor-pointer border ${
+                            del.deliveryStatus === 'Scheduled'
+                              ? 'bg-sky-500 text-slate-950 font-bold border-sky-400'
+                              : 'bg-slate-800 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          Scheduled
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateDeliveryStatus(del.id, 'Accepted')}
+                          className={`px-2 py-1 rounded text-[10px] font-mono cursor-pointer border ${
+                            del.deliveryStatus === 'Accepted'
+                              ? 'bg-emerald-500 text-slate-950 font-bold border-emerald-400'
+                              : 'bg-slate-800 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          Accepted
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdateDeliveryStatus(del.id, 'Delayed')}
+                          className={`px-2 py-1 rounded text-[10px] font-mono cursor-pointer border ${
+                            del.deliveryStatus === 'Delayed'
+                              ? 'bg-rose-500 text-white font-bold border-rose-400'
+                              : 'bg-slate-800 text-slate-300 border-slate-700'
+                          }`}
+                        >
+                          Delayed
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

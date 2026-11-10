@@ -39,7 +39,7 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
         { id: 'dashboard', label: 'Executive Portfolio', icon: TrendingUp },
         { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
         { id: 'gantt', label: 'Master Gantt & Timeline', icon: BarChart3 },
-        { id: 'kanban', label: 'Field Execution Kanban', icon: CheckSquare },
+        { id: 'kanban', label: 'Progress & Activity Reports', icon: CheckSquare },
         { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
       ]
     },
@@ -48,7 +48,7 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       title: 'Field Operations',
       items: [
         { id: 'site-diary', label: 'Site Diary & Weather', icon: CloudSun },
-        { id: 'rfis', label: 'Engineering RFIs Register', icon: FileSpreadsheet, badgeKey: 'rfis' },
+        { id: 'rfis', label: 'Procurement, Approvals & Deliveries', icon: FileSpreadsheet, badgeKey: 'rfis' },
         { id: 'change-orders', label: 'Commercial Change Orders', icon: FileText, badgeKey: 'changeOrders' },
         { id: 'risks', label: 'Jobsite Safety & Risk Matrix', icon: ShieldAlert },
       ]
@@ -101,7 +101,7 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
         { id: 'dashboard', label: 'Site Command Center', icon: HardHat },
         { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
         { id: 'gantt', label: 'Site Gantt Schedule', icon: BarChart3 },
-        { id: 'kanban', label: 'Field Execution Kanban', icon: CheckSquare },
+        { id: 'kanban', label: 'Progress & Activity Reports', icon: CheckSquare },
         { id: 'schedule', label: 'Site Calendar & Visits', icon: CalendarDays },
       ]
     },
@@ -110,7 +110,7 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       title: 'Field Operations',
       items: [
         { id: 'site-diary', label: 'Site Diary & Weather', icon: CloudSun },
-        { id: 'rfis', label: 'Engineering RFIs Register', icon: FileSpreadsheet, badgeKey: 'rfis' },
+        { id: 'rfis', label: 'Procurement, Approvals & Deliveries', icon: FileSpreadsheet, badgeKey: 'rfis' },
         { id: 'change-orders', label: 'Site Change Orders', icon: FileText, badgeKey: 'changeOrders' },
         { id: 'risks', label: 'Jobsite Safety & Risk Matrix', icon: ShieldAlert },
       ]

@@ -21,8 +21,10 @@ export function generateReallocationRecommendations(
     return recommendations;
   }
 
-  // Filter out office/executive personnel who are never mobilized as site construction trade labor
-  const fieldContractors = contractors.filter(c => !isOfficeOrExecutive(c));
+  // Filter out office/executive personnel and any artisan flagged as isLockedByAdmin (Human Override Protection Lock)
+  const fieldContractors = contractors.filter(
+    c => !isOfficeOrExecutive(c) && !c.isLockedByAdmin && !(c.manualOverrideNote && c.manualOverrideNote.trim().length > 0)
+  );
   if (fieldContractors.length === 0) return recommendations;
 
   // 1. Identify donor projects: >= 90% progress or in turnover/completed stages

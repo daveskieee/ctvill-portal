@@ -228,6 +228,9 @@ export interface Contractor {
   shiftHours?: string;
   certifications?: string[];
   dispatchNotes?: { id: string; sender: string; text: string; timestamp: string; isSelf?: boolean }[];
+  isLockedByAdmin?: boolean;
+  manualOverrideNote?: string;
+  allocationSource?: 'Manual' | 'AI';
 }
 
 export function isOfficeOrExecutive(c: Partial<Contractor>): boolean {
@@ -401,6 +404,9 @@ export interface LaborAllocation {
   workScope: string; // e.g., "Heavy Grading & Subbase Compaction"
   status: 'ACTIVE' | 'ON_HOLD' | 'COMPLETED';
   notes?: string;
+  isLockedByAdmin?: boolean;
+  manualOverrideNote?: string;
+  allocationSource?: 'Manual' | 'AI';
   updatedAt?: string;
 }
 

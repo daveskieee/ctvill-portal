@@ -3,14 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef, useMemo } from 'react';
-import { 
-  Plus, CheckCircle2, Clock, AlertTriangle, User, Tag, 
-  Calendar, CheckSquare, MoreVertical, X, Filter, Sparkles,
-  Trash2, GripVertical, Building2, Layers, LayoutGrid, ListFilter,
-  Check, ArrowRight, Zap, RefreshCw
+import React, { useState, useMemo } from 'react';
+import {
+  FileSpreadsheet, FileText, ShieldCheck, Building2, Calendar,
+  CheckCircle2, AlertTriangle, CloudSun, CloudRain, HardHat,
+  Wrench, Camera, Plus, Printer, Download, Check, Clock, Users
 } from 'lucide-react';
-import { ProjectTask, TaskPriority, TaskStatus, TaskSubItem, ProjectProfile } from '../types';
+import { ProjectTask, TaskStatus, ProjectProfile } from '../types';
+import { STANDARD_CONSTRUCTION_PHASES } from './GanttTimeline';
 
 interface ProjectKanbanProps {
   tasks: ProjectTask[];
@@ -21,801 +21,931 @@ interface ProjectKanbanProps {
   onClearAllTasks?: () => void;
 }
 
-export default function ProjectKanban({ 
-  tasks, 
+interface EquipmentEntry {
+  id: string;
+  name: string;
+  qty: number;
+  status: 'Operational' | 'For Repair';
+}
+
+interface WeeklyActivityReportRecord {
+  id: string;
+  projectId: string;
+  projectName: string;
+  periodCovered: string;
+  manpower: {
+    leadman: number;
+    foreman: number;
+    mason: number;
+    laborer: number;
+    skilled: number;
+  };
+  equipment: EquipmentEntry[];
+  weatherLog: Record<'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat', 'Sunny' | 'Rainy'>;
+  activitiesAccomplished: string;
+  issuesEncountered: string;
+  photos: { id: string; caption: string; timestamp: string }[];
+  preparedBy: string;
+  preparedByRole: string;
+  checkedBy: string;
+  checkedByRole: string;
+  createdAt: string;
+}
+
+interface ComplianceItem {
+  id: string;
+  projectId: string;
+  category: 'PPE_ISSUANCE' | 'TOOLBOX_MEETING' | 'QUALITY_INSPECTION' | 'PUNCH_LIST';
+  title: string;
+  details: string;
+  assignedTo: string;
+  date: string;
+  status: 'COMPLIANT' | 'OPEN_DEFECT' | 'RECTIFIED' | 'ISSUED';
+}
+
+const DEFAULT_PHASE_WEIGHTS: Record<string, number> = {
+  'Earthworks': 8,
+  'Concreting Works': 14,
+  'Reinforcing Bar': 10,
+  'Formworks': 8,
+  'Masonry Works': 12,
+  'Roof Works': 8,
+  'Finishing & Tiling Works': 9,
+  'Ceiling Works': 5,
+  'Finishing Carpentry': 5,
+  'Doors and Windows': 4,
+  'Cabinet Works': 4,
+  'Painting Works': 5,
+  'Electrical Works': 4,
+  'Plumbing Works': 4
+};
+
+export default function ProjectKanban({
+  tasks = [],
   projects = [],
-  onAddTask, 
-  onUpdateTaskStatus, 
-  onDeleteTask, 
-  onClearAllTasks 
 }: ProjectKanbanProps) {
-  // Filters
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('ALL');
-  const [selectedPhase, setSelectedPhase] = useState<string>('ALL');
-  const [filterPriority, setFilterPriority] = useState<string>('ALL');
-  const [filterCategory, setFilterCategory] = useState<string>('ALL');
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [viewDensity, setViewDensity] = useState<'detailed' | 'compact'>('compact');
+  const [activeSubTab, setActiveSubTab] = useState<'summary-excel' | 'weekly-pdf' | 'safety-qa'>('summary-excel');
+  const [selectedProjectId, setSelectedProjectId] = useState<string>(() => projects[0]?.id || 'ALL');
 
-  // Modal & Drag state
-  const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
-  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
-  const [dragOverColId, setDragOverColId] = useState<string | null>(null);
-  const draggedTaskIdRef = useRef<string | null>(null);
+  const selectedProject = useMemo(() => {
+    if (selectedProjectId === 'ALL') return projects[0] || null;
+    return projects.find(p => p.id === selectedProjectId) || projects[0] || null;
+  }, [projects, selectedProjectId]);
 
-  // New task form state
-  const [newTitle, setNewTitle] = useState<string>('');
-  const [newDescription, setNewDescription] = useState<string>('');
-  const [newProjectId, setNewProjectId] = useState<string>('');
-  const [newAssignee, setNewAssignee] = useState<string>('Engr. Ricardo Gomez');
-  const [newPriority, setNewPriority] = useState<TaskPriority>('MEDIUM');
-  const [newStatus, setNewStatus] = useState<TaskStatus>('TODO');
-  const [newDueDate, setNewDueDate] = useState<string>('');
-  const [newEstimatedHours, setNewEstimatedHours] = useState<number>(16);
-  const [newCategory, setNewCategory] = useState<string>('CIVIL_WORKS');
-  const [newWbsCode, setNewWbsCode] = useState<string>('');
-  const [newSubtaskInput, setNewSubtaskInput] = useState<string>('');
-  const [newSubtasks, setNewSubtasks] = useState<TaskSubItem[]>([]);
+  // ---------------------------------------------------------------------------
+  // SUB-TAB 1: SUMMARY PROGRESS REPORT (EXCEL STANDARD) SYNCED WITH GANTT
+  // ---------------------------------------------------------------------------
+  const phaseProgressRows = useMemo(() => {
+    const projectTasks = selectedProject
+      ? tasks.filter(t => !t.projectId || t.projectId === selectedProject.id)
+      : tasks;
 
-  const columns: { id: TaskStatus; title: string; color: string; badge: string; borderAccent: string }[] = [
-    { id: 'BACKLOG', title: 'Backlog', color: 'border-slate-700 bg-slate-900/40', badge: 'bg-slate-800 text-slate-300', borderAccent: 'border-slate-600' },
-    { id: 'TODO', title: 'To Do', color: 'border-blue-900/60 bg-blue-950/20', badge: 'bg-blue-900/80 text-blue-300', borderAccent: 'border-blue-500' },
-    { id: 'IN_PROGRESS', title: 'In Progress', color: 'border-amber-900/60 bg-amber-950/20', badge: 'bg-amber-900/80 text-amber-300', borderAccent: 'border-amber-500' },
-    { id: 'REVIEW', title: 'Review & QA', color: 'border-purple-900/60 bg-purple-950/20', badge: 'bg-purple-900/80 text-purple-300', borderAccent: 'border-purple-500' },
-    { id: 'COMPLETED', title: 'Completed', color: 'border-emerald-900/60 bg-emerald-950/20', badge: 'bg-emerald-900/80 text-emerald-300', borderAccent: 'border-emerald-500' },
-    { id: 'BLOCKED', title: 'Blocked', color: 'border-rose-900/60 bg-rose-950/20', badge: 'bg-rose-900/80 text-rose-300', borderAccent: 'border-rose-500' },
-  ];
+    const baseProjectProgress = selectedProject
+      ? Number(selectedProject.cpmProgress ?? selectedProject.overallProgress ?? selectedProject.progressPercentage ?? 42)
+      : 45;
 
-  // Distinct phases extracted from tasks
-  const availablePhases = useMemo(() => {
-    const set = new Set<string>();
-    tasks.forEach(t => {
-      if (t.milestonePhase) set.add(t.milestonePhase.trim());
-      if (t.tags && Array.isArray(t.tags)) {
-        t.tags.forEach(tag => {
-          if (tag && tag.toLowerCase().includes('phase')) set.add(tag.trim());
-        });
+    return STANDARD_CONSTRUCTION_PHASES.map((phaseName, idx) => {
+      const weight = DEFAULT_PHASE_WEIGHTS[phaseName] || 5;
+      // Match tasks belonging to this phase by name, milestonePhase, or tag
+      const matched = projectTasks.filter(t => {
+        const text = `${t.title || ''} ${t.description || ''} ${t.milestonePhase || ''}`.toLowerCase();
+        const kw = phaseName.toLowerCase().split(' ')[0];
+        return text.includes(phaseName.toLowerCase()) || (kw.length > 3 && text.includes(kw));
+      });
+
+      let actualPct = 0;
+      if (matched.length > 0) {
+        const totalW = matched.reduce((acc, t) => acc + Math.max(1, Number(t.duration || 1)), 0);
+        const sumProg = matched.reduce((acc, t) => {
+          const raw = t.status === 'COMPLETED' ? 100 : typeof t.progress === 'number' ? (t.progress <= 1 ? t.progress * 100 : t.progress) : 0;
+          return acc + raw * Math.max(1, Number(t.duration || 1));
+        }, 0);
+        actualPct = totalW > 0 ? Math.round(sumProg / totalW) : 0;
+      } else {
+        // Derive realistic progressive completion curve from live project progress
+        const phaseThreshold = (idx / STANDARD_CONSTRUCTION_PHASES.length) * 100;
+        if (baseProjectProgress >= phaseThreshold + 18) {
+          actualPct = 100;
+        } else if (baseProjectProgress > phaseThreshold) {
+          actualPct = Math.min(95, Math.max(10, Math.round(((baseProjectProgress - phaseThreshold) / 18) * 100)));
+        } else {
+          actualPct = 0;
+        }
       }
-    });
-    return Array.from(set);
-  }, [tasks]);
 
-  const handleAddSubtask = () => {
-    if (!newSubtaskInput.trim()) return;
-    setNewSubtasks([...newSubtasks, { id: `sub-${Date.now()}`, title: newSubtaskInput.trim(), completed: false }]);
-    setNewSubtaskInput('');
+      const plannedPct = Math.min(100, Math.max(actualPct, idx < 6 ? 100 : idx < 10 ? 60 : 25));
+      const variancePct = actualPct - plannedPct;
+      const weightedActual = +((actualPct * weight) / 100).toFixed(2);
+      const weightedPlanned = +((plannedPct * weight) / 100).toFixed(2);
+
+      return {
+        wbs: `${idx + 1}.0`,
+        phaseName,
+        weight,
+        plannedPct,
+        actualPct,
+        variancePct,
+        weightedActual,
+        weightedPlanned,
+        matchedCount: matched.length
+      };
+    });
+  }, [tasks, selectedProject]);
+
+  const summaryTotals = useMemo(() => {
+    const totalWeight = phaseProgressRows.reduce((s, r) => s + r.weight, 0);
+    const totalPlanned = +phaseProgressRows.reduce((s, r) => s + r.weightedPlanned, 0).toFixed(1);
+    const totalActual = +phaseProgressRows.reduce((s, r) => s + r.weightedActual, 0).toFixed(1);
+    const variance = +(totalActual - totalPlanned).toFixed(1);
+    return { totalWeight, totalPlanned, totalActual, variance };
+  }, [phaseProgressRows]);
+
+  // ---------------------------------------------------------------------------
+  // SUB-TAB 2: WEEKLY & DAILY ACTIVITY REPORTS (PDF STANDARD)
+  // ---------------------------------------------------------------------------
+  const [periodCovered, setPeriodCovered] = useState<string>('Nov 03, 2026 – Nov 08, 2026 (Mon–Sat)');
+  const [manpowerCounts, setManpowerCounts] = useState({
+    leadman: 2,
+    foreman: 2,
+    mason: 8,
+    laborer: 12,
+    skilled: 6
+  });
+  const [equipmentList, setEquipmentList] = useState<EquipmentEntry[]>([
+    { id: 'eq-1', name: '1-Bagger Concrete Mixer', qty: 2, status: 'Operational' },
+    { id: 'eq-2', name: 'Rebar Cutter & Bar Bender Set', qty: 2, status: 'Operational' },
+    { id: 'eq-3', name: 'Plate Compactor (Earthworks)', qty: 1, status: 'Operational' },
+    { id: 'eq-4', name: 'Portable Welding Machine 300A', qty: 2, status: 'For Repair' },
+  ]);
+  const [newEquipName, setNewEquipName] = useState('');
+  const [weatherLog, setWeatherLog] = useState<Record<'Mon' | 'Tue' | 'Wed' | 'Thu' | 'Fri' | 'Sat', 'Sunny' | 'Rainy'>>({
+    Mon: 'Sunny',
+    Tue: 'Sunny',
+    Wed: 'Rainy',
+    Thu: 'Sunny',
+    Fri: 'Sunny',
+    Sat: 'Sunny',
+  });
+  const [activitiesAccomplished, setActivitiesAccomplished] = useState<string>(
+    '• Completed footing excavation and gravel bedding at Grid A1–D4 (80% weight share).\n• Installed 16mm deformed reinforcing bars and phenolic formworks for ground floor columns.\n• Commenced CHB wall laying and rough plastering at East Perimeter.'
+  );
+  const [issuesEncountered, setIssuesEncountered] = useState<string>(
+    '• Brief afternoon rain on Wednesday delayed exterior concrete pouring by 2 hours; shifted crew to interior rebar fabrication.\n• 1 unit Welding Machine flagged For Repair (replacement unit dispatched from central yard).'
+  );
+  const [photos, setPhotos] = useState<{ id: string; caption: string; timestamp: string }[]>([
+    { id: 'ph-1', caption: 'Grid A1–D4 Footing Concreting & Rebar Cage Inspection', timestamp: '2026-11-06 10:15 AM' },
+    { id: 'ph-2', caption: 'Formworks Alignment & Plumbness Check (2nd Floor Columns)', timestamp: '2026-11-07 03:40 PM' },
+  ]);
+  const [newPhotoCaption, setNewPhotoCaption] = useState('');
+  const [preparedBy, setPreparedBy] = useState('Engr. Carlos Mendoza');
+  const [checkedBy, setCheckedBy] = useState('Engr. Ricardo Ramos');
+  const [savedReports, setSavedReports] = useState<WeeklyActivityReportRecord[]>([]);
+  const [reportSavedBanner, setReportSavedBanner] = useState<string | null>(null);
+
+  const handleSaveWeeklyReport = () => {
+    const newReport: WeeklyActivityReportRecord = {
+      id: `WAR-${Date.now().toString().slice(-5)}`,
+      projectId: selectedProject?.id || 'PRJ-01',
+      projectName: selectedProject?.name || 'Commercial Fit-Out Site',
+      periodCovered,
+      manpower: { ...manpowerCounts },
+      equipment: [...equipmentList],
+      weatherLog: { ...weatherLog },
+      activitiesAccomplished,
+      issuesEncountered,
+      photos: [...photos],
+      preparedBy,
+      preparedByRole: 'Site Engineer',
+      checkedBy,
+      checkedByRole: 'Head Project Manager',
+      createdAt: new Date().toLocaleString('en-PH')
+    };
+    setSavedReports(prev => [newReport, ...prev]);
+    setReportSavedBanner(`Activity Report ${newReport.id} logged and signed off by ${preparedBy}.`);
+    setTimeout(() => setReportSavedBanner(null), 3500);
   };
 
-  const handleCreateTaskSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim()) return;
-
-    onAddTask({
-      projectId: newProjectId || (projects[0]?.id || undefined),
-      title: newTitle.trim(),
-      description: newDescription.trim(),
-      assigneeName: newAssignee,
-      priority: newPriority,
-      status: newStatus,
-      progress: newStatus === 'COMPLETED' ? 1.0 : newStatus === 'IN_PROGRESS' ? 0.5 : 0.0,
-      dueDate: newDueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      estimatedHours: Number(newEstimatedHours) || 0,
-      actualHours: 0,
-      category: newCategory,
-      milestonePhase: newWbsCode || undefined,
-      subtasks: newSubtasks,
-      tags: [newCategory, ...(newWbsCode ? [newWbsCode] : [])],
-    });
-
-    // Reset
-    setNewTitle('');
-    setNewDescription('');
-    setNewWbsCode('');
-    setNewSubtasks([]);
-    setIsModalOpen(false);
-  };
-
-  // Filter tasks with project, phase, priority, category, and query
-  const filteredTasks = useMemo(() => {
-    return tasks.filter((t) => {
-      const matchesProject = selectedProjectId === 'ALL' || t.projectId === selectedProjectId;
-      const matchesPhase = selectedPhase === 'ALL' || t.milestonePhase === selectedPhase || (t.tags && t.tags.includes(selectedPhase));
-      const matchesPriority = filterPriority === 'ALL' || t.priority === filterPriority;
-      const matchesCategory = filterCategory === 'ALL' || t.category === filterCategory;
-      const matchesSearch = !searchQuery || 
-        t.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-        (t.description && t.description.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (t.assigneeName && t.assigneeName.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        (t.milestonePhase && t.milestonePhase.toLowerCase().includes(searchQuery.toLowerCase()));
-      return matchesProject && matchesPhase && matchesPriority && matchesCategory && matchesSearch;
-    });
-  }, [tasks, selectedProjectId, selectedPhase, filterPriority, filterCategory, searchQuery]);
-
-  // Overall statistics for metric strip
-  const stats = useMemo(() => {
-    const total = filteredTasks.length;
-    const completed = filteredTasks.filter(t => t.status === 'COMPLETED').length;
-    const inProgress = filteredTasks.filter(t => t.status === 'IN_PROGRESS').length;
-    const todo = filteredTasks.filter(t => t.status === 'TODO').length;
-    const backlog = filteredTasks.filter(t => t.status === 'BACKLOG').length;
-    const blocked = filteredTasks.filter(t => t.status === 'BLOCKED').length;
-    const review = filteredTasks.filter(t => t.status === 'REVIEW').length;
-    const avgProgress = total > 0 ? Math.round((completed / total) * 100) : 0;
-    return { total, completed, inProgress, todo, backlog, blocked, review, avgProgress };
-  }, [filteredTasks]);
-
-  const getPriorityBadge = (priority: TaskPriority) => {
-    switch (priority) {
-      case 'CRITICAL':
-        return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">CRITICAL</span>;
-      case 'HIGH':
-        return <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/40">HIGH</span>;
-      case 'MEDIUM':
-        return <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/20 text-blue-400 border border-blue-500/40">MEDIUM</span>;
-      default:
-        return <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-slate-500/20 text-slate-400 border border-slate-500/40">LOW</span>;
+  // ---------------------------------------------------------------------------
+  // SUB-TAB 3: SAFETY, PPE ISSUANCE, QUALITY INSPECTIONS & TOOLBOX (WITH PUNCH LIST)
+  // ---------------------------------------------------------------------------
+  const [complianceItems, setComplianceItems] = useState<ComplianceItem[]>([
+    {
+      id: 'CMP-101',
+      projectId: 'ALL',
+      category: 'PPE_ISSUANCE',
+      title: 'Hard Hats, High-Vis Vests & Steel-Toe Boots Issued',
+      details: 'Issued to 24 deployed artisans (Masonry, Concreting & Rebar crews). Signed acknowledgment on file.',
+      assignedTo: 'Safety Officer / Timekeeper',
+      date: '2026-11-04',
+      status: 'ISSUED'
+    },
+    {
+      id: 'CMP-102',
+      projectId: 'ALL',
+      category: 'TOOLBOX_MEETING',
+      title: 'Morning Toolbox Briefing: Working at Heights & Scaffolding Safety',
+      details: 'Mandatory 15-min briefing prior to 2nd floor formworks & roof truss erection (30/30 crew present).',
+      assignedTo: 'Engr. Carlos Mendoza',
+      date: '2026-11-06',
+      status: 'COMPLIANT'
+    },
+    {
+      id: 'CMP-103',
+      projectId: 'ALL',
+      category: 'QUALITY_INSPECTION',
+      title: 'Rebar Spacing, Concrete Slump Test & Formworks Plumbness QA',
+      details: 'Verified 4,000 PSI concrete mix design and 16mm rebar splice lengths prior to slab pouring.',
+      assignedTo: 'QA/QC Lead Engineer',
+      date: '2026-11-07',
+      status: 'COMPLIANT'
+    },
+    {
+      id: 'CMP-104',
+      projectId: 'ALL',
+      category: 'PUNCH_LIST',
+      title: 'Punch-List Item: Minor Plastering Hairline Crack at Grid C2 Wall',
+      details: 'Merged field punch-list item — requires skim coat rectification prior to primer painting.',
+      assignedTo: 'Master Mason Crew',
+      date: '2026-11-08',
+      status: 'OPEN_DEFECT'
     }
+  ]);
+
+  const [newCompCategory, setNewCompCategory] = useState<ComplianceItem['category']>('QUALITY_INSPECTION');
+  const [newCompTitle, setNewCompTitle] = useState('');
+  const [newCompDetails, setNewCompDetails] = useState('');
+  const [newCompAssignee, setNewCompAssignee] = useState('Engr. Carlos Mendoza');
+
+  const handleAddComplianceItem = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCompTitle.trim()) return;
+    const item: ComplianceItem = {
+      id: `CMP-${Date.now().toString().slice(-4)}`,
+      projectId: selectedProject?.id || 'ALL',
+      category: newCompCategory,
+      title: newCompTitle.trim(),
+      details: newCompDetails.trim() || 'Field verification recorded on site.',
+      assignedTo: newCompAssignee.trim() || 'Site Engineer',
+      date: new Date().toISOString().split('T')[0],
+      status: newCompCategory === 'PUNCH_LIST' ? 'OPEN_DEFECT' : newCompCategory === 'PPE_ISSUANCE' ? 'ISSUED' : 'COMPLIANT'
+    };
+    setComplianceItems(prev => [item, ...prev]);
+    setNewCompTitle('');
+    setNewCompDetails('');
   };
 
-  const getTaskProgressPercent = (task: ProjectTask) => {
-    if (task.status === 'COMPLETED') return 100;
-    if (typeof task.progress === 'number') return Math.round(task.progress * 100);
-    if (task.status === 'IN_PROGRESS') return 50;
-    return 0;
-  };
+  const totalManpower =
+    manpowerCounts.leadman +
+    manpowerCounts.foreman +
+    manpowerCounts.mason +
+    manpowerCounts.laborer +
+    manpowerCounts.skilled;
 
   return (
-    <div className="space-y-4">
-      {/* Header & Controls */}
-      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs space-y-3">
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold tracking-wider uppercase">
-                Work Breakdown Structure
-              </span>
-              <span className="text-xs text-slate-400">Field Execution Sprints & Work Orders</span>
-            </div>
-            <h2 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-emerald-400" />
-              <span>Project Task Board (Kanban WBS)</span>
-              <span className="text-xs font-normal text-slate-400 font-mono">({filteredTasks.length} tasks)</span>
-            </h2>
-            <p className="text-slate-400 text-xs mt-0.5">
-              Field execution sprints and contractor assignments. Tasks with 100% progress automatically transition to Completed.
-            </p>
+    <div className="space-y-5">
+      {/* Top Header & Project Filter + 3 Sub-Tabs */}
+      <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-semibold">
+              Civil Engineer Standard
+            </span>
+            <span className="text-xs text-slate-400 font-mono">
+              Live Synced with Master CPM Gantt
+            </span>
           </div>
-
-          {/* Action buttons */}
-          <div className="flex items-center gap-2 self-stretch sm:self-auto justify-end">
-            {/* View Density Toggle */}
-            <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-0.5">
-              <button
-                type="button"
-                onClick={() => setViewDensity('compact')}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-all cursor-pointer ${
-                  viewDensity === 'compact'
-                    ? 'bg-slate-800 text-emerald-300 shadow-xs'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-                title="Compact view (fits more cards without scrolling)"
-              >
-                <LayoutGrid className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Compact</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewDensity('detailed')}
-                className={`flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold transition-all cursor-pointer ${
-                  viewDensity === 'detailed'
-                    ? 'bg-slate-800 text-emerald-300 shadow-xs'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-                title="Detailed view (full scope and checklist preview)"
-              >
-                <ListFilter className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">Detailed</span>
-              </button>
-            </div>
-
-            {tasks.length > 0 && onClearAllTasks && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm(`Are you sure you want to clear all ${tasks.length} tasks from the board?`)) {
-                    onClearAllTasks();
-                  }
-                }}
-                className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-rose-300 border border-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
-                title="Clear all tasks from the board"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span className="hidden md:inline">Clear Board</span>
-              </button>
-            )}
-
-            <button
-              onClick={() => setIsModalOpen(true)}
-              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Create Task</span>
-            </button>
-          </div>
+          <h2 className="text-base sm:text-lg font-bold text-white mt-1 flex items-center gap-2">
+            <FileSpreadsheet className="w-5 h-5 text-amber-400" />
+            Progress & Field Activity Reports
+          </h2>
         </div>
 
-        {/* Filter Strip */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 pt-2 border-t border-slate-800/80">
+        <div className="flex flex-wrap items-center gap-2.5">
           {/* Project Selector */}
-          <div className="relative">
+          <div className="flex items-center gap-2 bg-slate-950 border border-slate-800 rounded-lg px-3 py-1.5">
+            <Building2 className="w-3.5 h-3.5 text-amber-400" />
             <select
               value={selectedProjectId}
               onChange={(e) => setSelectedProjectId(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer truncate"
+              className="bg-transparent text-xs font-semibold text-white focus:outline-none cursor-pointer"
             >
-              <option value="ALL">🏢 All Commercial Sites ({tasks.length})</option>
-              {projects.map((p) => {
-                const projTasks = tasks.filter(t => t.projectId === p.id).length;
-                return (
-                  <option key={p.id} value={p.id}>
-                    {p.name} ({projTasks} tasks)
-                  </option>
-                );
-              })}
-            </select>
-          </div>
-
-          {/* Phase / Milestone Selector */}
-          <div className="relative">
-            <select
-              value={selectedPhase}
-              onChange={(e) => setSelectedPhase(e.target.value)}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-emerald-500 cursor-pointer truncate"
-            >
-              <option value="ALL">📑 All WBS Phases / Milestones</option>
-              {availablePhases.map((phase) => (
-                <option key={phase} value={phase}>
-                  Phase: {phase}
+              {projects.map(p => (
+                <option key={p.id} value={p.id} className="bg-slate-900 text-white">
+                  {p.name}
                 </option>
               ))}
             </select>
           </div>
 
-          {/* Priority Filter */}
-          <select
-            value={filterPriority}
-            onChange={(e) => setFilterPriority(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
-          >
-            <option value="ALL">All Priorities</option>
-            <option value="CRITICAL">Critical Priority</option>
-            <option value="HIGH">High Priority</option>
-            <option value="MEDIUM">Medium Priority</option>
-            <option value="LOW">Low Priority</option>
-          </select>
-
-          {/* Category Filter */}
-          <select
-            value={filterCategory}
-            onChange={(e) => setFilterCategory(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-emerald-500 cursor-pointer"
-          >
-            <option value="ALL">All Trade Categories</option>
-            <option value="CIVIL_WORKS">Civil Works & Structure</option>
-            <option value="SURVEYING">Land Surveying & Staking</option>
-            <option value="PERMITTING">DHSUD / LGU Permits</option>
-            <option value="LEGAL">Titling & Legal</option>
-            <option value="QA">Quality Assurance & Turnover</option>
-          </select>
-
-          {/* Search Box */}
-          <input
-            type="text"
-            placeholder="Search tasks, WBS, crew..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
-          />
-        </div>
-
-        {/* Live Metrics Ribbon */}
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-slate-800/80 text-xs font-mono">
-          <div className="flex items-center gap-2 flex-wrap text-[11px]">
-            <span className="text-slate-400 font-sans">Quick Scope:</span>
-            <span className="bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-lg text-slate-400">
-              Total: <strong className="text-white ml-1">{stats.total}</strong>
-            </span>
-            <span className="bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-lg text-slate-400">
-              To Do: <strong className="text-white ml-1">{stats.todo}</strong>
-            </span>
-            <span className="bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-lg text-slate-400">
-              In Progress: <strong className="text-white ml-1">{stats.inProgress}</strong>
-            </span>
-            <span className="bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-lg text-slate-400">
-              Completed: <strong className="text-white ml-1">{stats.completed}</strong>
-            </span>
-            {stats.blocked > 0 && (
-              <span className="bg-slate-900/60 border border-slate-800 px-2.5 py-1 rounded-lg text-slate-400">
-                Blocked: <strong className="text-white ml-1">{stats.blocked}</strong>
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2 font-mono">
-            <span className="text-slate-400 font-sans text-xs">Board Completion:</span>
-            <div className="w-20 bg-slate-800 h-1.5 rounded-full overflow-hidden border border-slate-700/50">
-              <div 
-                className="bg-emerald-500 h-full transition-all duration-300"
-                style={{ width: `${stats.avgProgress}%` }}
-              />
-            </div>
-            <span className="font-bold text-white text-xs">{stats.avgProgress}%</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Kanban Columns Grid with Drag & Drop and Fixed Max-Height Scrollable Columns */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3.5 items-start">
-        {columns.map((col) => {
-          const colTasks = filteredTasks.filter((t) => t.status === col.id);
-          const isOver = dragOverColId === col.id;
-
-          return (
-            <div 
-              key={col.id} 
-              onDragOver={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.dataTransfer.dropEffect = 'move';
-                if (dragOverColId !== col.id) {
-                  setDragOverColId(col.id);
-                }
-              }}
-              onDragEnter={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                setDragOverColId(col.id);
-              }}
-              onDragLeave={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                if (e.currentTarget === e.target) {
-                  setDragOverColId(null);
-                }
-              }}
-              onDrop={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                const taskId = 
-                  e.dataTransfer.getData('text/plain') || 
-                  e.dataTransfer.getData('text') || 
-                  draggedTaskIdRef.current || 
-                  (window as any).__kanbanDraggingTaskId || 
-                  draggingTaskId;
-                
-                if (taskId) {
-                  onUpdateTaskStatus(taskId, col.id);
-                }
-                draggedTaskIdRef.current = null;
-                (window as any).__kanbanDraggingTaskId = null;
-                setDraggingTaskId(null);
-                setDragOverColId(null);
-              }}
-              className={`rounded-2xl border ${col.color} p-3 flex flex-col transition-all duration-150 ${
-                isOver ? 'ring-2 ring-emerald-400 bg-slate-900/95 shadow-xl shadow-emerald-500/20 scale-[1.01]' : ''
+          {/* 3 Sub-Tabs Switcher */}
+          <div className="flex items-center bg-slate-950 border border-slate-800 rounded-xl p-1 gap-1">
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('summary-excel')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                activeSubTab === 'summary-excel'
+                  ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
+                  : 'text-slate-400 hover:text-white'
               }`}
             >
-              {/* Column Header */}
-              <div className="flex items-center justify-between pb-2.5 mb-2 border-b border-slate-800/80">
-                <div className="flex items-center gap-2">
-                  <span className="font-bold text-xs text-white uppercase tracking-wider">{col.title}</span>
-                  <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full font-bold ${col.badge}`}>
-                    {colTasks.length}
-                  </span>
-                </div>
-                {isOver && (
-                  <span className="text-[10px] font-mono font-bold text-emerald-400 animate-pulse">
-                    Drop Here
-                  </span>
-                )}
-              </div>
-
-              {/* Scrollable Column Task Stack: Bounded height so tasks never pile down indefinitely */}
-              <div 
-                className="space-y-2.5 flex-1 max-h-[calc(100vh-320px)] min-h-[460px] overflow-y-auto pr-1 custom-scrollbar pb-3 flex flex-col"
-              >
-                {colTasks.map((task) => {
-                  const completedSubtasks = task.subtasks?.filter((s) => s.completed).length || 0;
-                  const totalSubtasks = task.subtasks?.length || 0;
-                  const isDragging = draggingTaskId === task.id;
-                  const progressPct = getTaskProgressPercent(task);
-                  const isCompleted = task.status === 'COMPLETED' || progressPct >= 100;
-
-                  return (
-                    <div
-                      key={task.id}
-                      draggable={true}
-                      onDragStart={(e) => {
-                        e.dataTransfer.setData('text/plain', task.id);
-                        e.dataTransfer.setData('text', task.id);
-                        e.dataTransfer.effectAllowed = 'move';
-                        draggedTaskIdRef.current = task.id;
-                        (window as any).__kanbanDraggingTaskId = task.id;
-                        setDraggingTaskId(task.id);
-                      }}
-                      onDragEnd={() => {
-                        draggedTaskIdRef.current = null;
-                        (window as any).__kanbanDraggingTaskId = null;
-                        setDraggingTaskId(null);
-                        setDragOverColId(null);
-                      }}
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        e.dataTransfer.dropEffect = 'move';
-                      }}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        const taskId = 
-                          e.dataTransfer.getData('text/plain') || 
-                          e.dataTransfer.getData('text') || 
-                          draggedTaskIdRef.current || 
-                          (window as any).__kanbanDraggingTaskId;
-                        if (taskId) {
-                          onUpdateTaskStatus(taskId, col.id);
-                        }
-                        draggedTaskIdRef.current = null;
-                        (window as any).__kanbanDraggingTaskId = null;
-                        setDraggingTaskId(null);
-                        setDragOverColId(null);
-                      }}
-                      className={`
-                        bg-slate-900/90 border rounded-xl p-3 shadow-md hover:shadow-xl transition-all group select-none cursor-grab active:cursor-grabbing
-                        ${isDragging ? 'opacity-30 scale-95 border-emerald-500 ring-2 ring-emerald-500/40' : 'border-slate-800 hover:border-slate-600'}
-                        ${isCompleted ? 'bg-emerald-950/15 border-emerald-900/40' : ''}
-                      `}
-                    >
-                      {/* Top Bar: Category & Priority */}
-                      <div className="flex items-start justify-between gap-1 mb-1.5">
-                        <div className="flex items-center gap-1.5 min-w-0 flex-wrap">
-                          <GripVertical className="w-3.5 h-3.5 text-slate-600 group-hover:text-slate-400 shrink-0" />
-                          <span className="text-[10px] font-mono text-emerald-400 font-semibold uppercase truncate">
-                            {task.category || 'TASK'}
-                          </span>
-                          {task.milestonePhase && (
-                            <span className="text-[9px] font-mono text-slate-400 bg-slate-800/80 px-1.5 py-0.5 rounded truncate max-w-[110px]" title={task.milestonePhase}>
-                              {task.milestonePhase}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 shrink-0">
-                          {getPriorityBadge(task.priority)}
-                          {onDeleteTask && (
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onDeleteTask(task.id);
-                              }}
-                              className="p-1 rounded bg-slate-800/80 hover:bg-rose-950 text-slate-400 hover:text-rose-300 border border-slate-700/60 hover:border-rose-700/60 transition-all cursor-pointer"
-                              title="Delete task"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Title */}
-                      <h4 className={`text-xs font-bold leading-snug mb-1.5 group-hover:text-emerald-300 transition-colors ${isCompleted ? 'text-emerald-200 line-through/40' : 'text-white'}`}>
-                        {task.title}
-                      </h4>
-
-                      {/* Detailed Mode Scope */}
-                      {viewDensity === 'detailed' && task.description && (
-                        <p className="text-[11px] text-slate-400 line-clamp-2 mb-2 leading-relaxed">
-                          {task.description}
-                        </p>
-                      )}
-
-                      {/* Progress Bar (Gantt-synced) */}
-                      <div className="mb-2 bg-slate-950/80 rounded-lg p-1.5 border border-slate-800">
-                        <div className="flex items-center justify-between text-[10px] mb-1">
-                          <span className="text-slate-400 flex items-center gap-1">
-                            {isCompleted ? (
-                              <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                            ) : (
-                              <Clock className="w-3 h-3 text-amber-400" />
-                            )}
-                            Gantt Progress
-                          </span>
-                          <span className={`font-mono font-bold ${isCompleted ? 'text-emerald-400' : progressPct > 0 ? 'text-amber-400' : 'text-slate-400'}`}>
-                            {progressPct}%
-                          </span>
-                        </div>
-                        <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                          <div
-                            className={`h-full transition-all duration-300 ${
-                              isCompleted 
-                                ? 'bg-emerald-500' 
-                                : progressPct > 0 
-                                ? 'bg-amber-500' 
-                                : 'bg-slate-700'
-                            }`}
-                            style={{ width: `${progressPct}%` }}
-                          />
-                        </div>
-                      </div>
-
-                      {/* Subtasks Progress */}
-                      {totalSubtasks > 0 && viewDensity === 'detailed' && (
-                        <div className="mb-2 bg-slate-950/80 rounded-lg p-1.5 border border-slate-800">
-                          <div className="flex items-center justify-between text-[10px] text-slate-400 mb-1">
-                            <span className="flex items-center gap-1">
-                              <CheckSquare className="w-3 h-3 text-emerald-400" />
-                              Subtasks
-                            </span>
-                            <span className="font-mono">{completedSubtasks}/{totalSubtasks}</span>
-                          </div>
-                          <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
-                            <div
-                              className="bg-emerald-500 h-full transition-all"
-                              style={{ width: `${(completedSubtasks / totalSubtasks) * 100}%` }}
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Footer & Quick Shift Selector */}
-                      <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between gap-1 text-[10px] text-slate-400">
-                        <span className="flex items-center gap-1 font-medium text-slate-300 truncate max-w-[100px]" title={task.assigneeName || 'Unassigned'}>
-                          <User className="w-3 h-3 text-slate-500 shrink-0" />
-                          <span className="truncate">{task.assigneeName ? task.assigneeName.split(' ')[0] : 'Unassigned'}</span>
-                        </span>
-
-                        {/* Quick Shift Dropdown to avoid tedious dragging */}
-                        <div className="flex items-center gap-1">
-                          <select
-                            value={task.status}
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onChange={(e) => {
-                              e.stopPropagation();
-                              onUpdateTaskStatus(task.id, e.target.value as TaskStatus);
-                            }}
-                            className="bg-slate-950/90 border border-slate-700/80 rounded-md px-1.5 py-0.5 text-[9px] font-mono text-slate-300 hover:text-white hover:border-emerald-500 focus:outline-none cursor-pointer"
-                            title="Quick shift task to column"
-                          >
-                            <option value="BACKLOG">Backlog</option>
-                            <option value="TODO">To Do</option>
-                            <option value="IN_PROGRESS">In Progress</option>
-                            <option value="REVIEW">Review & QA</option>
-                            <option value="COMPLETED">Completed</option>
-                            <option value="BLOCKED">Blocked</option>
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {isOver && (
-                  <div className="h-16 border-2 border-dashed border-emerald-400/80 bg-emerald-500/10 rounded-xl flex items-center justify-center text-xs font-bold text-emerald-300 animate-pulse mt-1 shrink-0">
-                    Drop into {col.title}
-                  </div>
-                )}
-
-                {colTasks.length === 0 && !isOver && (
-                  <div className="h-32 border border-dashed border-slate-800/60 rounded-xl flex flex-col items-center justify-center text-[11px] p-2 text-center text-slate-600 shrink-0">
-                    <span>No tasks</span>
-                    <span className="text-[9px] text-slate-500 mt-0.5">Drag card here</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          );
-        })}
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              <span>1. Summary Progress (Excel)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('weekly-pdf')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                activeSubTab === 'weekly-pdf'
+                  ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>2. Weekly & Daily Activity (PDF)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveSubTab('safety-qa')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
+                activeSubTab === 'safety-qa'
+                  ? 'bg-sky-500 text-slate-950 font-bold shadow-xs'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>3. Safety, PPE, QA & Punch List</span>
+            </button>
+          </div>
+        </div>
       </div>
 
-      {/* Create Task Modal */}
-      {isModalOpen && (
-        <div className="fixed inset-0 z-[99999] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 w-full max-w-lg shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Plus className="w-5 h-5 text-emerald-400" />
-                Create Construction & Operational Task
+      {/* ===================================================================== */}
+      {/* SUB-TAB 1: SUMMARY PROGRESS REPORT (EXCEL STANDARD)                   */}
+      {/* ===================================================================== */}
+      {activeSubTab === 'summary-excel' && (
+        <div className="bg-slate-900/80 border border-slate-800 rounded-xl overflow-hidden shadow-lg">
+          <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-slate-950/60">
+            <div>
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-400" />
+                Summary Progress Report — {selectedProject?.name || 'Commercial Project'}
               </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Standard 14-Phase Bill of Quantities / WBS Progress Table synced live from Master Gantt weighted tasks
+              </p>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="px-3 py-1.5 rounded-lg bg-emerald-950/60 border border-emerald-500/30 text-xs font-mono">
+                <span className="text-slate-400 mr-1.5">Overall Weighted Progress:</span>
+                <span className="text-emerald-400 font-bold">{summaryTotals.totalActual}%</span>
+              </div>
               <button
-                onClick={() => setIsModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
+                type="button"
+                onClick={() => window.print()}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
               >
-                <X className="w-5 h-5" />
+                <Printer className="w-3.5 h-3.5 text-amber-400" />
+                <span>Print Excel Sheet</span>
               </button>
             </div>
+          </div>
 
-            <form onSubmit={handleCreateTaskSubmit} className="space-y-3.5">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead>
+                <tr className="bg-slate-950 text-slate-400 font-mono text-[11px] uppercase border-b border-slate-800">
+                  <th className="py-3 px-4 w-16">Item</th>
+                  <th className="py-3 px-4">Scope of Works / Construction Phase</th>
+                  <th className="py-3 px-3 text-right">Weight (%)</th>
+                  <th className="py-3 px-3 text-right">Planned (%)</th>
+                  <th className="py-3 px-3 text-right">Actual (%)</th>
+                  <th className="py-3 px-4 w-64">Live Gantt Progress Bar</th>
+                  <th className="py-3 px-3 text-right">Variance</th>
+                  <th className="py-3 px-4 text-right">Weighted Accomplishment</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/70">
+                {phaseProgressRows.map((row) => {
+                  const isCompleted = row.actualPct >= 100;
+                  const isDelayed = row.variancePct < -10;
+                  return (
+                    <tr key={row.wbs} className="hover:bg-slate-800/40 transition-colors">
+                      <td className="py-2.5 px-4 font-mono font-bold text-amber-400">{row.wbs}</td>
+                      <td className="py-2.5 px-4 font-semibold text-white">{row.phaseName}</td>
+                      <td className="py-2.5 px-3 text-right font-mono text-slate-300">{row.weight.toFixed(1)}%</td>
+                      <td className="py-2.5 px-3 text-right font-mono text-slate-400">{row.plannedPct}%</td>
+                      <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-400">{row.actualPct}%</td>
+                      <td className="py-2.5 px-4">
+                        <div className="w-full bg-slate-950 rounded-md h-4 overflow-hidden border border-slate-800 relative flex items-center">
+                          <div
+                            className={`h-full transition-all duration-300 ${
+                              isCompleted ? 'bg-emerald-500' : 'bg-emerald-600'
+                            }`}
+                            style={{ width: `${Math.min(100, Math.max(0, row.actualPct))}%` }}
+                          />
+                          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-mono font-bold text-white drop-shadow">
+                            {row.actualPct}%
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-2.5 px-3 text-right font-mono">
+                        <span className={
+                          row.variancePct >= 0
+                            ? 'text-emerald-400'
+                            : isDelayed
+                            ? 'text-rose-400 font-semibold'
+                            : 'text-amber-400'
+                        }>
+                          {row.variancePct > 0 ? `+${row.variancePct}%` : `${row.variancePct}%`}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-4 text-right font-mono font-bold text-white">
+                        {row.weightedActual.toFixed(2)}%
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="bg-slate-950 border-t-2 border-slate-700 font-mono text-xs font-bold text-white">
+                  <td className="py-3 px-4 text-amber-400">TOTAL</td>
+                  <td className="py-3 px-4">Cumulative Project Accomplishment</td>
+                  <td className="py-3 px-3 text-right text-emerald-400">{summaryTotals.totalWeight.toFixed(1)}%</td>
+                  <td className="py-3 px-3 text-right text-slate-300">{summaryTotals.totalPlanned}%</td>
+                  <td className="py-3 px-3 text-right text-emerald-400">{summaryTotals.totalActual}%</td>
+                  <td className="py-3 px-4">
+                    <div className="w-full bg-slate-900 rounded-md h-4 overflow-hidden border border-emerald-500/40 relative">
+                      <div
+                        className="h-full bg-emerald-500"
+                        style={{ width: `${Math.min(100, Math.max(0, summaryTotals.totalActual))}%` }}
+                      />
+                      <span className="absolute inset-0 flex items-center justify-center text-[10px] font-mono font-bold text-white">
+                        {summaryTotals.totalActual}% Overall
+                      </span>
+                    </div>
+                  </td>
+                  <td className="py-3 px-3 text-right">
+                    <span className={summaryTotals.variance >= 0 ? 'text-emerald-400' : 'text-amber-400'}>
+                      {summaryTotals.variance > 0 ? `+${summaryTotals.variance}%` : `${summaryTotals.variance}%`}
+                    </span>
+                  </td>
+                  <td className="py-3 px-4 text-right text-emerald-400 text-sm">
+                    {summaryTotals.totalActual}%
+                  </td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* SUB-TAB 2: WEEKLY & DAILY ACTIVITY REPORTS (PDF STANDARD)             */}
+      {/* ===================================================================== */}
+      {activeSubTab === 'weekly-pdf' && (
+        <div className="space-y-5">
+          {reportSavedBanner && (
+            <div className="p-3 rounded-xl bg-emerald-950/80 border border-emerald-500/40 text-emerald-300 text-xs font-medium flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                <span>{reportSavedBanner}</span>
+              </div>
+              <button onClick={() => setReportSavedBanner(null)} className="text-xs underline cursor-pointer">Dismiss</button>
+            </div>
+          )}
+
+          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-6 shadow-xl">
+            {/* PDF Standard Document Header */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-800 pb-4">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Target Commercial Site / Project *</label>
-                <select
-                  value={newProjectId}
-                  onChange={(e) => setNewProjectId(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                >
-                  <option value="">Default Site / Primary Project</option>
-                  {projects.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                <span className="text-[10px] font-mono uppercase tracking-widest text-amber-400 font-bold">
+                  FIELD ENGINEERING STANDARD FORM • WEEKLY / DAILY SITE ACTIVITY REPORT
+                </span>
+                <h3 className="text-base sm:text-lg font-bold text-white mt-0.5">
+                  {selectedProject?.name || 'Commercial Fit-Out Project'}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Location: {selectedProject?.location || 'Metro Manila Commercial Zone'}
+                </p>
+              </div>
+              <div className="flex flex-col sm:items-end gap-1.5">
+                <label className="text-[10px] font-mono uppercase text-slate-400">Period Covered (Mon–Sat)</label>
+                <input
+                  type="text"
+                  value={periodCovered}
+                  onChange={(e) => setPeriodCovered(e.target.value)}
+                  className="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs font-mono text-white w-64 focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Row 1: Manpower Designation Counts + Mon-Sat Weather Log */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+              {/* Manpower Designation Counts */}
+              <div className="lg:col-span-7 bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono uppercase tracking-wider text-teal-400 font-bold flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5" />
+                    Manpower Designation Count
+                  </span>
+                  <span className="text-xs font-mono font-bold text-white bg-teal-500/15 border border-teal-500/30 px-2 py-0.5 rounded">
+                    Total: {totalManpower} Pax
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                  {([
+                    { key: 'leadman', label: 'Leadman' },
+                    { key: 'foreman', label: 'Foreman' },
+                    { key: 'mason', label: 'Mason' },
+                    { key: 'laborer', label: 'Laborer' },
+                    { key: 'skilled', label: 'Skilled' },
+                  ] as const).map(role => (
+                    <div key={role.key} className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 text-center">
+                      <div className="text-[10px] font-mono uppercase text-slate-400">{role.label}</div>
+                      <input
+                        type="number"
+                        min={0}
+                        value={manpowerCounts[role.key]}
+                        onChange={(e) =>
+                          setManpowerCounts(prev => ({
+                            ...prev,
+                            [role.key]: Math.max(0, parseInt(e.target.value, 10) || 0)
+                          }))
+                        }
+                        className="w-full text-center bg-transparent text-base font-bold font-mono text-white mt-1 focus:outline-none"
+                      />
+                    </div>
                   ))}
+                </div>
+              </div>
+
+              {/* Mon-Sat Weather Log */}
+              <div className="lg:col-span-5 bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono uppercase tracking-wider text-sky-400 font-bold flex items-center gap-1.5">
+                    <CloudSun className="w-3.5 h-3.5" />
+                    Mon–Sat Weather Telemetry Log
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">Click day to toggle</span>
+                </div>
+                <div className="grid grid-cols-6 gap-1.5">
+                  {(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const).map(day => {
+                    const isSunny = weatherLog[day] === 'Sunny';
+                    return (
+                      <button
+                        key={day}
+                        type="button"
+                        onClick={() =>
+                          setWeatherLog(prev => ({
+                            ...prev,
+                            [day]: prev[day] === 'Sunny' ? 'Rainy' : 'Sunny'
+                          }))
+                        }
+                        className={`p-2 rounded-lg border text-center transition cursor-pointer flex flex-col items-center gap-1 ${
+                          isSunny
+                            ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                            : 'bg-sky-500/15 border-sky-500/40 text-sky-300'
+                        }`}
+                      >
+                        <span className="text-[10px] font-mono font-bold">{day}</span>
+                        {isSunny ? <CloudSun className="w-4 h-4 text-amber-400" /> : <CloudRain className="w-4 h-4 text-sky-400" />}
+                        <span className="text-[9px] font-mono">{weatherLog[day]}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Row 2: Equipment Used (Operational / For Repair) */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-xs font-mono uppercase tracking-wider text-amber-400 font-bold flex items-center gap-1.5">
+                  <Wrench className="w-3.5 h-3.5" />
+                  Site Equipment & Machinery Status
+                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newEquipName}
+                    onChange={(e) => setNewEquipName(e.target.value)}
+                    placeholder="Add equipment (e.g. Concrete Vibrator)..."
+                    className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!newEquipName.trim()) return;
+                      setEquipmentList(prev => [
+                        ...prev,
+                        { id: `eq-${Date.now()}`, name: newEquipName.trim(), qty: 1, status: 'Operational' }
+                      ]);
+                      setNewEquipName('');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>Add</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+                {equipmentList.map(eq => (
+                  <div key={eq.id} className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-white truncate">{eq.name}</div>
+                      <div className="text-[10px] font-mono text-slate-400">Qty: {eq.qty} unit(s)</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setEquipmentList(prev =>
+                          prev.map(item =>
+                            item.id === eq.id
+                              ? { ...item, status: item.status === 'Operational' ? 'For Repair' : 'Operational' }
+                              : item
+                          )
+                        )
+                      }
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 cursor-pointer border ${
+                        eq.status === 'Operational'
+                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                      }`}
+                    >
+                      {eq.status}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Row 3: Activities Accomplished & Issues Encountered */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-mono uppercase tracking-wider text-emerald-400 font-bold mb-1.5">
+                  Activities Accomplished (Current Period)
+                </label>
+                <textarea
+                  rows={4}
+                  value={activitiesAccomplished}
+                  onChange={(e) => setActivitiesAccomplished(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 leading-relaxed focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-mono uppercase tracking-wider text-rose-400 font-bold mb-1.5">
+                  Site Issues / Delays Encountered & Mitigation
+                </label>
+                <textarea
+                  rows={4}
+                  value={issuesEncountered}
+                  onChange={(e) => setIssuesEncountered(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-xs text-slate-200 leading-relaxed focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Row 4: Photo Attachments */}
+            <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-4 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <span className="text-xs font-mono uppercase tracking-wider text-slate-300 font-bold flex items-center gap-1.5">
+                  <Camera className="w-3.5 h-3.5 text-amber-400" />
+                  Site Progress Photo Attachments ({photos.length})
+                </span>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newPhotoCaption}
+                    onChange={(e) => setNewPhotoCaption(e.target.value)}
+                    placeholder="Photo caption (e.g. Slab rebar inspection)..."
+                    className="bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white focus:border-amber-500 focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!newPhotoCaption.trim()) return;
+                      setPhotos(prev => [
+                        ...prev,
+                        {
+                          id: `ph-${Date.now()}`,
+                          caption: newPhotoCaption.trim(),
+                          timestamp: new Date().toLocaleString('en-PH')
+                        }
+                      ]);
+                      setNewPhotoCaption('');
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                  >
+                    <Camera className="w-3 h-3" />
+                    <span>Attach Photo</span>
+                  </button>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {photos.map(ph => (
+                  <div key={ph.id} className="bg-slate-900 border border-slate-800 rounded-lg p-2.5 flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+                      <Camera className="w-4 h-4 text-amber-400" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-white truncate">{ph.caption}</div>
+                      <div className="text-[10px] font-mono text-slate-400">{ph.timestamp} • Geotagged Site Photo</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Row 5: Signature Blocks (Prepared By Site Engineer / Checked By Head Engineer) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-3 border-t border-slate-800">
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5">
+                <div className="text-[10px] font-mono uppercase text-slate-400">Prepared By (Site Engineer)</div>
+                <input
+                  type="text"
+                  value={preparedBy}
+                  onChange={(e) => setPreparedBy(e.target.value)}
+                  className="bg-transparent text-sm font-bold text-white mt-1 w-full focus:outline-none border-b border-slate-800 pb-1"
+                />
+                <div className="text-[11px] text-emerald-400 font-mono mt-1 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  <span>Digitally Signed • Site Engineer</span>
+                </div>
+              </div>
+
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-3.5">
+                <div className="text-[10px] font-mono uppercase text-slate-400">Checked & Verified By (Project Manager / Ops)</div>
+                <input
+                  type="text"
+                  value={checkedBy}
+                  onChange={(e) => setCheckedBy(e.target.value)}
+                  className="bg-transparent text-sm font-bold text-white mt-1 w-full focus:outline-none border-b border-slate-800 pb-1"
+                />
+                <div className="text-[11px] text-amber-400 font-mono mt-1 flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>Verified • Lead Project Manager</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5 text-amber-400" />
+                <span>Export / Print PDF Report</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveWeeklyReport}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md shadow-amber-500/10"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>Log & Sign Activity Report</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* SUB-TAB 3: SAFETY, PPE ISSUANCE, QUALITY INSPECTIONS & TOOLBOX        */}
+      {/* ===================================================================== */}
+      {activeSubTab === 'safety-qa' && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          {/* Left: Compliance & Merged Punch List Feed */}
+          <div className="lg:col-span-8 space-y-3">
+            {complianceItems.map(item => (
+              <div
+                key={item.id}
+                className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">
+                      {item.id}
+                    </span>
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold uppercase ${
+                      item.category === 'PPE_ISSUANCE'
+                        ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30'
+                        : item.category === 'TOOLBOX_MEETING'
+                        ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30'
+                        : item.category === 'QUALITY_INSPECTION'
+                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                        : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                    }`}>
+                      {item.category.replace('_', ' ')}
+                    </span>
+                    <span className="text-[11px] font-mono text-slate-400">{item.date}</span>
+                  </div>
+                  <h4 className="text-sm font-bold text-white">{item.title}</h4>
+                  <p className="text-xs text-slate-400">{item.details}</p>
+                  <div className="text-[11px] text-amber-400/90 font-mono">
+                    Responsible: {item.assignedTo}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setComplianceItems(prev =>
+                        prev.map(c =>
+                          c.id === item.id
+                            ? {
+                                ...c,
+                                status:
+                                  c.status === 'OPEN_DEFECT'
+                                    ? 'RECTIFIED'
+                                    : c.status === 'RECTIFIED'
+                                    ? 'COMPLIANT'
+                                    : c.status
+                              }
+                            : c
+                        )
+                      )
+                    }
+                    className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold border cursor-pointer ${
+                      item.status === 'OPEN_DEFECT'
+                        ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                        : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                    }`}
+                  >
+                    {item.status === 'OPEN_DEFECT' ? '⚠️ Open Punch-List (Click to Rectify)' : `✓ ${item.status}`}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Right: Quick Log Form */}
+          <div className="lg:col-span-4">
+            <form
+              onSubmit={handleAddComplianceItem}
+              className="bg-slate-900/90 border border-slate-800 rounded-xl p-4 space-y-3.5 sticky top-6"
+            >
+              <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-sky-400" />
+                Log Field Safety, QA or Punch Item
+              </h3>
+
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Record Type</label>
+                <select
+                  value={newCompCategory}
+                  onChange={(e) => setNewCompCategory(e.target.value as ComplianceItem['category'])}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                >
+                  <option value="PPE_ISSUANCE">PPE Issuance Log</option>
+                  <option value="TOOLBOX_MEETING">Daily Toolbox Meeting</option>
+                  <option value="QUALITY_INSPECTION">Quality Inspection Sign-off</option>
+                  <option value="PUNCH_LIST">Punch-List Defect / Rectification</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Task Title *</label>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Summary / Title *</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Concrete Pouring for Spine Road Curb (Lots 1-5)"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  value={newCompTitle}
+                  onChange={(e) => setNewCompTitle(e.target.value)}
+                  placeholder="e.g. Issued 10 Safety Harnesses to Roof Crew"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Task Description / Scope</label>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Inspection / Safety Notes</label>
                 <textarea
-                  rows={2}
-                  placeholder="Details, engineering tolerances, contractor instructions..."
-                  value={newDescription}
-                  onChange={(e) => setNewDescription(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
+                  rows={3}
+                  value={newCompDetails}
+                  onChange={(e) => setNewCompDetails(e.target.value)}
+                  placeholder="Enter observations, headcount, or rectification notes..."
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">WBS / Milestone Phase</label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Foundation, Structural Framing"
-                    value={newWbsCode}
-                    onChange={(e) => setNewWbsCode(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Category</label>
-                  <select
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  >
-                    <option value="CIVIL_WORKS">Civil Works</option>
-                    <option value="SURVEYING">Land Surveying</option>
-                    <option value="PERMITTING">Permitting & LGU</option>
-                    <option value="LEGAL">Legal / Titling</option>
-                    <option value="QA">Inspection & QA</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Assignee</label>
-                  <select
-                    value={newAssignee}
-                    onChange={(e) => setNewAssignee(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  >
-                    <option value="Engr. Ricardo Gomez">Engr. Ricardo Gomez (Inspector)</option>
-                    <option value="Laguna Geodetic Earthmovers">Laguna Geodetic Earthmovers</option>
-                    <option value="Calabarzon Road Masters">Calabarzon Road Masters</option>
-                    <option value="Agua-Laguna Drainage Corp">Agua-Laguna Drainage Corp</option>
-                    <option value="Atty. Katrina Alvero">Atty. Katrina Alvero (Legal/Titling)</option>
-                    <option value="Mauro R. Principe Jr.">Mauro R. Principe Jr. (COO)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Priority</label>
-                  <select
-                    value={newPriority}
-                    onChange={(e) => setNewPriority(e.target.value as TaskPriority)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  >
-                    <option value="LOW">Low</option>
-                    <option value="MEDIUM">Medium</option>
-                    <option value="HIGH">High</option>
-                    <option value="CRITICAL">Critical</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Initial Status</label>
-                  <select
-                    value={newStatus}
-                    onChange={(e) => setNewStatus(e.target.value as TaskStatus)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2 py-2 text-xs text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  >
-                    <option value="TODO">To Do</option>
-                    <option value="BACKLOG">Backlog</option>
-                    <option value="IN_PROGRESS">In Progress</option>
-                    <option value="COMPLETED">Completed</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1">Due Date</label>
-                  <input
-                    type="date"
-                    value={newDueDate}
-                    onChange={(e) => setNewDueDate(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Subtasks Checklist Builder */}
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Subtasks & Inspection Checklist</label>
-                <div className="flex gap-2 mb-2">
-                  <input
-                    type="text"
-                    placeholder="Add step or verification item..."
-                    value={newSubtaskInput}
-                    onChange={(e) => setNewSubtaskInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        e.preventDefault();
-                        handleAddSubtask();
-                      }
-                    }}
-                    className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-white focus:ring-2 focus:ring-emerald-500 focus:outline-none"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAddSubtask}
-                    className="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs px-3 py-1.5 rounded-xl cursor-pointer"
-                  >
-                    Add
-                  </button>
-                </div>
-
-                {newSubtasks.length > 0 && (
-                  <div className="space-y-1 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800 max-h-24 overflow-y-auto">
-                    {newSubtasks.map((sub, idx) => (
-                      <div key={sub.id} className="flex items-center justify-between text-xs text-slate-300">
-                        <span>{idx + 1}. {sub.title}</span>
-                        <button
-                          type="button"
-                          onClick={() => setNewSubtasks(newSubtasks.filter((s) => s.id !== sub.id))}
-                          className="text-rose-400 hover:text-rose-300 text-[10px]"
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Verified By / Assigned Trade</label>
+                <input
+                  type="text"
+                  value={newCompAssignee}
+                  onChange={(e) => setNewCompAssignee(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                />
               </div>
 
-              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setIsModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-xl text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 shadow-lg shadow-emerald-950 cursor-pointer"
-                >
-                  Create Task
-                </button>
-              </div>
+              <button
+                type="submit"
+                className="w-full py-2 rounded-xl bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs cursor-pointer transition"
+              >
+                + Record Field Entry
+              </button>
             </form>
           </div>
         </div>

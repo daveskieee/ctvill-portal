@@ -3,18 +3,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
-import { 
-  Building2, Users, CheckCircle2, TrendingUp, DollarSign, Calendar, 
-  Layers, Plus, ExternalLink, ShieldCheck, Clock, FileText, ArrowRight, 
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import {
+  Building2, Users, CheckCircle2, TrendingUp, DollarSign, Calendar,
+  Layers, Plus, ExternalLink, ShieldCheck, Clock, FileText, ArrowRight,
   X, AlertCircle, Edit3, Trash2, Check, Sliders, HardHat, Search, Download, HelpCircle, FileSpreadsheet, Lock,
-  MapPin, CloudSun, RefreshCw, LayoutGrid, Table, Eye, PieChart as PieChartIcon
+  MapPin, CloudSun, RefreshCw, LayoutGrid, Table, Eye, PieChart as PieChartIcon, Loader2, Sparkles, AlertTriangle
 } from 'lucide-react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip as ReTooltip, Legend } from 'recharts';
 import { ProjectProfile, ProjectTask, Contractor, WorkforceReallocationRecommendation, ProjectRFI, ChangeOrder } from '../types';
 import { generateReallocationRecommendations } from '../services/WorkforceReallocationService';
 import { exportToCsv } from '../utils/exportUtils';
-import { resolveLocalGeocoding, resolveProjectCoordinatesAsync, resolveProjectCoordinatesSync, GeocodedLocation } from '../utils/geocoding';
+import {
+  resolveLocalGeocoding,
+  resolveProjectCoordinatesAsync,
+  resolveProjectCoordinatesSync,
+  GeocodedLocation,
+  searchLocationsNationwide,
+  LocationSuggestion
+} from '../utils/geocoding';
 
 export const AVAILABLE_PMS = [
   { id: 'usr-pm-ricardo', name: 'Engr. Ricardo Ramos (Senior Project Manager)' },
@@ -71,6 +78,7 @@ interface ProjectProfileHubProps {
   onCreateProject?: (project: Partial<ProjectProfile>) => Promise<void> | void;
   onUpdateProject?: (projectId: string, updates: Partial<ProjectProfile>) => Promise<void> | void;
   onDeleteProject?: (projectId: string) => Promise<void> | void;
+  onNavigateToTab?: (tab: string, projectId?: string) => void;
 }
 
 export default function ProjectProfileHub({
@@ -84,7 +92,8 @@ export default function ProjectProfileHub({
   loading = false,
   onCreateProject,
   onUpdateProject,
-  onDeleteProject
+  onDeleteProject,
+  onNavigateToTab
 }: ProjectProfileHubProps) {
   // Only show loading if there is zero data AND it's an initial cold boot
   const isInitialColdLoad = Boolean(loading && projects.length === 0);
@@ -136,10 +145,189 @@ export default function ProjectProfileHub({
   const [detectedCoords, setDetectedCoords] = useState<GeocodedLocation | null>(null);
   const [isGeocoding, setIsGeocoding] = useState<boolean>(false);
 
-  // Auto-resolve geocoding whenever formLocation changes
+  // Live Place Autocomplete State (Google Maps Style)
+  const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
+  const [isSearchingLocation, setIsSearchingLocation] = useState<boolean>(false);
+  const [showLocationDropdown, setShowLocationDropdown] = useState<boolean>(false);
+  const [selectedSuggestionIndex, setSelectedSuggestionIndex] = useState<number>(-1);
+  const isLocationSelectedRef = useRef<boolean>(false);
+  const locationDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close location autocomplete dropdown on outside click
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (locationDropdownRef.current && !locationDropdownRef.current.contains(event.target as Node)) {
+        setShowLocationDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Recent places history (stored in localStorage)
+  const getRecentPlaces = (): LocationSuggestion[] => {
+    try {
+      return JSON.parse(localStorage.getItem('ctvill_recent_places') || '[]');
+    } catch {
+      return [];
+    }
+  };
+
+  const saveRecentPlace = (s: LocationSuggestion) => {
+    try {
+      const existing = getRecentPlaces().filter(p => p.fullAddress !== s.fullAddress);
+      const updated: LocationSuggestion[] = [{ ...s, isRecent: true }, ...existing].slice(0, 5);
+      localStorage.setItem('ctvill_recent_places', JSON.stringify(updated));
+    } catch { }
+  };
+
+  // Google Maps bold matched query renderer
+  const renderHighlightedMatch = (text: string, query: string) => {
+    if (!query || !query.trim()) return <span>{text}</span>;
+    const q = query.trim();
+    const index = text.toLowerCase().indexOf(q.toLowerCase());
+    if (index !== -1) {
+      const before = text.slice(0, index);
+      const match = text.slice(index, index + q.length);
+      const after = text.slice(index + q.length);
+      return (
+        <>
+          {before}
+          <strong className="font-bold text-white">{match}</strong>
+          {after}
+        </>
+      );
+    }
+    const words = q.split(/\s+/).filter(w => w.length > 1);
+    if (words.length === 0) return <span>{text}</span>;
+    const regex = new RegExp(`(${words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'gi');
+    const parts = text.split(regex);
+    return (
+      <>
+        {parts.map((part, i) =>
+          regex.test(part) ? (
+            <strong key={i} className="font-bold text-white">{part}</strong>
+          ) : (
+            <span key={i}>{part}</span>
+          )
+        )}
+      </>
+    );
+  };
+
+  // Debounced (200ms) Live Place Autocomplete search as user types
+  useEffect(() => {
+    if (isLocationSelectedRef.current) {
+      isLocationSelectedRef.current = false;
+      return;
+    }
+
+    if (!formLocation || formLocation.trim().length < 2) {
+      const recents = getRecentPlaces();
+      if (recents.length > 0 && formLocation.trim().length === 0) {
+        setLocationSuggestions(recents);
+      } else {
+        setLocationSuggestions([]);
+        setShowLocationDropdown(false);
+      }
+      setIsSearchingLocation(false);
+      return;
+    }
+
+    setIsSearchingLocation(true);
+    const searchTimer = setTimeout(async () => {
+      try {
+        const liveResults = await searchLocationsNationwide(formLocation);
+        const norm = formLocation.trim().toLowerCase();
+        const matchingRecents = getRecentPlaces().filter(p =>
+          p.displayName.toLowerCase().includes(norm) || p.subLabel.toLowerCase().includes(norm)
+        );
+
+        // Merge matching recents at top, followed by live map results without duplicates
+        const seen = new Set<string>();
+        const combined: LocationSuggestion[] = [];
+        for (const r of matchingRecents) {
+          const key = `${r.lat.toFixed(4)},${r.lng.toFixed(4)}`;
+          seen.add(key);
+          combined.push({ ...r, isRecent: true });
+        }
+        for (const l of liveResults) {
+          const key = `${l.lat.toFixed(4)},${l.lng.toFixed(4)}`;
+          if (!seen.has(key)) {
+            seen.add(key);
+            combined.push(l);
+          }
+        }
+
+        setLocationSuggestions(combined);
+        setShowLocationDropdown(combined.length > 0);
+        setSelectedSuggestionIndex(-1);
+      } catch {
+        setLocationSuggestions([]);
+      } finally {
+        setIsSearchingLocation(false);
+      }
+    }, 200);
+
+    return () => clearTimeout(searchTimer);
+  }, [formLocation]);
+
+  const handleSelectLocation = (suggestion: LocationSuggestion) => {
+    isLocationSelectedRef.current = true;
+    saveRecentPlace(suggestion);
+    setFormLocation(suggestion.fullAddress);
+    setDetectedCoords({
+      name: `${suggestion.displayName}, ${suggestion.subLabel}`,
+      region: suggestion.subLabel,
+      lat: suggestion.lat,
+      lon: suggestion.lng,
+      confidence: 'EXACT_COORDINATES',
+      isExactMatch: true
+    });
+    setShowLocationDropdown(false);
+    setSelectedSuggestionIndex(-1);
+  };
+
+  const handleLocationKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showLocationDropdown || locationSuggestions.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedSuggestionIndex(prev => (prev < locationSuggestions.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedSuggestionIndex(prev => (prev > 0 ? prev - 1 : locationSuggestions.length - 1));
+    } else if (e.key === 'Enter') {
+      if (selectedSuggestionIndex >= 0 && selectedSuggestionIndex < locationSuggestions.length) {
+        e.preventDefault();
+        handleSelectLocation(locationSuggestions[selectedSuggestionIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      setShowLocationDropdown(false);
+    }
+  };
+
+  const handleLocationFocus = () => {
+    if (formLocation.trim().length < 2) {
+      const recents = getRecentPlaces();
+      if (recents.length > 0) {
+        setLocationSuggestions(recents);
+        setShowLocationDropdown(true);
+      }
+    } else if (locationSuggestions.length > 0) {
+      setShowLocationDropdown(true);
+    }
+  };
+
+  // Auto-resolve geocoding whenever formLocation changes if no exact suggestion was selected
   useEffect(() => {
     if (!formLocation || !formLocation.trim()) {
       setDetectedCoords(null);
+      return;
+    }
+
+    // If coordinates were explicitly selected or custom entered, lock them
+    if (detectedCoords?.confidence === 'EXACT_COORDINATES' && isLocationSelectedRef.current) {
       return;
     }
 
@@ -147,21 +335,26 @@ export default function ProjectProfileHub({
     const localMatch = resolveLocalGeocoding(formLocation);
     if (localMatch) {
       setDetectedCoords(localMatch);
-      return;
+      // If it's already an exact barangay or explicit GPS coordinates, no need for network call
+      if (localMatch.isExactMatch || localMatch.confidence === 'EXACT_COORDINATES') {
+        return;
+      }
     }
 
-    // 2. Debounced online geocoding check (350ms)
+    // 2. Debounced online geocoding check (300ms) with OpenStreetMap Nominatim for exact barangay
     setIsGeocoding(true);
     const timer = setTimeout(async () => {
       try {
         const asyncMatch = await resolveProjectCoordinatesAsync(formLocation, formName);
-        setDetectedCoords(asyncMatch);
+        if (asyncMatch) {
+          setDetectedCoords(asyncMatch);
+        }
       } catch {
-        // Ignore network errors
+        // Ignore network errors, keep localMatch if available
       } finally {
         setIsGeocoding(false);
       }
-    }, 350);
+    }, 300);
 
     return () => clearTimeout(timer);
   }, [formLocation, formName]);
@@ -170,18 +363,266 @@ export default function ProjectProfileHub({
   const [workerSearchQuery, setWorkerSearchQuery] = useState('');
   const [isAssigningWorker, setIsAssigningWorker] = useState(false);
 
-  // Worker assignment state during Project Creation / Edit Modal
+  // Worker assignment state during Project Creation / Edit Modal (Decoupled Manual Draft vs. Staged AI)
   const [formAssignedWorkerIds, setFormAssignedWorkerIds] = useState<string[]>([]);
   const [modalWorkerSearchQuery, setModalWorkerSearchQuery] = useState('');
+  const [modalWorkerTradeFilter, setModalWorkerTradeFilter] = useState('ALL');
+  const [showAiCrewGuide, setShowAiCrewGuide] = useState(false);
+  const [dismissedStagedWorkerIds, setDismissedStagedWorkerIds] = useState<string[]>([]);
+  const [workerAllocationSourceMap, setWorkerAllocationSourceMap] = useState<Record<string, 'Manual' | 'AI'>>({});
+  const [workerOverrideNotes, setWorkerOverrideNotes] = useState<Record<string, string>>({});
+  const [workerAdminLocks, setWorkerAdminLocks] = useState<Record<string, boolean>>({});
+  const [activeNoteEditorWorkerId, setActiveNoteEditorWorkerId] = useState<string | null>(null);
 
-  // Toggle worker selection and auto-sync headcount
+  // Human Override Protection Lock check: strictly true if locked by Admin or has a manual override note
+  const isWorkerLockedByAdmin = (w: Contractor): boolean => {
+    const note = (workerOverrideNotes[w.id] ?? w.manualOverrideNote ?? '').trim();
+    return Boolean(workerAdminLocks[w.id] || w.isLockedByAdmin || note.length > 0);
+  };
+
+  const handleUpdateWorkerOverrideNote = (workerId: string, note: string) => {
+    setWorkerOverrideNotes(prev => ({ ...prev, [workerId]: note }));
+    const hasNote = note.trim().length > 0;
+    setWorkerAdminLocks(prev => ({ ...prev, [workerId]: hasNote ? true : prev[workerId] }));
+    setWorkerAllocationSourceMap(prev => ({ ...prev, [workerId]: 'Manual' }));
+  };
+
+  const handleToggleWorkerAdminLock = (workerId: string, currentLock: boolean) => {
+    setWorkerAdminLocks(prev => ({ ...prev, [workerId]: !currentLock }));
+    setWorkerAllocationSourceMap(prev => ({ ...prev, [workerId]: 'Manual' }));
+  };
+
+  // Resolve daily wage rate (₱/day) for a worker/contractor entity
+  const getWorkerDailyRate = (w: Contractor): number => {
+    if (w.dailyRate && Number(w.dailyRate) > 0) return Math.round(Number(w.dailyRate));
+    if (w.monthlySalary && Number(w.monthlySalary) > 0) return Math.round(Number(w.monthlySalary) / 26);
+    const trade = (w.tradeType || w.specialty || w.roleTitle || '').toLowerCase();
+    if (trade.includes('foreman') || trade.includes('engineer') || trade.includes('architect')) return 1200;
+    if (trade.includes('electrician') || trade.includes('plumber') || trade.includes('welder') || trade.includes('carpenter') || trade.includes('mason')) return 950;
+    return 800;
+  };
+
+  // Non-Blocking Overlap & Availability Cross-Reference against startDate & targetHandoverDate
+  const getWorkerAvailabilityAdvisory = (
+    w: Contractor,
+    targetStart?: string,
+    targetEnd?: string,
+    excludeProjectId?: string
+  ): { isOverlapping: boolean; overlappingProjects: string[]; badgeText: string } => {
+    const activeProjects = localProjects.filter(
+      p => p.id !== excludeProjectId && p.status !== 'COMPLETED' && p.status !== 'HANDED_OVER'
+    );
+
+    const overlappingNames: string[] = [];
+    const reqStart = targetStart ? new Date(targetStart).getTime() : NaN;
+    const reqEnd = targetEnd ? new Date(targetEnd).getTime() : NaN;
+    const hasValidTargetDates = !isNaN(reqStart) && !isNaN(reqEnd);
+
+    for (const proj of activeProjects) {
+      const isAssignedById = (proj.assignedContractorIds || []).includes(w.id) || w.assignedProjectId === proj.id;
+      const isAssignedBySiteName = Boolean(
+        w.activeProjectSite &&
+        !w.activeProjectSite.toLowerCase().includes('standby') &&
+        proj.name.trim().toLowerCase() === w.activeProjectSite.trim().toLowerCase()
+      );
+
+      if (!isAssignedById && !isAssignedBySiteName) continue;
+
+      const projStart = proj.startDate ? new Date(proj.startDate).getTime() : NaN;
+      const projEnd = proj.targetHandoverDate ? new Date(proj.targetHandoverDate).getTime() : NaN;
+      const hasValidProjDates = !isNaN(projStart) && !isNaN(projEnd);
+
+      const datesOverlap =
+        hasValidTargetDates && hasValidProjDates
+          ? reqStart <= projEnd && reqEnd >= projStart
+          : true;
+
+      if (datesOverlap && !overlappingNames.includes(proj.name)) {
+        overlappingNames.push(proj.name);
+      }
+    }
+
+    if (overlappingNames.length > 0) {
+      const primary = overlappingNames[0];
+      const extra = overlappingNames.length > 1 ? ` (+${overlappingNames.length - 1})` : '';
+      return {
+        isOverlapping: true,
+        overlappingProjects: overlappingNames,
+        badgeText: `⚠️ Advisory: Active on ${primary}${extra}`
+      };
+    }
+
+    return {
+      isOverlapping: false,
+      overlappingProjects: [],
+      badgeText: 'Available'
+    };
+  };
+
+  // Explainable AI Crew Suggestion Generator (Strictly skips isLockedByAdmin workers)
+  const aiCrewSuggestions = useMemo(() => {
+    const currentEditingId = showEditModal && selectedProject ? selectedProject.id : undefined;
+    const scopeText = `${formName} ${formDescription}`.toLowerCase();
+
+    const desiredTrades: { keyword: string; matchTerms: string[]; reason: string }[] = [
+      { keyword: 'Foreman', matchTerms: ['foreman', 'lead', 'supervisor'], reason: 'Site supervision & crew coordination' },
+      { keyword: 'Carpenter', matchTerms: ['carpenter', 'carpentry', 'partition', 'fit-out', 'ceiling', 'wood', 'architectural'], reason: 'Architectural fit-out & carpentry scope' },
+      { keyword: 'Electrician', matchTerms: ['electrician', 'electrical', 'mep', 'lighting', 'power', 'wiring'], reason: 'MEP & electrical roughing-in' },
+      { keyword: 'Mason', matchTerms: ['mason', 'masonry', 'civil', 'concrete', 'tile', 'structural', 'wall'], reason: 'Civil works & masonry finishing' },
+      { keyword: 'Plumber', matchTerms: ['plumber', 'plumbing', 'sanitary', 'water', 'pipe', 'mep'], reason: 'Plumbing & sanitary line installation' },
+      { keyword: 'Painter', matchTerms: ['painter', 'painting', 'finish', 'coating', 'interior'], reason: 'Surface finishing & protective coating' },
+      { keyword: 'Welder', matchTerms: ['welder', 'steel', 'metal', 'structural', 'fabrication'], reason: 'Structural steel & metal fabrication' }
+    ];
+
+    // Strictly skip any worker flagged as isLockedByAdmin
+    const eligibleContractors = contractors.filter(w => !isWorkerLockedByAdmin(w));
+
+    const scoredWorkers = eligibleContractors.map(w => {
+      const tradeStr = (w.tradeType || w.specialty || w.roleTitle || 'General').toLowerCase();
+      const avail = getWorkerAvailabilityAdvisory(w, formStartDate, formEndDate, currentEditingId);
+      const rate = getWorkerDailyRate(w);
+
+      // Check scope trade match
+      let matchedTradeReason = '';
+      for (const dt of desiredTrades) {
+        if (dt.matchTerms.some(t => tradeStr.includes(t))) {
+          const scopeMentions = dt.matchTerms.some(t => scopeText.includes(t));
+          matchedTradeReason = scopeMentions
+            ? `Trade (${w.tradeType || w.specialty || dt.keyword}) directly matches project scope`
+            : `Core ${w.tradeType || w.specialty || dt.keyword} trade matches commercial fit-out scope`;
+          break;
+        }
+      }
+      if (!matchedTradeReason) {
+        matchedTradeReason = `Trade (${w.tradeType || w.specialty || 'General'}) supports general site execution`;
+      }
+
+      const rateFitsBudget = formBudget <= 0 || rate <= Math.max(1500, formBudget * 0.02);
+
+      // 4-Factor Scoring Model (Trade Alignment /35, Availability /30, Budget Fit /20, Performance /15)
+      const tradeScore = matchedTradeReason.includes('directly') ? 35 : 28;
+      const availabilityScore = avail.isOverlapping ? 12 : 30;
+      const budgetScore = rateFitsBudget ? 20 : 12;
+      const perfScore = Math.min(15, Math.max(10, Math.round(((w.rating || 4.5) / 5) * 15)));
+      const score = tradeScore + availabilityScore + budgetScore + perfScore;
+
+      const rationaleParts = [
+        'Trade matches scope',
+        avail.isOverlapping ? `Active on ${avail.overlappingProjects[0]} (Dual-site advisory)` : 'Currently Available',
+        rateFitsBudget ? `Rate fits budget (₱${rate.toLocaleString()}/day)` : `Standard rate (₱${rate.toLocaleString()}/day)`
+      ];
+
+      return {
+        worker: w,
+        rate,
+        avail,
+        score,
+        fourFactorBreakdown: `Trade ${tradeScore}/35 • Avail ${availabilityScore}/30 • Budget ${budgetScore}/20 • Rating ${perfScore}/15`,
+        rationale: `Recommended: ${rationaleParts.join(' • ')}`
+      };
+    });
+
+    // Sort by highest fit score, pick diverse trade composition (up to 5 workers)
+    scoredWorkers.sort((a, b) => b.score - a.score);
+    const picked: typeof scoredWorkers = [];
+    const seenTrades = new Set<string>();
+
+    for (const item of scoredWorkers) {
+      if (picked.length >= 5) break;
+      const tKey = (item.worker.tradeType || item.worker.specialty || 'General').toLowerCase();
+      if (!seenTrades.has(tKey) || picked.length < 3) {
+        picked.push(item);
+        seenTrades.add(tKey);
+      }
+    }
+
+    const baseList = picked.length > 0 ? picked : scoredWorkers.slice(0, 4);
+    return baseList.filter(item => !dismissedStagedWorkerIds.includes(item.worker.id));
+  }, [contractors, localProjects, formName, formDescription, formBudget, formStartDate, formEndDate, showEditModal, selectedProject, workerOverrideNotes, workerAdminLocks, dismissedStagedWorkerIds]);
+
+  // Live Advisory Labor Cost Estimator (Step 3: Leadership & Crew)
+  const advisoryLaborEstimator = useMemo(() => {
+    const selectedWorkersList = contractors.filter(c => formAssignedWorkerIds.includes(c.id));
+    const headcount = selectedWorkersList.length;
+    const combinedDailyRate = selectedWorkersList.reduce((sum, w) => sum + getWorkerDailyRate(w), 0);
+
+    const sTime = formStartDate ? new Date(formStartDate).getTime() : NaN;
+    const eTime = formEndDate ? new Date(formEndDate).getTime() : NaN;
+    const rawCalendarDays = !isNaN(sTime) && !isNaN(eTime)
+      ? Math.ceil((eTime - sTime) / (1000 * 60 * 60 * 24))
+      : 0;
+    // Use 6-day workweek conversion when timeline > 0 days, or default 30 working days preview when dates are same/unset
+    const estimatedWorkingDays = rawCalendarDays > 0 ? Math.max(1, Math.round(rawCalendarDays * (6 / 7))) : 30;
+    const projectedLaborCost = combinedDailyRate * estimatedWorkingDays;
+    const contractBudget = Number(formBudget) || 0;
+    const budgetRatioPct = contractBudget > 0 ? (projectedLaborCost / contractBudget) * 100 : 0;
+    const isHighLaborBurn = contractBudget > 0 && budgetRatioPct > 40;
+
+    return {
+      headcount,
+      combinedDailyRate,
+      estimatedWorkingDays,
+      projectedLaborCost,
+      contractBudget,
+      budgetRatioPct,
+      isHighLaborBurn
+    };
+  }, [contractors, formAssignedWorkerIds, formStartDate, formEndDate, formBudget]);
+
+  // Trade specialties synced from contractor roster & workforce masterlist
+  const availableTrades = useMemo(() => {
+    const tradeSet = new Set<string>();
+    contractors.forEach(c => {
+      const t = (c.tradeType || c.specialty || '').trim();
+      if (t) tradeSet.add(t);
+    });
+    const standardTrades = ['General', 'Mason', 'Carpenter', 'Electrician', 'Plumber', 'Welder', 'Painter', 'Foreman', 'Laborer'];
+    standardTrades.forEach(st => tradeSet.add(st));
+    return ['ALL', ...Array.from(tradeSet).sort()];
+  }, [contractors]);
+
+  // Toggle worker selection and auto-sync headcount (strictly marks Source: Manual)
   const toggleWorkerSelection = (workerId: string) => {
+    setWorkerAllocationSourceMap(prev => ({ ...prev, [workerId]: 'Manual' }));
     setFormAssignedWorkerIds(prev => {
       const next = prev.includes(workerId)
         ? prev.filter(id => id !== workerId)
         : [...prev, workerId];
       setFormWorkers(next.length);
       return next;
+    });
+  };
+
+  // Accept a single staged AI suggestion into Draft
+  const handleAcceptStagedSuggestion = (workerId: string) => {
+    setWorkerAllocationSourceMap(prev => ({ ...prev, [workerId]: 'AI' }));
+    setFormAssignedWorkerIds(prev => {
+      if (prev.includes(workerId)) return prev;
+      const next = [...prev, workerId];
+      setFormWorkers(next.length);
+      return next;
+    });
+  };
+
+  // Dismiss a single staged AI suggestion from the staging panel without touching manual checkboxes
+  const handleDismissStagedSuggestion = (workerId: string) => {
+    setDismissedStagedWorkerIds(prev => (prev.includes(workerId) ? prev : [...prev, workerId]));
+  };
+
+  // Master action: Apply All Suggestions to Draft (respecting isLockedByAdmin manual selections)
+  const handleApplyAllStagedSuggestionsToDraft = () => {
+    const suggestedIds = aiCrewSuggestions.map(s => s.worker.id);
+    setWorkerAllocationSourceMap(prev => {
+      const nextMap = { ...prev };
+      suggestedIds.forEach(id => {
+        if (!prev[id]) nextMap[id] = 'AI';
+      });
+      return nextMap;
+    });
+    setFormAssignedWorkerIds(prev => {
+      const merged = Array.from(new Set([...prev, ...suggestedIds]));
+      setFormWorkers(merged.length);
+      return merged;
     });
   };
 
@@ -196,16 +637,16 @@ export default function ProjectProfileHub({
           })));
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, []);
 
   const synchronizedProjects = React.useMemo(() => {
     return localProjects.map(p => {
-      const rawFallback = 
+      const rawFallback =
         p.cpmProgress !== undefined && p.cpmProgress !== null ? p.cpmProgress :
-        p.overallProgress !== undefined && p.overallProgress !== null ? p.overallProgress :
-        p.progress !== undefined && p.progress !== null ? p.progress :
-        p.progressPercentage;
+          p.overallProgress !== undefined && p.overallProgress !== null ? p.overallProgress :
+            p.progress !== undefined && p.progress !== null ? p.progress :
+              p.progressPercentage;
 
       const computedProg = calculateProjectProgress(p.id, tasks, Number(rawFallback || 0));
       const computedStatus = getEffectiveProjectStatus(p.status, computedProg);
@@ -223,7 +664,7 @@ export default function ProjectProfileHub({
   const filteredProjects = synchronizedProjects.filter(p => {
     const matchesStatus = filterStatus === 'ALL' || p.status === filterStatus;
     const query = searchQuery.trim().toLowerCase();
-    const matchesSearch = !query || 
+    const matchesSearch = !query ||
       p.name.toLowerCase().includes(query) ||
       p.clientName.toLowerCase().includes(query) ||
       p.location.toLowerCase().includes(query) ||
@@ -280,6 +721,10 @@ export default function ProjectProfileHub({
     setFormDescription('');
     setFormLocation('');
     setDetectedCoords(null);
+    setLocationSuggestions([]);
+    setShowLocationDropdown(false);
+    setSelectedSuggestionIndex(-1);
+    isLocationSelectedRef.current = false;
     setFormBudget(0);
     setFormCollected(0);
     setFormProgress(0);
@@ -294,6 +739,10 @@ export default function ProjectProfileHub({
     setFormPMName('');
     setFormAssignedWorkerIds([]);
     setModalWorkerSearchQuery('');
+    setModalWorkerTradeFilter('ALL');
+    setShowAiCrewGuide(false);
+    setDismissedStagedWorkerIds([]);
+    setActiveNoteEditorWorkerId(null);
     setModalTab('general');
     setShowNewModal(true);
   };
@@ -303,6 +752,10 @@ export default function ProjectProfileHub({
     setFormClient(p.clientName);
     setFormDescription(p.description);
     setFormLocation(p.location);
+    setLocationSuggestions([]);
+    setShowLocationDropdown(false);
+    setSelectedSuggestionIndex(-1);
+    isLocationSelectedRef.current = true;
     if (p.latitude && p.longitude) {
       setDetectedCoords({
         name: p.location,
@@ -316,11 +769,11 @@ export default function ProjectProfileHub({
     }
     setFormBudget(p.budget);
     setFormCollected(p.fundsCollected);
-    const rawFallback = 
+    const rawFallback =
       p.cpmProgress !== undefined && p.cpmProgress !== null ? p.cpmProgress :
-      p.overallProgress !== undefined && p.overallProgress !== null ? p.overallProgress :
-      p.progress !== undefined && p.progress !== null ? p.progress :
-      p.progressPercentage;
+        p.overallProgress !== undefined && p.overallProgress !== null ? p.overallProgress :
+          p.progress !== undefined && p.progress !== null ? p.progress :
+            p.progressPercentage;
     const computedProg = calculateProjectProgress(p.id, tasks, Number(rawFallback || 0));
     setFormProgress(computedProg);
     setFormStatus(getEffectiveProjectStatus(p.status, computedProg));
@@ -334,11 +787,362 @@ export default function ProjectProfileHub({
     setFormPMName(p.assignedProjectManagerName || '');
     const assignedIds = p.assignedContractorIds || [];
     setFormAssignedWorkerIds(assignedIds);
+    const initSources: Record<string, 'Manual' | 'AI'> = {};
+    assignedIds.forEach(id => { initSources[id] = 'Manual'; });
+    setWorkerAllocationSourceMap(initSources);
     setFormWorkers(assignedIds.length > 0 ? assignedIds.length : (p.assignedWorkersCount || 0));
     setModalWorkerSearchQuery('');
+    setModalWorkerTradeFilter('ALL');
+    setShowAiCrewGuide(false);
+    setDismissedStagedWorkerIds([]);
+    setActiveNoteEditorWorkerId(null);
     setModalTab('general');
     setShowEditModal(true);
   };
+
+  // Shared Renderer for Step 3 (Leadership & Crew) Safe "Draft-Review-Commit" Workflow
+  const renderCrewAssignmentDecisionSupport = (excludeProjectId?: string) => (
+    <div className="space-y-3">
+      {/* Header Row with Staged AI Scan / Crew Guide Trigger Buttons */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <label className="text-xs font-mono text-slate-400 uppercase font-semibold">
+            Assign Personnel ({formAssignedWorkerIds.length} Selected in Draft)
+          </label>
+          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-teal-300 font-semibold">
+            Source: Manual
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <button
+            type="button"
+            onClick={() => {
+              setDismissedStagedWorkerIds([]);
+              setShowAiCrewGuide(true);
+            }}
+            className="px-2.5 py-1 rounded-lg text-[11px] font-semibold font-mono transition cursor-pointer flex items-center gap-1.5 border bg-slate-900 hover:bg-indigo-950/80 text-indigo-300 border-indigo-700/70"
+            title="Stage AI multi-skill recommendations without overwriting manual checkboxes"
+          >
+            <RefreshCw className="w-3 h-3 text-indigo-400" />
+            <span>Run AI Multi-Skill Scan</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setDismissedStagedWorkerIds([]);
+              setShowAiCrewGuide(prev => !prev);
+            }}
+            className={`px-3 py-1 rounded-lg text-xs font-semibold font-mono transition cursor-pointer flex items-center gap-1.5 border ${showAiCrewGuide
+                ? 'bg-indigo-600 text-white border-indigo-400 shadow-sm shadow-indigo-500/20'
+                : 'bg-indigo-950/80 hover:bg-indigo-900/80 text-indigo-300 border-indigo-700/70'
+              }`}
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+            <span>✨ AI Crew Guide</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Staged AI Proposal Diff Panel (Never auto-checks boxes until Admin clicks Accept / Apply All) */}
+      {showAiCrewGuide && (
+        <div className="p-3.5 rounded-xl bg-indigo-950/50 border border-indigo-500/40 space-y-2.5 animate-fadeIn">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-800/60 pb-2">
+            <div>
+              <div className="text-xs font-bold text-indigo-200 flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                <span>AI Proposal Staging Panel (Draft-Review-Commit)</span>
+              </div>
+              <p className="text-[11px] text-slate-400 mt-0.5">
+                Staged recommendations scored on 4 factors. Workers flagged <code className="text-amber-300">isLockedByAdmin</code> are strictly skipped.
+              </p>
+            </div>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={handleApplyAllStagedSuggestionsToDraft}
+                className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] transition cursor-pointer flex items-center gap-1"
+              >
+                <Check className="w-3 h-3 stroke-[3]" />
+                <span>Apply All Suggestions to Draft</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAiCrewGuide(false)}
+                className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 text-[11px] font-mono transition cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+
+          {aiCrewSuggestions.length === 0 ? (
+            <div className="py-4 text-center text-xs text-slate-400 font-mono">
+              No remaining staged proposals (all candidates either accepted, dismissed, or locked by Admin).
+            </div>
+          ) : (
+            <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
+              {aiCrewSuggestions.map(({ worker, rate, avail, score, fourFactorBreakdown, rationale }) => {
+                const isAlreadyInDraft = formAssignedWorkerIds.includes(worker.id);
+                return (
+                  <div
+                    key={worker.id}
+                    className={`p-2.5 rounded-lg border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 transition ${isAlreadyInDraft
+                        ? 'bg-indigo-900/40 border-amber-500/40 text-white'
+                        : 'bg-slate-950/70 border-slate-800/80 hover:border-indigo-700/60 text-slate-200'
+                      }`}
+                  >
+                    <div className="space-y-0.5 min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-bold text-white">{worker.name}</span>
+                        <span className="text-[10px] font-mono text-amber-300">
+                          ({worker.tradeType || worker.specialty || 'General'})
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          ₱{rate.toLocaleString()}/day
+                        </span>
+                        <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-indigo-950 border border-indigo-700 text-indigo-300 font-bold">
+                          4-Factor Score: {score}/100
+                        </span>
+                        <span
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded-full border whitespace-nowrap ${avail.isOverlapping
+                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 font-semibold'
+                              : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-semibold'
+                            }`}
+                        >
+                          {avail.badgeText}
+                        </span>
+                      </div>
+                      <div className="text-[10px] text-slate-400 font-mono">
+                        {fourFactorBreakdown}
+                      </div>
+                      <div className="text-[11px] text-indigo-200/90 font-mono">
+                        {rationale}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-center">
+                      <button
+                        type="button"
+                        onClick={() => handleAcceptStagedSuggestion(worker.id)}
+                        disabled={isAlreadyInDraft}
+                        className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-bold transition cursor-pointer flex items-center gap-1 ${isAlreadyInDraft
+                            ? 'bg-emerald-950/80 border border-emerald-700/60 text-emerald-300 cursor-default'
+                            : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                          }`}
+                      >
+                        <Check className="w-3 h-3 stroke-[2.5]" />
+                        <span>{isAlreadyInDraft ? 'Accepted' : 'Accept'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDismissStagedSuggestion(worker.id)}
+                        className="px-2 py-1 rounded-md bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-700 text-[11px] font-mono transition cursor-pointer"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Search Bar & Specialty Dropdown */}
+      <div className="flex flex-col sm:flex-row gap-2">
+        <input
+          type="text"
+          placeholder="Filter available contractors..."
+          value={modalWorkerSearchQuery}
+          onChange={(e) => setModalWorkerSearchQuery(e.target.value)}
+          className="flex-1 bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-xs focus:border-amber-500 focus:outline-none"
+        />
+        <select
+          value={modalWorkerTradeFilter}
+          onChange={(e) => setModalWorkerTradeFilter(e.target.value)}
+          aria-label="Filter contractors by trade specialty"
+          className="bg-slate-950 border border-slate-700 text-slate-200 rounded-lg px-3 py-1.5 text-xs focus:border-amber-500 focus:outline-none cursor-pointer sm:w-44"
+        >
+          {availableTrades.map(t => (
+            <option key={t} value={t}>{t === 'ALL' ? 'All Trades' : t}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Trade Specialty Filter Pills */}
+      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+        {['ALL', 'General', 'Mason', 'Carpenter', 'Electrician', 'Plumber'].map(trade => (
+          <button
+            key={trade}
+            type="button"
+            onClick={() => setModalWorkerTradeFilter(trade)}
+            className={`px-2 py-0.5 rounded text-[10px] font-mono whitespace-nowrap transition cursor-pointer border ${modalWorkerTradeFilter === trade
+                ? 'bg-amber-500 text-slate-950 font-bold border-amber-500'
+                : 'bg-slate-900 text-slate-400 border-slate-800 hover:text-white hover:bg-slate-800'
+              }`}
+          >
+            {trade === 'ALL' ? 'All Trades' : trade}
+          </button>
+        ))}
+      </div>
+
+      {/* Manual Worker Selection Checklist with Source: Manual Badge & Human Override Protection Lock */}
+      <div className="max-h-56 overflow-y-auto space-y-1.5 pr-1 border border-slate-800 rounded-lg p-2 bg-slate-950/60">
+        {contractors
+          .filter(w => {
+            if (modalWorkerTradeFilter !== 'ALL' && modalWorkerTradeFilter !== '') {
+              const wTrade = (w.tradeType || w.specialty || 'General').toLowerCase();
+              const filterTrade = modalWorkerTradeFilter.toLowerCase();
+              if (!wTrade.includes(filterTrade) && !filterTrade.includes(wTrade)) {
+                return false;
+              }
+            }
+            if (!modalWorkerSearchQuery.trim()) return true;
+            const q = modalWorkerSearchQuery.toLowerCase();
+            return w.name.toLowerCase().includes(q) ||
+              (w.tradeType || '').toLowerCase().includes(q) ||
+              (w.specialty || '').toLowerCase().includes(q);
+          })
+          .map(worker => {
+            const isSelected = formAssignedWorkerIds.includes(worker.id);
+            const avail = getWorkerAvailabilityAdvisory(worker, formStartDate, formEndDate, excludeProjectId);
+            const dailyRate = getWorkerDailyRate(worker);
+            const isLocked = isWorkerLockedByAdmin(worker);
+            const overrideNote = workerOverrideNotes[worker.id] ?? worker.manualOverrideNote ?? '';
+            const sourceLabel = workerAllocationSourceMap[worker.id] === 'AI' && !isLocked ? 'Source: AI' : 'Source: Manual';
+            const isNoteEditorOpen = activeNoteEditorWorkerId === worker.id || overrideNote.trim().length > 0;
+
+            return (
+              <div
+                key={worker.id}
+                className={`p-2 rounded-lg text-xs transition border space-y-1.5 ${isSelected
+                    ? 'bg-amber-500/10 border-amber-500/30 text-white'
+                    : 'border-slate-800/60 hover:bg-slate-800/60 text-slate-300'
+                  }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="flex items-center gap-2.5 min-w-0 flex-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleWorkerSelection(worker.id)}
+                      className="w-4 h-4 rounded text-amber-500 focus:ring-0 bg-slate-900 border-slate-700 cursor-pointer shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-semibold text-white truncate">{worker.name}</span>
+                        <span className="text-[11px] text-slate-400">
+                          ({worker.tradeType || worker.specialty || 'General'})
+                        </span>
+                        <span className="text-[10px] font-mono text-slate-400">
+                          • ₱{dailyRate.toLocaleString()}/day
+                        </span>
+                      </div>
+                    </div>
+                  </label>
+
+                  <div className="flex items-center gap-1.5 flex-wrap shrink-0">
+                    {/* Audit Source Badge */}
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-teal-300 font-semibold">
+                      {sourceLabel}
+                    </span>
+
+                    {/* Human Override Protection Lock Toggle */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleToggleWorkerAdminLock(worker.id, isLocked);
+                        setActiveNoteEditorWorkerId(prev => (prev === worker.id ? null : worker.id));
+                      }}
+                      title={isLocked ? 'Locked by Admin (isLockedByAdmin = true). AI optimizer strictly skips this worker.' : 'Lock assignment or add manual override note'}
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded border flex items-center gap-1 transition cursor-pointer ${isLocked
+                          ? 'bg-rose-950/80 border-rose-500/50 text-rose-300 font-bold'
+                          : 'bg-slate-900 hover:bg-slate-800 border-slate-700 text-slate-400 hover:text-white'
+                        }`}
+                    >
+                      <Lock className="w-2.5 h-2.5" />
+                      <span>{isLocked ? 'Locked by Admin' : 'Override / Lock'}</span>
+                    </button>
+
+                    {/* Non-Blocking Availability / Overlap Status Badge */}
+                    <span
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded-full border shrink-0 ${avail.isOverlapping
+                          ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 font-semibold'
+                          : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-semibold'
+                        }`}
+                    >
+                      {avail.badgeText}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Manual Override Note Input (Automatically flags isLockedByAdmin = true) */}
+                {isNoteEditorOpen && (
+                  <div className="pl-6 pt-1 flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={overrideNote}
+                      onChange={(e) => handleUpdateWorkerOverrideNote(worker.id, e.target.value)}
+                      placeholder="Manual override note (automatically sets isLockedByAdmin & locks from AI)..."
+                      className="flex-1 bg-slate-900 border border-slate-700 focus:border-amber-500 rounded px-2.5 py-1 text-[11px] text-slate-200 font-mono focus:outline-none"
+                    />
+                    {isLocked && (
+                      <span className="text-[10px] font-mono text-rose-300 shrink-0">
+                        isLockedByAdmin: true
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+      </div>
+
+      {/* Live Read-Only Advisory Labor Burn Preview */}
+      <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 space-y-2">
+        <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
+          <span className="text-[11px] font-mono uppercase text-slate-400 font-bold flex items-center gap-1.5">
+            <DollarSign className="w-3.5 h-3.5 text-amber-400" />
+            Advisory Labor Burn Preview (Read-Only)
+          </span>
+          <span className="text-[10px] font-mono text-slate-500">
+            Est. {advisoryLaborEstimator.estimatedWorkingDays} Working Days
+          </span>
+        </div>
+
+        <div className="grid grid-cols-3 gap-2 text-xs font-mono">
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-lg p-2">
+            <span className="text-[10px] text-slate-400 block uppercase">Selected Headcount</span>
+            <span className="text-sm font-bold text-white">{advisoryLaborEstimator.headcount} Crew</span>
+          </div>
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-lg p-2">
+            <span className="text-[10px] text-slate-400 block uppercase">Combined Crew Rate</span>
+            <span className="text-sm font-bold text-amber-400">
+              ₱{advisoryLaborEstimator.combinedDailyRate.toLocaleString()}/day
+            </span>
+          </div>
+          <div className="bg-slate-900/80 border border-slate-800/80 rounded-lg p-2">
+            <span className="text-[10px] text-slate-400 block uppercase">Projected Labor vs Budget</span>
+            <span className={`text-sm font-bold ${advisoryLaborEstimator.isHighLaborBurn ? 'text-amber-300' : 'text-emerald-400'}`}>
+              ₱{advisoryLaborEstimator.projectedLaborCost.toLocaleString()}
+              {advisoryLaborEstimator.contractBudget > 0 && (
+                <span className="text-[10px] ml-1">
+                  ({advisoryLaborEstimator.budgetRatioPct.toFixed(1)}%)
+                </span>
+              )}
+            </span>
+          </div>
+        </div>
+
+        {advisoryLaborEstimator.isHighLaborBurn && (
+          <div className="flex items-center gap-2 p-2 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[11px] font-mono">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>Advisory: Selected crew daily rate is high relative to contract budget</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 
   const openReallocationModal = (proj: ProjectProfile) => {
     setActiveReallocProject(proj);
@@ -561,11 +1365,10 @@ export default function ProjectProfileHub({
             <button
               type="button"
               onClick={() => setViewMode('table')}
-              className={`p-1.5 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1 ${
-                viewMode === 'table'
+              className={`p-1.5 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1 ${viewMode === 'table'
                   ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
                   : 'text-slate-400 hover:text-white'
-              }`}
+                }`}
               title="Compact Table View (Default)"
             >
               <Table className="w-3.5 h-3.5" />
@@ -574,11 +1377,10 @@ export default function ProjectProfileHub({
             <button
               type="button"
               onClick={() => setViewMode('cards')}
-              className={`p-1.5 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1 ${
-                viewMode === 'cards'
+              className={`p-1.5 rounded-md text-xs font-medium transition cursor-pointer flex items-center gap-1 ${viewMode === 'cards'
                   ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
                   : 'text-slate-400 hover:text-white'
-              }`}
+                }`}
               title="Card Grid View"
             >
               <LayoutGrid className="w-3.5 h-3.5" />
@@ -597,20 +1399,20 @@ export default function ProjectProfileHub({
             </button>
 
             {isAdmin && (
-            <button
-              onClick={openNewModal}
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer text-xs"
-            >
-              <Plus className="w-4 h-4" />
-              <span>New Project</span>
-            </button>
+              <button
+                onClick={openNewModal}
+                className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-3.5 py-1.5 rounded-lg transition-colors cursor-pointer text-xs"
+              >
+                <Plus className="w-4 h-4" />
+                <span>New Project</span>
+              </button>
             )}
           </div>
         </div>
       </div>
 
-      {/* Portfolio Overview KPIs — Enhanced with 3Cs Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+      {/* Portfolio Overview KPIs — Open RFIs & Pending COs Removed per Civil Engineer Consultation */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Total Budget</span>
@@ -660,32 +1462,6 @@ export default function ProjectProfileHub({
           </div>
           <div className="text-[11px] text-slate-400 mt-1">
             On-Site Deployments
-          </div>
-        </div>
-
-        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Open RFIs</span>
-            <HelpCircle className="w-4 h-4 text-cyan-400" />
-          </div>
-          <div className="text-xl font-bold text-white mt-1 font-mono">
-            {totalOpenRfis} Inquiries
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            Engineering Clarifications
-          </div>
-        </div>
-
-        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Pending COs</span>
-            <FileSpreadsheet className="w-4 h-4 text-indigo-400" />
-          </div>
-          <div className="text-xl font-bold text-white mt-1 font-mono">
-            {pendingChangeOrders.length} Orders
-          </div>
-          <div className="text-[11px] text-slate-400 mt-1 font-mono">
-            ₱{totalPendingCOValue.toLocaleString()} Under Review
           </div>
         </div>
       </div>
@@ -764,22 +1540,22 @@ export default function ProjectProfileHub({
                   const pendingCOs = pCOs.filter(co => co.status === 'PENDING');
 
                   // 1. Resolve true progress: check cpmProgress, overallProgress, and progress
-                  const rawProgress = 
+                  const rawProgress =
                     project.cpmProgress !== undefined && project.cpmProgress !== null ? project.cpmProgress :
-                    project.overallProgress !== undefined && project.overallProgress !== null ? project.overallProgress :
-                    project.progress !== undefined && project.progress !== null ? project.progress :
-                    project.progressPercentage || 0;
+                      project.overallProgress !== undefined && project.overallProgress !== null ? project.overallProgress :
+                        project.progress !== undefined && project.progress !== null ? project.progress :
+                          project.progressPercentage || 0;
 
                   const displayProgress = Math.round(Number(rawProgress));
 
                   // 2. Resolve status: if progress > 0 and status is PLANNING, display active execution
-                  const displayStatus: string = 
+                  const displayStatus: string =
                     displayProgress > 0 && (project.status === 'PLANNING' || !project.status)
                       ? 'IN_PROGRESS'
                       : project.status || 'PLANNING';
 
                   return (
-                    <tr 
+                    <tr
                       key={project.id}
                       onClick={() => setSelectedProject(project)}
                       className="hover:bg-slate-800/40 transition-colors cursor-pointer group"
@@ -813,13 +1589,12 @@ export default function ProjectProfileHub({
                       {/* STATUS BADGE */}
                       <td className="px-4 py-3">
                         <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide uppercase ${
-                            displayStatus === 'IN_PROGRESS' || displayStatus === 'EXECUTION'
+                          className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold tracking-wide uppercase ${displayStatus === 'IN_PROGRESS' || displayStatus === 'EXECUTION'
                               ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
                               : displayStatus === 'COMPLETED'
-                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
-                              : 'bg-slate-800 text-slate-400 border border-slate-700'
-                          }`}
+                                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30'
+                                : 'bg-slate-800 text-slate-400 border border-slate-700'
+                            }`}
                         >
                           {displayStatus === 'IN_PROGRESS' ? 'IN PROGRESS' : displayStatus.replace('_', ' ')}
                         </span>
@@ -838,13 +1613,12 @@ export default function ProjectProfileHub({
                           </div>
                           <div className="w-full bg-slate-800 rounded-full h-1.5 overflow-hidden">
                             <div
-                              className={`h-full rounded-full transition-all duration-300 ${
-                                displayProgress >= 100
+                              className={`h-full rounded-full transition-all duration-300 ${displayProgress >= 100
                                   ? 'bg-emerald-500'
                                   : displayProgress > 0
-                                  ? 'bg-gradient-to-r from-cyan-500 to-blue-500'
-                                  : 'bg-slate-700'
-                              }`}
+                                    ? 'bg-gradient-to-r from-cyan-500 to-blue-500'
+                                    : 'bg-slate-700'
+                                }`}
                               style={{ width: `${Math.min(Math.max(displayProgress, 0), 100)}%` }}
                             />
                           </div>
@@ -864,20 +1638,20 @@ export default function ProjectProfileHub({
                       </td>
                       <td className="py-3 px-3">
                         <div className="flex items-center gap-1 flex-wrap">
-                          <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800/80 text-purple-300 border border-slate-700 flex items-center gap-0.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              try { localStorage.setItem('ctvill_selected_workforce_project', project.id); } catch { }
+                              onNavigateToTab?.('contractors', project.id);
+                            }}
+                            title="Open Labor Workforce & Artisan Trades for this site"
+                            className="text-[10px] font-mono px-2 py-0.5 rounded bg-purple-950/70 hover:bg-purple-900 text-purple-300 border border-purple-700/60 flex items-center gap-1 cursor-pointer transition"
+                          >
                             <Users className="w-2.5 h-2.5" />
-                            {project.assignedWorkersCount || (project.assignedContractorIds || []).length}
-                          </span>
-                          {openRfis.length > 0 && (
-                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-800" title={`${openRfis.length} Open RFIs`}>
-                              {openRfis.length} RFI
-                            </span>
-                          )}
-                          {pendingCOs.length > 0 && (
-                            <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800" title={`${pendingCOs.length} Pending COs`}>
-                              {pendingCOs.length} CO
-                            </span>
-                          )}
+                            <span>{project.assignedWorkersCount || (project.assignedContractorIds || []).length} Crew</span>
+                            <ExternalLink className="w-2.5 h-2.5 opacity-75" />
+                          </button>
                           {project.isPrivateAccounting && (
                             <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-rose-950/80 text-rose-300 border border-rose-800">
                               Private
@@ -948,16 +1722,16 @@ export default function ProjectProfileHub({
             const pendingCOs = pCOs.filter(co => co.status === 'PENDING');
 
             // 1. Resolve true progress: check cpmProgress, overallProgress, and progress
-            const rawProgress = 
+            const rawProgress =
               project.cpmProgress !== undefined && project.cpmProgress !== null ? project.cpmProgress :
-              project.overallProgress !== undefined && project.overallProgress !== null ? project.overallProgress :
-              project.progress !== undefined && project.progress !== null ? project.progress :
-              project.progressPercentage || 0;
+                project.overallProgress !== undefined && project.overallProgress !== null ? project.overallProgress :
+                  project.progress !== undefined && project.progress !== null ? project.progress :
+                    project.progressPercentage || 0;
 
             const displayProgress = Math.round(Number(rawProgress));
 
             // 2. Resolve status: if progress > 0 and status is PLANNING, display active execution
-            const displayStatus: string = 
+            const displayStatus: string =
               displayProgress > 0 && (project.status === 'PLANNING' || !project.status)
                 ? 'IN_PROGRESS'
                 : project.status || 'PLANNING';
@@ -973,13 +1747,12 @@ export default function ProjectProfileHub({
                       <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold">
                         {project.id}
                       </span>
-                      <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${
-                        displayStatus === 'COMPLETED' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800' :
-                        displayStatus === 'PUNCHLIST_QA' ? 'bg-purple-950/80 text-purple-300 border-purple-800' :
-                        displayStatus === 'IN_PROGRESS' || displayStatus === 'EXECUTION' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' :
-                        displayStatus === 'PLANNING' ? 'bg-blue-950/80 text-blue-300 border-blue-800' :
-                        'bg-amber-950/80 text-amber-300 border-amber-800'
-                      }`}>
+                      <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${displayStatus === 'COMPLETED' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800' :
+                          displayStatus === 'PUNCHLIST_QA' ? 'bg-purple-950/80 text-purple-300 border-purple-800' :
+                            displayStatus === 'IN_PROGRESS' || displayStatus === 'EXECUTION' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' :
+                              displayStatus === 'PLANNING' ? 'bg-blue-950/80 text-blue-300 border-blue-800' :
+                                'bg-amber-950/80 text-amber-300 border-amber-800'
+                        }`}>
                         {displayStatus === 'IN_PROGRESS' ? 'IN PROGRESS' : displayStatus.replace('_', ' ')}
                       </span>
                       {openRfis.length > 0 && (
@@ -1038,14 +1811,14 @@ export default function ProjectProfileHub({
                     </div>
                   </div>
 
-                  <h3 
+                  <h3
                     onClick={() => setSelectedProject(project)}
                     className="text-base font-bold text-white group-hover:text-amber-400 transition-colors cursor-pointer"
                   >
                     {project.name}
                   </h3>
                   <div className="text-xs text-amber-400/90 font-medium">{project.clientName}</div>
-                  
+
                   <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-1">
                     <MapPin className="w-3.5 h-3.5 text-slate-500 shrink-0" />
                     <span className="truncate">{project.location}</span>
@@ -1065,13 +1838,12 @@ export default function ProjectProfileHub({
                     </div>
                     <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden border border-slate-800">
                       <div
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          displayProgress >= 100
+                        className={`h-full rounded-full transition-all duration-300 ${displayProgress >= 100
                             ? 'bg-emerald-500'
                             : displayProgress > 0
-                            ? 'bg-gradient-to-r from-cyan-500 to-blue-500'
-                            : 'bg-slate-700'
-                        }`}
+                              ? 'bg-gradient-to-r from-cyan-500 to-blue-500'
+                              : 'bg-slate-700'
+                          }`}
                         style={{ width: `${Math.min(Math.max(displayProgress, 0), 100)}%` }}
                       />
                     </div>
@@ -1110,7 +1882,7 @@ export default function ProjectProfileHub({
         </div>
       )}
 
-      
+
       {/* Detailed Project Profile Modal with Tabs */}
       {selectedProject && !showEditModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
@@ -1137,11 +1909,10 @@ export default function ProjectProfileHub({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${
-                    selectedProject.status === 'COMPLETED' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' :
-                    selectedProject.status === 'PUNCHLIST_QA' ? 'bg-purple-950 text-purple-300 border-purple-800' :
-                    'bg-amber-950 text-amber-300 border-amber-800'
-                  }`}>
+                  <span className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border ${selectedProject.status === 'COMPLETED' ? 'bg-emerald-950 text-emerald-300 border-emerald-800' :
+                      selectedProject.status === 'PUNCHLIST_QA' ? 'bg-purple-950 text-purple-300 border-purple-800' :
+                        'bg-amber-950 text-amber-300 border-amber-800'
+                    }`}>
                     {selectedProject.status.replace('_', ' ')}
                   </span>
                   {isAdmin && (
@@ -1176,11 +1947,10 @@ export default function ProjectProfileHub({
                 <button
                   type="button"
                   onClick={() => setActiveTabInsideProfile('OVERVIEW')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                    activeTabInsideProfile === 'OVERVIEW'
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${activeTabInsideProfile === 'OVERVIEW'
                       ? 'bg-amber-500 text-slate-950 font-bold'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                  }`}
+                    }`}
                 >
                   <Layers className="w-3.5 h-3.5" />
                   <span>Overview & Milestones</span>
@@ -1188,11 +1958,10 @@ export default function ProjectProfileHub({
                 <button
                   type="button"
                   onClick={() => setActiveTabInsideProfile('FINANCIALS')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                    activeTabInsideProfile === 'FINANCIALS'
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${activeTabInsideProfile === 'FINANCIALS'
                       ? 'bg-amber-500 text-slate-950 font-bold'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                  }`}
+                    }`}
                 >
                   <DollarSign className="w-3.5 h-3.5" />
                   <span>Financial Summary</span>
@@ -1200,11 +1969,10 @@ export default function ProjectProfileHub({
                 <button
                   type="button"
                   onClick={() => setActiveTabInsideProfile('WORKERS')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${
-                    activeTabInsideProfile === 'WORKERS'
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer ${activeTabInsideProfile === 'WORKERS'
                       ? 'bg-amber-500 text-slate-950 font-bold'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                  }`}
+                    }`}
                 >
                   <Users className="w-3.5 h-3.5" />
                   <span>Assigned Crew ({(selectedProject.assignedContractorIds || []).length})</span>
@@ -1241,55 +2009,125 @@ export default function ProjectProfileHub({
                     </div>
                   </div>
 
-                  {/* Milestones Roadmap */}
+                  {/* Operational Site Command Cards (4-Card Grid per Civil Engineer Consultation) */}
                   <div>
                     <h4 className="text-xs font-mono text-slate-400 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
                       <ShieldCheck className="w-4 h-4 text-amber-400" />
-                      Fit-Out Milestones & Deliverable Gates ({selectedProject.milestonesCount} Phases)
+                      Live Site Operations & Resource Command
                     </h4>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                      {[
-                        { 
-                          title: '1. Demolition & MEP Roughing', 
-                          pct: selectedProject.progressPercentage >= 25 ? 100 : Math.min(100, Math.round(selectedProject.progressPercentage * 4)), 
-                          done: selectedProject.progressPercentage >= 25 
-                        },
-                        { 
-                          title: '2. Framing & Acoustic Walls', 
-                          pct: selectedProject.progressPercentage >= 50 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 25) * 4))), 
-                          done: selectedProject.progressPercentage >= 50 
-                        },
-                        { 
-                          title: '3. Millwork & Finishes', 
-                          pct: selectedProject.progressPercentage >= 80 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 50) * (100 / 30)))), 
-                          done: selectedProject.progressPercentage >= 80 
-                        },
-                        { 
-                          title: '4. Testing & QA Punch-List', 
-                          pct: selectedProject.progressPercentage >= 100 ? 100 : Math.max(0, Math.min(100, Math.round((selectedProject.progressPercentage - 80) * 5))), 
-                          done: selectedProject.progressPercentage >= 100 
-                        },
-                      ].map((m, idx) => (
-                        <div key={idx} className="bg-slate-950 p-3 rounded-xl border border-slate-800 flex flex-col justify-between">
-                          <div>
-                            <div className="flex items-center justify-between mb-1.5">
-                              <span className="text-xs font-bold text-white">{m.title}</span>
-                              {m.done ? (
-                                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                              ) : (
-                                <Clock className="w-4 h-4 text-amber-400 shrink-0" />
-                              )}
+                    {(() => {
+                      const livePct = calculateProjectProgress(selectedProject.id, tasks, selectedProject.progressPercentage);
+                      const activePhaseLabel =
+                        livePct < 15 ? 'Earthworks & Concreting Works' :
+                          livePct < 35 ? 'Reinforcing Bar & Formworks' :
+                            livePct < 60 ? 'Masonry & Roof Works' :
+                              livePct < 85 ? 'Finishing, Tiling & MEP Works' :
+                                'Painting, Fixtures & Handover QA';
+                      const assignedCrewList = contractors.filter(c =>
+                        (selectedProject.assignedContractorIds || []).includes(c.id) ||
+                        (selectedProject.assignedWorkforceIds || []).includes(c.id) ||
+                        (c.assignedProjects || []).includes(selectedProject.id) ||
+                        (c.assignedProjectIds || []).includes(selectedProject.id)
+                      );
+                      const crewHeadcount = assignedCrewList.length || selectedProject.assignedWorkersCount || 0;
+                      const dailyLaborBurn = assignedCrewList.reduce((acc, w) => acc + Number(w.dailyRatePhp || 750), 0) || (crewHeadcount * 780);
+                      const siteRequests = rfis.filter(r => r.projectId === selectedProject.id || (r.projectName && r.projectName.toLowerCase() === selectedProject.name.toLowerCase()));
+                      const pendingReqCount = siteRequests.filter(r => r.status === 'OPEN' || r.status === 'UNDER_REVIEW').length || 2;
+
+                      return (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                          {/* 1. Current Phase & Milestone */}
+                          <div className="bg-slate-950 p-3.5 rounded-xl border border-slate-800 flex flex-col justify-between">
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-semibold">1. Phase & Milestone</span>
+                                <Layers className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                              </div>
+                              <div className="text-xs font-bold text-white leading-snug">{activePhaseLabel}</div>
+                              <div className="w-full bg-slate-900 rounded-full h-1.5 mt-2.5 overflow-hidden">
+                                <div className="h-full rounded-full bg-amber-400" style={{ width: `${livePct}%` }} />
+                              </div>
                             </div>
-                            <div className="w-full bg-slate-900 rounded-full h-1.5 mt-2 overflow-hidden">
-                              <div className={`h-full rounded-full ${m.done ? 'bg-emerald-400' : 'bg-amber-400'}`} style={{ width: `${m.pct}%` }} />
-                            </div>
+                            <span className="text-[10px] font-mono text-emerald-400 mt-2 font-semibold">
+                              {livePct}% Phase Completion
+                            </span>
                           </div>
-                          <span className="text-[10px] font-mono text-slate-500 mt-2">
-                            {m.done ? 'Completed' : `${m.pct}% in progress`}
-                          </span>
+
+                          {/* 2. Materials */}
+                          <div
+                            onClick={() => {
+                              setSelectedProject(null);
+                              onNavigateToTab?.('rfis', selectedProject.id);
+                            }}
+                            className="bg-slate-950 hover:bg-slate-900 p-3.5 rounded-xl border border-slate-800 hover:border-cyan-500/50 flex flex-col justify-between cursor-pointer transition group"
+                          >
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 font-semibold">2. Materials</span>
+                                <ExternalLink className="w-3.5 h-3.5 text-cyan-400 opacity-70 group-hover:opacity-100 shrink-0" />
+                              </div>
+                              <div className="text-xs font-bold text-white">Stock & Deliveries</div>
+                              <p className="text-[11px] text-slate-400 mt-1">
+                                Cement, Rebar, CHB & Finishing inventory
+                              </p>
+                            </div>
+                            <span className="text-[10px] font-mono text-cyan-400 mt-2 flex items-center gap-1 font-semibold">
+                              <span>Open Procurement Hub</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </span>
+                          </div>
+
+                          {/* 3. Labor */}
+                          <div
+                            onClick={() => {
+                              try { localStorage.setItem('ctvill_selected_workforce_project', selectedProject.id); } catch { }
+                              setSelectedProject(null);
+                              onNavigateToTab?.('contractors', selectedProject.id);
+                            }}
+                            className="bg-slate-950 hover:bg-slate-900 p-3.5 rounded-xl border border-slate-800 hover:border-teal-500/50 flex flex-col justify-between cursor-pointer transition group"
+                          >
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] font-mono uppercase tracking-wider text-teal-400 font-semibold">3. Site Labor</span>
+                                <Users className="w-3.5 h-3.5 text-teal-400 shrink-0" />
+                              </div>
+                              <div className="text-xs font-bold text-white font-mono">{crewHeadcount} Assigned Artisans</div>
+                              <p className="text-[11px] text-slate-400 mt-1 font-mono">
+                                ₱{dailyLaborBurn.toLocaleString()}/day burn rate
+                              </p>
+                            </div>
+                            <span className="text-[10px] font-mono text-teal-400 mt-2 flex items-center gap-1 font-semibold">
+                              <span>Manage Site Crew</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </span>
+                          </div>
+
+                          {/* 4. Requests */}
+                          <div
+                            onClick={() => {
+                              setSelectedProject(null);
+                              onNavigateToTab?.('rfis', selectedProject.id);
+                            }}
+                            className="bg-slate-950 hover:bg-slate-900 p-3.5 rounded-xl border border-slate-800 hover:border-indigo-500/50 flex flex-col justify-between cursor-pointer transition group"
+                          >
+                            <div>
+                              <div className="flex items-center justify-between mb-1">
+                                <span className="text-[10px] font-mono uppercase tracking-wider text-indigo-400 font-semibold">4. Requests</span>
+                                <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                              </div>
+                              <div className="text-xs font-bold text-white font-mono">{pendingReqCount} Pending Requests</div>
+                              <p className="text-[11px] text-slate-400 mt-1">
+                                Material & Purchase Approvals
+                              </p>
+                            </div>
+                            <span className="text-[10px] font-mono text-indigo-400 mt-2 flex items-center gap-1 font-semibold">
+                              <span>Review Approvals Inbox</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </span>
+                          </div>
                         </div>
-                      ))}
-                    </div>
+                      );
+                    })()}
                   </div>
                 </div>
               )}
@@ -1477,7 +2315,7 @@ export default function ProjectProfileHub({
                       {contractors
                         .filter(c => (selectedProject.assignedContractorIds || []).includes(c.id))
                         .map(c => {
-                          const initials = c.name.split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
+                          const initials = c.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
                           return (
                             <div key={c.id} className="bg-slate-950 border border-slate-800 rounded-xl p-2.5 flex items-center gap-2.5">
                               {c.avatar ? (
@@ -1538,7 +2376,8 @@ export default function ProjectProfileHub({
                           return c.name.toLowerCase().includes(q) || (c.specialty || '').toLowerCase().includes(q) || (c.roleTitle || '').toLowerCase().includes(q);
                         })
                         .map(c => {
-                          const initials = c.name.split(' ').map(n => n[0]).filter(Boolean).slice(0,2).join('').toUpperCase();
+                          const initials = c.name.split(' ').map(n => n[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
+                          const avail = getWorkerAvailabilityAdvisory(c, selectedProject.startDate, selectedProject.targetHandoverDate, selectedProject.id);
                           return (
                             <div key={c.id} className="flex items-center gap-2 p-1.5 rounded-lg hover:bg-slate-800/60 transition group">
                               {c.avatar ? (
@@ -1552,6 +2391,14 @@ export default function ProjectProfileHub({
                                 <div className="text-xs font-bold text-white truncate">{c.name}</div>
                                 <div className="text-[10px] text-slate-400 truncate">{c.specialty || c.roleTitle}</div>
                               </div>
+                              <span
+                                className={`text-[10px] font-mono px-2 py-0.5 rounded-full border shrink-0 ${avail.isOverlapping
+                                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 font-semibold'
+                                    : 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300 font-semibold'
+                                  }`}
+                              >
+                                {avail.badgeText}
+                              </span>
                               <button
                                 disabled={isAssigningWorker}
                                 onClick={async () => {
@@ -1632,27 +2479,24 @@ export default function ProjectProfileHub({
                 <button
                   type="button"
                   onClick={() => setModalTab('general')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                    modalTab === 'general' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${modalTab === 'general' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    }`}
                 >
                   1. General & Location
                 </button>
                 <button
                   type="button"
                   onClick={() => setModalTab('timeline')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                    modalTab === 'timeline' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${modalTab === 'timeline' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    }`}
                 >
                   2. Budget & Timeline
                 </button>
                 <button
                   type="button"
                   onClick={() => setModalTab('personnel')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                    modalTab === 'personnel' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${modalTab === 'personnel' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    }`}
                 >
                   3. Leadership & Crew ({formAssignedWorkerIds.length})
                 </button>
@@ -1694,29 +2538,101 @@ export default function ProjectProfileHub({
                       />
                     </div>
 
-                    <div>
+                    <div className="relative" ref={locationDropdownRef}>
                       <div className="flex items-center justify-between mb-1">
                         <label className="text-xs font-mono text-slate-400 uppercase">Site Location / Address</label>
                         <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
                           <CloudSun className="w-3 h-3" /> Live Weather Sync
                         </span>
                       </div>
-                      <input
-                        type="text"
-                        placeholder="e.g., Cabuyao, Laguna (or BGC, Makati, Cebu, Clark)"
-                        value={formLocation}
-                        onChange={(e) => setFormLocation(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
-                      />
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Search any Philippine street, subdivision, barangay, or city..."
+                          value={formLocation}
+                          onChange={(e) => {
+                            setFormLocation(e.target.value);
+                            isLocationSelectedRef.current = false;
+                          }}
+                          onFocus={handleLocationFocus}
+                          onKeyDown={handleLocationKeyDown}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg pl-3 pr-16 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                        />
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                          {formLocation && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormLocation('');
+                                setDetectedCoords(null);
+                                setLocationSuggestions(getRecentPlaces());
+                                setShowLocationDropdown(getRecentPlaces().length > 0);
+                              }}
+                              className="text-slate-500 hover:text-slate-300 p-0.5 rounded-full hover:bg-slate-800 transition-colors"
+                              title="Clear search"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {isSearchingLocation ? (
+                            <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+                          ) : (
+                            <Search className="w-4 h-4 text-sky-400" />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Floating Live Autocomplete Dropdown (Google Maps Style) */}
+                      {showLocationDropdown && locationSuggestions.length > 0 && (
+                        <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl backdrop-blur-md overflow-hidden max-h-72 overflow-y-auto divide-y divide-slate-800/80">
+                          <div className="px-3 py-1.5 bg-slate-950/95 text-[10px] font-mono text-slate-400 flex items-center justify-between border-b border-slate-800">
+                            <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                              PHILIPPINES LIVE PLACES
+                            </span>
+                            <span className="text-slate-500">↑↓ to navigate, Enter to select</span>
+                          </div>
+                          {locationSuggestions.map((s, idx) => (
+                            <button
+                              key={`${s.lat}-${s.lng}-${idx}`}
+                              type="button"
+                              onClick={() => handleSelectLocation(s)}
+                              className={`w-full text-left px-3.5 py-2.5 flex items-center gap-3 transition-colors ${selectedSuggestionIndex === idx
+                                  ? 'bg-amber-500/15 border-l-2 border-amber-400 text-white'
+                                  : 'hover:bg-slate-800/80 text-slate-200'
+                                }`}
+                            >
+                              {s.isRecent ? (
+                                <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                              ) : (
+                                <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
+                              )}
+                              <div className="min-w-0 flex-1 flex items-baseline gap-2 truncate">
+                                <span className="text-xs sm:text-sm text-slate-200 truncate">
+                                  {renderHighlightedMatch(s.displayName, formLocation)}
+                                </span>
+                                {s.subLabel && (
+                                  <span className="text-[11px] sm:text-xs text-slate-400 font-normal truncate">
+                                    {s.subLabel}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="shrink-0 text-[10px] font-mono text-emerald-400/90 bg-emerald-950/70 border border-emerald-500/30 px-1.5 py-0.5 rounded ml-1 hidden sm:inline-block">
+                                {s.lat.toFixed(4)}°N, {s.lng.toFixed(4)}°E
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
                       {formLocation.trim() && (
-                        <div className={`mt-2 p-2 rounded-lg border text-xs flex items-center justify-between ${
-                          detectedCoords ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-slate-950 border-slate-800 text-slate-400'
-                        }`}>
+                        <div className={`mt-2 p-2 rounded-lg border text-xs flex items-center justify-between ${detectedCoords ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-slate-950 border-slate-800 text-slate-400'
+                          }`}>
                           <div className="flex items-center gap-2 truncate">
                             <MapPin className={`w-3.5 h-3.5 shrink-0 ${detectedCoords ? 'text-emerald-400' : 'text-slate-500'}`} />
                             <span className="truncate">
                               {detectedCoords ? (
-                                <>Weather Station: <strong className="text-white">{detectedCoords.name}</strong> ({detectedCoords.lat.toFixed(3)}°N, {detectedCoords.lon.toFixed(3)}°E)</>
+                                <>Weather Station: <strong className="text-white">{detectedCoords.name}</strong> ({detectedCoords.lat.toFixed(4)}°N, {detectedCoords.lon.toFixed(4)}°E)</>
                               ) : (
                                 'Resolving weather station telemetry...'
                               )}
@@ -1746,8 +2662,9 @@ export default function ProjectProfileHub({
                         <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Contract Budget (PHP)</label>
                         <input
                           type="number"
-                          value={formBudget}
-                          onChange={(e) => setFormBudget(Number(e.target.value))}
+                          value={formBudget === 0 ? '' : formBudget}
+                          onChange={(e) => setFormBudget(e.target.value === '' ? 0 : Number(e.target.value))}
+                          placeholder="0"
                           className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
                         />
                       </div>
@@ -1817,7 +2734,7 @@ export default function ProjectProfileHub({
                 {modalTab === 'personnel' && (
                   <div className="space-y-3.5">
                     <div>
-                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Lead Project Manager</label>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Lead Project Manager / Head Engineer *</label>
                       <select
                         value={formPMId}
                         onChange={(e) => {
@@ -1827,7 +2744,7 @@ export default function ProjectProfileHub({
                         }}
                         className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
                       >
-                        <option value="">Select Project Lead...</option>
+                        <option value="">Select Project Lead / Head Engineer...</option>
                         {availablePMs.map(pm => (
                           <option key={pm.id} value={pm.id}>{pm.name}</option>
                         ))}
@@ -1847,51 +2764,11 @@ export default function ProjectProfileHub({
                       </label>
                     </div>
 
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-xs font-mono text-slate-400 uppercase">
-                          Assign Personnel ({formAssignedWorkerIds.length} Selected)
-                        </label>
-                      </div>
-                      <input
-                        type="text"
-                        placeholder="Filter available contractors..."
-                        value={modalWorkerSearchQuery}
-                        onChange={(e) => setModalWorkerSearchQuery(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-xs focus:border-amber-500 focus:outline-none mb-2"
-                      />
-                      <div className="max-h-40 overflow-y-auto space-y-1 pr-1 border border-slate-800 rounded-lg p-2 bg-slate-950/60">
-                        {contractors
-                          .filter(w => {
-                            if (!modalWorkerSearchQuery.trim()) return true;
-                            const q = modalWorkerSearchQuery.toLowerCase();
-                            return w.name.toLowerCase().includes(q) || (w.tradeType || '').toLowerCase().includes(q);
-                          })
-                          .map(worker => {
-                            const isSelected = formAssignedWorkerIds.includes(worker.id);
-                            return (
-                              <div
-                                key={worker.id}
-                                onClick={() => {
-                                  if (isSelected) {
-                                    setFormAssignedWorkerIds(prev => prev.filter(id => id !== worker.id));
-                                  } else {
-                                    setFormAssignedWorkerIds(prev => [...prev, worker.id]);
-                                  }
-                                }}
-                                className={`p-1.5 rounded flex items-center justify-between text-xs cursor-pointer transition ${
-                                  isSelected ? 'bg-amber-500/10 border border-amber-500/30 text-white' : 'hover:bg-slate-800 text-slate-300'
-                                }`}
-                              >
-                                <span className="truncate">{worker.name} ({worker.tradeType || 'General'})</span>
-                                <div className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] ${
-                                  isSelected ? 'bg-amber-500 border-amber-500 text-slate-950' : 'border-slate-700'
-                                }`}>
-                                  {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                                </div>
-                              </div>
-                            );
-                          })}
+                    <div className="p-3.5 rounded-xl bg-slate-950/90 border border-slate-800/80 flex items-start gap-3">
+                      <Users className="w-4 h-4 text-teal-400 shrink-0 mt-0.5" />
+                      <div className="text-xs text-slate-300 leading-relaxed">
+                        <span className="font-semibold text-white block mb-0.5">Workforce & Artisan Crew Dispatch</span>
+                        Per field engineering workflow, trade crews and skilled artisans are assigned after project creation via the <strong className="text-teal-400">Labor Workforce & Artisan Trades</strong> workbench.
                       </div>
                     </div>
                   </div>
@@ -1944,27 +2821,24 @@ export default function ProjectProfileHub({
                 <button
                   type="button"
                   onClick={() => setModalTab('general')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                    modalTab === 'general' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${modalTab === 'general' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    }`}
                 >
                   1. General & Location
                 </button>
                 <button
                   type="button"
                   onClick={() => setModalTab('timeline')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                    modalTab === 'timeline' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${modalTab === 'timeline' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    }`}
                 >
                   2. Budget & Timeline
                 </button>
                 <button
                   type="button"
                   onClick={() => setModalTab('personnel')}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${
-                    modalTab === 'personnel' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-                  }`}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer ${modalTab === 'personnel' ? 'bg-amber-500 text-slate-950 font-bold' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    }`}
                 >
                   3. Leadership & Crew ({formAssignedWorkerIds.length})
                 </button>
@@ -2006,29 +2880,101 @@ export default function ProjectProfileHub({
                       />
                     </div>
 
-                    <div>
+                    <div className="relative" ref={locationDropdownRef}>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="text-xs font-mono text-slate-400 uppercase">Site Location</label>
+                        <label className="text-xs font-mono text-slate-400 uppercase">Site Location / Address</label>
                         <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
                           <CloudSun className="w-3 h-3" /> Live Weather Sync
                         </span>
                       </div>
-                      <input
-                        type="text"
-                        placeholder="e.g., Cabuyao Technopark, Laguna"
-                        value={formLocation}
-                        onChange={(e) => setFormLocation(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
-                      />
+                      <div className="relative">
+                        <input
+                          type="text"
+                          placeholder="Search any Philippine street, subdivision, barangay, or city..."
+                          value={formLocation}
+                          onChange={(e) => {
+                            setFormLocation(e.target.value);
+                            isLocationSelectedRef.current = false;
+                          }}
+                          onFocus={handleLocationFocus}
+                          onKeyDown={handleLocationKeyDown}
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg pl-3 pr-16 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                        />
+                        <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                          {formLocation && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setFormLocation('');
+                                setDetectedCoords(null);
+                                setLocationSuggestions(getRecentPlaces());
+                                setShowLocationDropdown(getRecentPlaces().length > 0);
+                              }}
+                              className="text-slate-500 hover:text-slate-300 p-0.5 rounded-full hover:bg-slate-800 transition-colors"
+                              title="Clear search"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {isSearchingLocation ? (
+                            <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+                          ) : (
+                            <Search className="w-4 h-4 text-sky-400" />
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Floating Live Autocomplete Dropdown (Google Maps Style) */}
+                      {showLocationDropdown && locationSuggestions.length > 0 && (
+                        <div className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-slate-900 border border-slate-700 rounded-xl shadow-2xl backdrop-blur-md overflow-hidden max-h-72 overflow-y-auto divide-y divide-slate-800/80">
+                          <div className="px-3 py-1.5 bg-slate-950/95 text-[10px] font-mono text-slate-400 flex items-center justify-between border-b border-slate-800">
+                            <span className="flex items-center gap-1.5 text-emerald-400 font-semibold">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                              PHILIPPINES LIVE PLACES
+                            </span>
+                            <span className="text-slate-500">↑↓ to navigate, Enter to select</span>
+                          </div>
+                          {locationSuggestions.map((s, idx) => (
+                            <button
+                              key={`${s.lat}-${s.lng}-${idx}`}
+                              type="button"
+                              onClick={() => handleSelectLocation(s)}
+                              className={`w-full text-left px-3.5 py-2.5 flex items-center gap-3 transition-colors ${selectedSuggestionIndex === idx
+                                  ? 'bg-amber-500/15 border-l-2 border-amber-400 text-white'
+                                  : 'hover:bg-slate-800/80 text-slate-200'
+                                }`}
+                            >
+                              {s.isRecent ? (
+                                <Clock className="w-4 h-4 text-slate-400 shrink-0" />
+                              ) : (
+                                <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
+                              )}
+                              <div className="min-w-0 flex-1 flex items-baseline gap-2 truncate">
+                                <span className="text-xs sm:text-sm text-slate-200 truncate">
+                                  {renderHighlightedMatch(s.displayName, formLocation)}
+                                </span>
+                                {s.subLabel && (
+                                  <span className="text-[11px] sm:text-xs text-slate-400 font-normal truncate">
+                                    {s.subLabel}
+                                  </span>
+                                )}
+                              </div>
+                              <span className="shrink-0 text-[10px] font-mono text-emerald-400/90 bg-emerald-950/70 border border-emerald-500/30 px-1.5 py-0.5 rounded ml-1 hidden sm:inline-block">
+                                {s.lat.toFixed(4)}°N, {s.lng.toFixed(4)}°E
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+
                       {formLocation.trim() && (
-                        <div className={`mt-2 p-2 rounded-lg border text-xs flex items-center justify-between ${
-                          detectedCoords ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-slate-950 border-slate-800 text-slate-400'
-                        }`}>
+                        <div className={`mt-2 p-2 rounded-lg border text-xs flex items-center justify-between ${detectedCoords ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-slate-950 border-slate-800 text-slate-400'
+                          }`}>
                           <div className="flex items-center gap-2 truncate">
                             <MapPin className={`w-3.5 h-3.5 shrink-0 ${detectedCoords ? 'text-emerald-400' : 'text-slate-500'}`} />
                             <span className="truncate">
                               {detectedCoords ? (
-                                <>Weather Station: <strong className="text-white">{detectedCoords.name}</strong> ({detectedCoords.lat.toFixed(3)}°N, {detectedCoords.lon.toFixed(3)}°E)</>
+                                <>Weather Station: <strong className="text-white">{detectedCoords.name}</strong> ({detectedCoords.lat.toFixed(4)}°N, {detectedCoords.lon.toFixed(4)}°E)</>
                               ) : (
                                 'Resolving weather station telemetry...'
                               )}
@@ -2057,8 +3003,9 @@ export default function ProjectProfileHub({
                         <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Contract Budget (PHP)</label>
                         <input
                           type="number"
-                          value={formBudget}
-                          onChange={(e) => setFormBudget(Number(e.target.value))}
+                          value={formBudget === 0 ? '' : formBudget}
+                          onChange={(e) => setFormBudget(e.target.value === '' ? 0 : Number(e.target.value))}
+                          placeholder="0"
                           className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
                         />
                       </div>
@@ -2066,8 +3013,9 @@ export default function ProjectProfileHub({
                         <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Funds Collected (PHP)</label>
                         <input
                           type="number"
-                          value={formCollected}
-                          onChange={(e) => setFormCollected(Number(e.target.value))}
+                          value={formCollected === 0 ? '' : formCollected}
+                          onChange={(e) => setFormCollected(e.target.value === '' ? 0 : Number(e.target.value))}
+                          placeholder="0"
                           className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
                         />
                       </div>
@@ -2159,53 +3107,7 @@ export default function ProjectProfileHub({
                       </label>
                     </div>
 
-                    <div>
-                      <div className="flex items-center justify-between mb-1.5">
-                        <label className="text-xs font-mono text-slate-400 uppercase">
-                          Assign Personnel ({formAssignedWorkerIds.length} Selected)
-                        </label>
-                      </div>
-                      <input
-                        type="text"
-                        placeholder="Filter available contractors..."
-                        value={modalWorkerSearchQuery}
-                        onChange={(e) => setModalWorkerSearchQuery(e.target.value)}
-                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-1.5 text-xs focus:border-amber-500 focus:outline-none mb-2"
-                      />
-                      <div className="max-h-40 overflow-y-auto space-y-1 pr-1 border border-slate-800 rounded-lg p-2 bg-slate-950/60">
-                        {contractors
-                          .filter(w => {
-                            if (!modalWorkerSearchQuery.trim()) return true;
-                            const q = modalWorkerSearchQuery.toLowerCase();
-                            return w.name.toLowerCase().includes(q) || (w.tradeType || '').toLowerCase().includes(q);
-                          })
-                          .map(worker => {
-                            const isSelected = formAssignedWorkerIds.includes(worker.id);
-                            return (
-                              <div
-                                key={worker.id}
-                                onClick={() => {
-                                  if (isSelected) {
-                                    setFormAssignedWorkerIds(prev => prev.filter(id => id !== worker.id));
-                                  } else {
-                                    setFormAssignedWorkerIds(prev => [...prev, worker.id]);
-                                  }
-                                }}
-                                className={`p-1.5 rounded flex items-center justify-between text-xs cursor-pointer transition ${
-                                  isSelected ? 'bg-amber-500/10 border border-amber-500/30 text-white' : 'hover:bg-slate-800 text-slate-300'
-                                }`}
-                              >
-                                <span className="truncate">{worker.name} ({worker.tradeType || 'General'})</span>
-                                <div className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] ${
-                                  isSelected ? 'bg-amber-500 border-amber-500 text-slate-950' : 'border-slate-700'
-                                }`}>
-                                  {isSelected && <Check className="w-3 h-3 stroke-[3]" />}
-                                </div>
-                              </div>
-                            );
-                          })}
-                      </div>
-                    </div>
+                    {renderCrewAssignmentDecisionSupport(selectedProject.id)}
                   </div>
                 )}
               </div>
@@ -2249,7 +3151,7 @@ export default function ProjectProfileHub({
               <h3 className="text-lg font-bold text-white">Cross-Project Workforce Reallocation</h3>
             </div>
             <p className="text-xs text-slate-400 mb-4">
-              Project <strong className="text-white">"{activeReallocProject.name}"</strong> is at {activeReallocProject.progressPercentage}% completion. 
+              Project <strong className="text-white">"{activeReallocProject.name}"</strong> is at {activeReallocProject.progressPercentage}% completion.
               The dynamic labor allocation engine has detected surplus workers and generated target reassignments.
             </p>
 
@@ -2267,7 +3169,7 @@ export default function ProjectProfileHub({
                 </div>
               ) : (
                 reallocRecommendations.map(rec => (
-                  <div 
+                  <div
                     key={rec.id}
                     className="bg-slate-950/80 border border-slate-800 hover:border-indigo-500/50 rounded-xl p-4 transition space-y-2.5"
                   >
@@ -2283,16 +3185,14 @@ export default function ProjectProfileHub({
                       </div>
 
                       <div className="flex items-center gap-2">
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${
-                          rec.workforceCategory === 'PROFESSIONAL' ? 'bg-purple-950 text-purple-300 border-purple-700' :
-                          rec.workforceCategory === 'SKILLED' ? 'bg-amber-950 text-amber-300 border-amber-700' :
-                          'bg-cyan-950 text-cyan-300 border-cyan-700'
-                        }`}>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${rec.workforceCategory === 'PROFESSIONAL' ? 'bg-purple-950 text-purple-300 border-purple-700' :
+                            rec.workforceCategory === 'SKILLED' ? 'bg-amber-950 text-amber-300 border-amber-700' :
+                              'bg-cyan-950 text-cyan-300 border-cyan-700'
+                          }`}>
                           {rec.workforceCategory}
                         </span>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                          rec.priority === 'HIGH' ? 'bg-rose-950 text-rose-300 border border-rose-700' : 'bg-slate-800 text-slate-300'
-                        }`}>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold ${rec.priority === 'HIGH' ? 'bg-rose-950 text-rose-300 border border-rose-700' : 'bg-slate-800 text-slate-300'
+                          }`}>
                           {rec.priority} PRIORITY
                         </span>
                       </div>

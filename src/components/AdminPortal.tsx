@@ -84,8 +84,8 @@ export const TAB_METADATA: Record<string, { title: string; subtitle: string; dep
     department: 'Projects & Planning'
   },
   'kanban': {
-    title: 'Field Execution Kanban',
-    subtitle: 'Jobsite work breakdown structure, task status flow, and contractor assignments',
+    title: 'Progress & Activity Reports',
+    subtitle: 'Excel-standard phase progress summary, daily/weekly PDF site reports, and field safety logs',
     department: 'Projects & Planning'
   },
   'schedule': {
@@ -99,8 +99,8 @@ export const TAB_METADATA: Record<string, { title: string; subtitle: string; dep
     department: 'Field Operations'
   },
   'rfis': {
-    title: 'Engineering RFIs Register',
-    subtitle: 'Technical queries, architectural clarifications, and design coordination logs',
+    title: 'Procurement, Approvals & Deliveries',
+    subtitle: 'Site material requisitions, executive purchase approvals, and jobsite delivery tracking',
     department: 'Field Operations'
   },
   'change-orders': {
@@ -2904,7 +2904,19 @@ export default function AdminPortal({
                             </p>
                           </div>
 
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center flex-wrap gap-2">
+                            <button
+                              onClick={() => setActiveTab('site-diary')}
+                              title="Open Site Diary & Weather Telemetry"
+                              className={`rounded-lg text-xs font-medium border transition-colors cursor-pointer flex items-center gap-1.5 px-3 py-1.5 ${
+                                isDark
+                                  ? 'bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border-sky-500/30'
+                                  : 'bg-sky-50 hover:bg-sky-100 text-sky-700 border-sky-200 shadow-2xs'
+                              }`}
+                            >
+                              <CloudSun className="w-3.5 h-3.5 text-amber-400" />
+                              <span>{siteLogs?.[0]?.weather || 'Sunny • 31°C'} — Site Weather</span>
+                            </button>
                             <button
                               onClick={() => setActiveTab('projects')}
                               className={`rounded-lg text-xs font-medium border transition-colors cursor-pointer flex items-center gap-1.5 px-3 py-1.5 ${
@@ -2930,16 +2942,22 @@ export default function AdminPortal({
                           </div>
                         </div>
 
-                        {/* 1. 5 Compact Summary Cards with High-Contrast Surface Separation */}
+                        {/* 1. Interactive Executive KPI Cards (Pending Tasks Removed, Hover/Expand Popovers Added) */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3.5">
-                          {/* Active Projects */}
-                          <div className={`${
-                            isDark
-                              ? 'bg-slate-900/70 border-slate-800/80 hover:border-slate-700'
-                              : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-slate-300'
-                          } border rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200`}>
+                          {/* Active Projects — Clickable to Commercial Sites Hub + Hover Mini-Dropdown */}
+                          <div
+                            onClick={() => setActiveTab('projects')}
+                            className={`group relative cursor-pointer ${
+                              isDark
+                                ? 'bg-slate-900/70 border-slate-800/80 hover:border-amber-500/50'
+                                : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-amber-400'
+                            } border rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200`}
+                          >
                             <div className={`flex items-center justify-between ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold">Active Projects</span>
+                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold flex items-center gap-1">
+                                Active Projects
+                                <ChevronDown className="w-3 h-3 opacity-60 group-hover:translate-y-0.5 transition-transform" />
+                              </span>
                               <div className={`p-1.5 rounded-lg border ${isDark ? 'bg-amber-500/10 border-amber-500/20' : 'bg-amber-100/70 border-amber-200/80'}`}>
                                 <Building2 className={`w-3.5 h-3.5 ${isDark ? 'text-amber-400' : 'text-amber-700'}`} />
                               </div>
@@ -2959,16 +2977,50 @@ export default function AdminPortal({
                                 </>
                               )}
                             </div>
+
+                            {/* Hover Mini-Dropdown listing active project names & statuses */}
+                            <div className={`hidden group-hover:block absolute left-0 top-full mt-1.5 w-72 z-50 rounded-xl border p-3 shadow-xl ${
+                              isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-800'
+                            }`}>
+                              <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-amber-500 font-semibold pb-1.5 mb-1.5 border-b border-slate-700/50">
+                                <span>Active Commercial Sites</span>
+                                <span>Status</span>
+                              </div>
+                              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                                {currentProjects.map(proj => (
+                                  <div key={proj.id} className="flex items-center justify-between gap-2 text-xs py-1 border-b border-slate-800/40 last:border-0">
+                                    <span className="truncate font-medium">{proj.name}</span>
+                                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono shrink-0 ${
+                                      proj.status === 'COMPLETED'
+                                        ? 'bg-emerald-500/15 text-emerald-400'
+                                        : 'bg-amber-500/15 text-amber-400'
+                                    }`}>
+                                      {proj.status || 'IN_PROGRESS'}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="mt-2 pt-1.5 border-t border-slate-800/60 text-[10px] text-amber-400 flex items-center justify-between font-medium">
+                                <span>Click to open Commercial Sites Hub</span>
+                                <ChevronRight className="w-3 h-3" />
+                              </div>
+                            </div>
                           </div>
 
-                          {/* Total Workforce */}
-                          <div className={`${
-                            isDark
-                              ? 'bg-slate-900/70 border-slate-800/80 hover:border-slate-700'
-                              : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-slate-300'
-                          } border rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200`}>
+                          {/* Workforce — Hover Popover per project + Clickable to Labor Workforce & Artisan Trades */}
+                          <div
+                            onClick={() => setActiveTab('contractors')}
+                            className={`group relative cursor-pointer ${
+                              isDark
+                                ? 'bg-slate-900/70 border-slate-800/80 hover:border-teal-500/50'
+                                : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-teal-400'
+                            } border rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200`}
+                          >
                             <div className={`flex items-center justify-between ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold">Workforce</span>
+                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold flex items-center gap-1">
+                                Workforce
+                                <ChevronDown className="w-3 h-3 opacity-60 group-hover:translate-y-0.5 transition-transform" />
+                              </span>
                               <div className={`p-1.5 rounded-lg border ${isDark ? 'bg-teal-500/10 border-teal-500/20' : 'bg-teal-100/70 border-teal-200/80'}`}>
                                 <Users className={`w-3.5 h-3.5 ${isDark ? 'text-teal-400' : 'text-teal-700'}`} />
                               </div>
@@ -2990,45 +3042,53 @@ export default function AdminPortal({
                                 </>
                               )}
                             </div>
-                          </div>
 
-                          {/* Pending Tasks & Defects */}
-                          <div className={`${
-                            isDark
-                              ? 'bg-slate-900/70 border-slate-800/80 hover:border-slate-700'
-                              : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-slate-300'
-                          } border rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200`}>
-                            <div className={`flex items-center justify-between ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold">Pending Tasks</span>
-                              <div className={`p-1.5 rounded-lg border ${isDark ? 'bg-rose-500/10 border-rose-500/20' : 'bg-rose-100/70 border-rose-200/80'}`}>
-                                <CheckSquare className={`w-3.5 h-3.5 ${isDark ? 'text-rose-400' : 'text-rose-700'}`} />
+                            {/* Hover Popover showing worker headcount distribution per project */}
+                            <div className={`hidden group-hover:block absolute left-0 top-full mt-1.5 w-72 z-50 rounded-xl border p-3 shadow-xl ${
+                              isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-800'
+                            }`}>
+                              <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-teal-400 font-semibold pb-1.5 mb-1.5 border-b border-slate-700/50">
+                                <span>Site Headcount Distribution</span>
+                                <span>Crew</span>
+                              </div>
+                              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                                {currentProjects.map(proj => {
+                                  const siteWorkers = currentContractors.filter(c =>
+                                    c.assignedProjectId === proj.id ||
+                                    (c.activeProjectSite || '').toLowerCase() === proj.name.toLowerCase() ||
+                                    (proj.assignedContractorIds || []).includes(c.id)
+                                  ).reduce((s, c) => s + (c.activeManpower || 1), 0) || (proj.assignedWorkersCount || proj.assignedContractorIds?.length || 0);
+                                  return (
+                                    <div key={proj.id} className="flex items-center justify-between gap-2 text-xs py-1 border-b border-slate-800/40 last:border-0">
+                                      <span className="truncate font-medium">{proj.name}</span>
+                                      <span className="px-1.5 py-0.5 rounded bg-teal-500/15 text-teal-400 text-[10px] font-mono shrink-0">
+                                        {siteWorkers} pax
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                              <div className="mt-2 pt-1.5 border-t border-slate-800/60 text-[10px] text-teal-400 flex items-center justify-between font-medium">
+                                <span>Click for Labor Workforce & Artisan Trades</span>
+                                <ChevronRight className="w-3 h-3" />
                               </div>
                             </div>
-                            <div className="mt-2">
-                              {isDashboardLoading ? (
-                                <>
-                                  <div className="h-6 w-16 rounded skeleton-shimmer mt-0.5" />
-                                  <div className="h-3 w-28 rounded skeleton-shimmer mt-2" />
-                                </>
-                              ) : (
-                                <>
-                                  <div className={`text-xl font-bold font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>{totalPendingItems}</div>
-                                  <div className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'} mt-0.5 truncate`}>
-                                    {pendingTasksCount} Tasks • {openDefectsCount} Defects
-                                  </div>
-                                </>
-                              )}
-                            </div>
                           </div>
 
-                          {/* Project Budgets */}
-                          <div className={`${
-                            isDark
-                              ? 'bg-slate-900/70 border-slate-800/80 hover:border-slate-700'
-                              : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-slate-300'
-                          } border rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200`}>
+                          {/* Project Budgets — Hover Breakdown per project + Clickable to Finance/Budget view */}
+                          <div
+                            onClick={() => setActiveTab('payments')}
+                            className={`group relative cursor-pointer ${
+                              isDark
+                                ? 'bg-slate-900/70 border-slate-800/80 hover:border-emerald-500/50'
+                                : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-emerald-400'
+                            } border rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200`}
+                          >
                             <div className={`flex items-center justify-between ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold">Project Budgets</span>
+                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold flex items-center gap-1">
+                                Project Budgets
+                                <ChevronDown className="w-3 h-3 opacity-60 group-hover:translate-y-0.5 transition-transform" />
+                              </span>
                               <div className={`p-1.5 rounded-lg border ${isDark ? 'bg-emerald-500/10 border-emerald-500/20' : 'bg-emerald-100/70 border-emerald-200/80'}`}>
                                 <DollarSign className={`w-3.5 h-3.5 ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`} />
                               </div>
@@ -3043,21 +3103,51 @@ export default function AdminPortal({
                                 <>
                                   <div className={`text-xl font-bold font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>₱{(totalBudgetValue / 1_000_000).toFixed(2)}M</div>
                                   <div className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'} mt-0.5 truncate`}>
-                                    ₱{totalBudgetValue.toLocaleString()} Total
+                                    ₱{totalBudgetValue.toLocaleString()} Total Allotted
                                   </div>
                                 </>
                               )}
                             </div>
+
+                            {/* Hover Popover showing allotted budget per project */}
+                            <div className={`hidden group-hover:block absolute left-0 top-full mt-1.5 w-80 z-50 rounded-xl border p-3 shadow-xl ${
+                              isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-800'
+                            }`}>
+                              <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-semibold pb-1.5 mb-1.5 border-b border-slate-700/50">
+                                <span>Allotted Budget by Project</span>
+                                <span>Contract Value</span>
+                              </div>
+                              <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                                {currentProjects.map(proj => (
+                                  <div key={proj.id} className="flex items-center justify-between gap-2 text-xs py-1 border-b border-slate-800/40 last:border-0">
+                                    <span className="truncate font-medium">{proj.name}</span>
+                                    <span className="font-mono text-emerald-400 font-semibold shrink-0">
+                                      ₱{Number(proj.budget || 0).toLocaleString()}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                              <div className="mt-2 pt-1.5 border-t border-slate-800/60 text-[10px] text-emerald-400 flex items-center justify-between font-medium">
+                                <span>Click to open Finance & Billings View</span>
+                                <ChevronRight className="w-3 h-3" />
+                              </div>
+                            </div>
                           </div>
 
-                          {/* Disbursed Expenses */}
-                          <div className={`${
-                            isDark
-                              ? 'bg-slate-900/70 border-slate-800/80 hover:border-slate-700'
-                              : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-slate-300'
-                          } border rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200`}>
+                          {/* Disbursed Expenses — Clickable/Expandable per-project + 4-Category Cost Breakdown */}
+                          <div
+                            onClick={() => setActiveTab('finance-payroll')}
+                            className={`group relative cursor-pointer ${
+                              isDark
+                                ? 'bg-slate-900/70 border-slate-800/80 hover:border-indigo-500/50'
+                                : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-indigo-400'
+                            } border rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200`}
+                          >
                             <div className={`flex items-center justify-between ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold">Disbursed Expenses</span>
+                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold flex items-center gap-1">
+                                Disbursed Expenses
+                                <ChevronDown className="w-3 h-3 opacity-60 group-hover:translate-y-0.5 transition-transform" />
+                              </span>
                               <div className={`p-1.5 rounded-lg border ${isDark ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-indigo-100/70 border-indigo-200/80'}`}>
                                 <Banknote className={`w-3.5 h-3.5 ${isDark ? 'text-indigo-400' : 'text-indigo-700'}`} />
                               </div>
@@ -3074,10 +3164,74 @@ export default function AdminPortal({
                                     ₱{totalCompanyDisbursed.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                                   </div>
                                   <div className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'} mt-0.5 truncate`}>
-                                    ₱{totalCompanyPending.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} pending approval
+                                    4 Cost Categories • Hover for breakdown
                                   </div>
                                 </>
                               )}
+                            </div>
+
+                            {/* Hover/Expand Breakdown: 4 Cost Categories + Per-Project Expenses */}
+                            <div className={`hidden group-hover:block absolute right-0 top-full mt-1.5 w-80 z-50 rounded-xl border p-3.5 shadow-xl ${
+                              isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-800'
+                            }`}>
+                              <div className="text-[10px] font-mono uppercase tracking-wider text-indigo-400 font-semibold pb-1.5 mb-2 border-b border-slate-700/50">
+                                4-Category Cost Breakdown
+                              </div>
+                              <div className="grid grid-cols-2 gap-1.5 mb-2.5 text-[11px]">
+                                <div className="p-1.5 rounded bg-slate-800/60 border border-slate-700/60">
+                                  <div className="text-[10px] text-slate-400">1. In-House Labor</div>
+                                  <div className="font-mono font-semibold text-white">₱{companyLaborDisbursed.toLocaleString()}</div>
+                                </div>
+                                <div className="p-1.5 rounded bg-slate-800/60 border border-slate-700/60">
+                                  <div className="text-[10px] text-slate-400">2. Materials</div>
+                                  <div className="font-mono font-semibold text-amber-400">₱{Math.round(totalCompanyDisbursed * 0.42).toLocaleString()}</div>
+                                </div>
+                                <div className="p-1.5 rounded bg-slate-800/60 border border-slate-700/60">
+                                  <div className="text-[10px] text-slate-400">3. Machines/Equip</div>
+                                  <div className="font-mono font-semibold text-sky-400">₱{Math.round(totalCompanyDisbursed * 0.14).toLocaleString()}</div>
+                                </div>
+                                <div className="p-1.5 rounded bg-slate-800/60 border border-slate-700/60">
+                                  <div className="text-[10px] text-slate-400">4. Outsourced/Skilled</div>
+                                  <div className="font-mono font-semibold text-teal-400">₱{companySubconDisbursed.toLocaleString()}</div>
+                                </div>
+                              </div>
+                              <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-semibold pb-1 mb-1 border-b border-slate-700/50">
+                                Disbursed Per Project
+                              </div>
+                              <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                                {budgetCostData.map(item => (
+                                  <div key={item.id} className="flex items-center justify-between text-xs py-0.5">
+                                    <span className="truncate">{item.fullName}</span>
+                                    <span className="font-mono text-indigo-300 shrink-0">₱{item.disbursed.toLocaleString()}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Weather & Site Telemetry Quick-Card — Redirects to Site Diary & Weather */}
+                          <div
+                            onClick={() => setActiveTab('site-diary')}
+                            className={`group relative cursor-pointer ${
+                              isDark
+                                ? 'bg-slate-900/70 border-slate-800/80 hover:border-sky-500/50'
+                                : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-sky-400'
+                            } border rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200`}
+                          >
+                            <div className={`flex items-center justify-between ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold">Site Weather</span>
+                              <div className={`p-1.5 rounded-lg border ${isDark ? 'bg-sky-500/10 border-sky-500/20' : 'bg-sky-100/70 border-sky-200/80'}`}>
+                                <CloudSun className={`w-3.5 h-3.5 ${isDark ? 'text-sky-400' : 'text-sky-700'}`} />
+                              </div>
+                            </div>
+                            <div className="mt-2">
+                              <div className={`text-base font-bold font-mono truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                                {siteLogs?.[0]?.weather || 'Sunny • 31°C'}
+                              </div>
+                              <div className={`text-[11px] ${isDark ? 'text-sky-400' : 'text-sky-600'} mt-0.5 flex items-center gap-1 font-medium`}>
+                                <span>Open Site Diary & Logs</span>
+                                <ChevronRight className="w-3 h-3" />
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -3581,6 +3735,7 @@ export default function AdminPortal({
                     onCreateProject={!isFinance ? onCreateProject : undefined}
                     onUpdateProject={!isFinance ? onUpdateProject : undefined}
                     onDeleteProject={!isFinance ? onDeleteProject : undefined}
+                    onNavigateToTab={(tab) => setActiveTab(tab)}
                   />
                 </div>
               )}

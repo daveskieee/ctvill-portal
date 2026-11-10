@@ -10,7 +10,7 @@ import {
   X, ChevronRight, ChevronDown, Clock, ArrowRight, Link2,
   AlertCircle, ChevronLeft, CornerDownRight, ChevronsDown, ChevronsUp,
   Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen, Scan,
-  Printer, Download, Wand2, BookmarkCheck, RotateCw
+  Printer, Download, Wand2, BookmarkCheck, RotateCw, Sparkles
 } from 'lucide-react';
 import { ProjectProfile, Contractor, DailySiteLog } from '../types';
 import { useTheme } from '../context/ThemeContext';
@@ -18,6 +18,23 @@ import { useTheme } from '../context/ThemeContext';
 // ==========================================
 // 1. Core Interfaces & Data Types
 // ==========================================
+
+export const STANDARD_CONSTRUCTION_PHASES: string[] = [
+  'Earthworks',
+  'Concreting Works',
+  'Reinforcing Bar',
+  'Formworks',
+  'Masonry Works',
+  'Roof Works',
+  'Finishing & Tiling Works',
+  'Ceiling Works',
+  'Finishing Carpentry',
+  'Doors and Windows',
+  'Cabinet Works',
+  'Painting Works',
+  'Electrical Works',
+  'Plumbing Works'
+];
 
 export interface GanttTaskItem {
   id: string;
@@ -28,6 +45,8 @@ export interface GanttTaskItem {
   endDate: string;   // YYYY-MM-DD
   duration: number;  // working days (Mon-Sat, skipping Sundays)
   progress: number;  // 0.0 to 1.0
+  weight?: number;   // Weighted percentage (0-100%) within parent phase or schedule
+  constructionPhase?: string; // Standard civil construction phase
   baselineStart?: string | null;
   baselineEnd?: string | null;
   type: 'task' | 'project' | 'milestone';
@@ -947,12 +966,45 @@ export default function GanttTimeline({
     setZoomFactor(1.0);
   }, []);
 
-  // Helper to compute duration-weighted physical progress from tasks
+  // Helper to compute weighted physical progress from subtasks & phases (100% total)
   const computeProjectProgress = useCallback((taskList: GanttTaskItem[]) => {
     if (!taskList || taskList.length === 0) return 0;
-    const totalDuration = taskList.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
-    const weightedProgress = taskList.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, curr.duration || 1), 0);
+    const parentIds = new Set(taskList.map(t => t.parentTaskId).filter(Boolean));
+    // Leaf tasks (subtasks or standalone tasks) drive physical progress
+    const leafTasks = taskList.filter(t => !parentIds.has(t.id));
+    const targetList = leafTasks.length > 0 ? leafTasks : taskList;
+
+    const hasExplicitWeights = targetList.some(t => typeof t.weight === 'number' && t.weight > 0);
+    if (hasExplicitWeights) {
+      const totalWeight = targetList.reduce((acc, curr) => acc + Math.max(1, Number(curr.weight ?? curr.duration ?? 10)), 0);
+      const weightedSum = targetList.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, Number(curr.weight ?? curr.duration ?? 10)), 0);
+      return totalWeight > 0 ? Math.round((weightedSum / totalWeight) * 100) : 0;
+    }
+
+    const totalDuration = targetList.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
+    const weightedProgress = targetList.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, curr.duration || 1), 0);
     return totalDuration > 0 ? Math.round((weightedProgress / totalDuration) * 100) : 0;
+  }, []);
+
+  // Roll up weighted subtask progress into parent Phase bars (100% total per phase)
+  const rollUpParentPhaseProgress = useCallback((taskList: GanttTaskItem[]): GanttTaskItem[] => {
+    const childrenByParent = new Map<string, GanttTaskItem[]>();
+    taskList.forEach(t => {
+      if (t.parentTaskId) {
+        if (!childrenByParent.has(t.parentTaskId)) childrenByParent.set(t.parentTaskId, []);
+        childrenByParent.get(t.parentTaskId)!.push(t);
+      }
+    });
+    if (childrenByParent.size === 0) return taskList;
+
+    return taskList.map(t => {
+      const children = childrenByParent.get(t.id);
+      if (!children || children.length === 0) return t;
+      const totalWeight = children.reduce((acc, c) => acc + Math.max(1, Number(c.weight ?? (100 / children.length))), 0);
+      const weightedProg = children.reduce((acc, c) => acc + (c.progress || 0) * Math.max(1, Number(c.weight ?? (100 / children.length))), 0);
+      const phaseProgress = totalWeight > 0 ? Math.max(0, Math.min(1, weightedProg / totalWeight)) : t.progress;
+      return { ...t, progress: phaseProgress };
+    });
   }, []);
 
   const currentProjectProgress = useMemo(() => {
@@ -1003,6 +1055,11 @@ export default function GanttTimeline({
     return Array.from(pairMap.values());
   }, [tasks, links]);
 
+  // Construction Phases Registry & Custom Phase Input State
+  const [constructionPhases, setConstructionPhases] = useState<string[]>(STANDARD_CONSTRUCTION_PHASES);
+  const [showAddPhaseInput, setShowAddPhaseInput] = useState<boolean>(false);
+  const [newCustomPhaseName, setNewCustomPhaseName] = useState<string>('');
+
   // Edit Modal & Creation Draft State
   const [isNewTaskDraft, setIsNewTaskDraft] = useState<boolean>(false);
   const [editingTask, setEditingTask] = useState<GanttTaskItem | null>(null);
@@ -1012,6 +1069,8 @@ export default function GanttTimeline({
     endDate: string;
     duration: number;
     progress: number;
+    weight: number;
+    constructionPhase: string;
     type: 'task' | 'project' | 'milestone';
     assignedContractorId: string;
     predecessorIds: string[];
@@ -1021,6 +1080,8 @@ export default function GanttTimeline({
     endDate: '',
     duration: 1,
     progress: 0,
+    weight: 25,
+    constructionPhase: STANDARD_CONSTRUCTION_PHASES[0],
     type: 'task',
     assignedContractorId: '',
     predecessorIds: []
@@ -1143,20 +1204,29 @@ export default function GanttTimeline({
       if (validTasks.length > 0) {
         setTasks(validTasks);
         setLinks(validLinks);
-      } else if (tasksProp && tasksProp.length > 0) {
-        setTasks(tasksProp);
+      } else if (tasksProp && tasksProp.length > 0 && tasksProp.some(t => t.projectId === projectId)) {
+        setTasks(tasksProp.filter(t => t.projectId === projectId));
         setLinks(validLinks);
-      } else {
+      } else if (projectId === 'default') {
+        // Fallback seed tasks strictly for default demo project
         setTasks(DEFAULT_EM_JAY_TASKS);
         setLinks(DEFAULT_EM_JAY_LINKS);
+      } else {
+        // Newly created projects start empty at 0% progress
+        setTasks([]);
+        setLinks([]);
       }
     } catch (err) {
       console.error('Failed to load project gantt data:', err);
-      if (tasksProp && tasksProp.length > 0) {
-        setTasks(tasksProp);
-      } else {
+      if (tasksProp && tasksProp.length > 0 && tasksProp.some(t => t.projectId === projectId)) {
+        setTasks(tasksProp.filter(t => t.projectId === projectId));
+        setLinks([]);
+      } else if (projectId === 'default') {
         setTasks(DEFAULT_EM_JAY_TASKS);
         setLinks(DEFAULT_EM_JAY_LINKS);
+      } else {
+        setTasks([]);
+        setLinks([]);
       }
     } finally {
       setIsLoading(false);
@@ -1712,6 +1782,8 @@ export default function GanttTimeline({
       endDate: task.endDate,
       duration: task.duration,
       progress: Math.round(task.progress * 100),
+      weight: typeof task.weight === 'number' ? task.weight : 25,
+      constructionPhase: task.constructionPhase || constructionPhases[0] || STANDARD_CONSTRUCTION_PHASES[0],
       type: task.type,
       assignedContractorId: task.assignedContractorId || '',
       predecessorIds: [...task.predecessorIds]
@@ -1727,14 +1799,96 @@ export default function GanttTimeline({
     const isMs = Number(editFormData.duration) === 0 || editFormData.type === 'milestone';
     const eDate = isMs ? sDate : (editFormData.endDate ? parseDate(editFormData.endDate) : addWorkingDays(sDate, Number(editFormData.duration) || 1));
     const dur = isMs ? 0 : Math.max(1, countWorkingDays(sDate, eDate) || Number(editFormData.duration) || 1);
+    const selectedPhaseName = editFormData.constructionPhase || STANDARD_CONSTRUCTION_PHASES[0];
+
+    // Multi-Task Bulk Input Support (comma-separated task names during creation)
+    const rawNames = isNewTaskDraft
+      ? editFormData.text.split(',').map(s => s.trim()).filter(Boolean)
+      : [editFormData.text.trim() || 'Construction Task'];
+    const taskNames = rawNames.length > 0 ? rawNames : ['Construction Task'];
+
+    if (isNewTaskDraft && taskNames.length > 1) {
+      const perTaskWeight = Math.max(1, Math.round((editFormData.weight || 100) / taskNames.length));
+      const newBatchTasks: GanttTaskItem[] = [];
+
+      setTasks(prev => {
+        let baseList = [...prev];
+        // Find or create parent Phase summary row for selectedPhaseName
+        let phaseParent = baseList.find(t => !t.parentTaskId && t.text.toLowerCase() === selectedPhaseName.toLowerCase());
+        if (!phaseParent) {
+          const phaseId = `phase-${Date.now()}`;
+          phaseParent = {
+            id: phaseId,
+            projectId: selectedProjectId,
+            wbsCode: `${baseList.filter(t => !t.parentTaskId).length + 1}.0`,
+            text: selectedPhaseName,
+            startDate: formatDateISO(sDate),
+            endDate: formatDateISO(eDate),
+            duration: dur,
+            progress: progressVal,
+            weight: 100,
+            constructionPhase: selectedPhaseName,
+            type: 'project',
+            parentTaskId: null,
+            sortOrder: baseList.length + 1,
+            assignedContractorId: editFormData.assignedContractorId || null,
+            contractorName: contractor?.name || 'CTVill Construction Crew',
+            predecessorIds: []
+          };
+          baseList.push(phaseParent);
+        }
+
+        const existingChildCount = baseList.filter(t => t.parentTaskId === phaseParent!.id).length;
+        const parentWbsPrefix = (phaseParent.wbsCode || '1.0').replace(/\.0$/, '');
+
+        taskNames.forEach((tName, idx) => {
+          const newTaskObj: GanttTaskItem = {
+            id: `task-${Date.now()}-${idx}`,
+            projectId: selectedProjectId,
+            wbsCode: `${parentWbsPrefix}.${existingChildCount + idx + 1}`,
+            text: tName,
+            startDate: formatDateISO(sDate),
+            endDate: formatDateISO(eDate),
+            duration: dur,
+            progress: progressVal,
+            weight: perTaskWeight,
+            constructionPhase: selectedPhaseName,
+            type: 'task',
+            parentTaskId: phaseParent!.id,
+            sortOrder: baseList.length + idx + 1,
+            assignedContractorId: editFormData.assignedContractorId || null,
+            contractorName: contractor?.name || 'CTVill Construction Crew',
+            predecessorIds: [...editFormData.predecessorIds]
+          };
+          newBatchTasks.push(newTaskObj);
+          baseList.push(newTaskObj);
+        });
+
+        const rolledUp = rollUpParentPhaseProgress(baseList);
+        const scheduled = cascadeDownstreamSchedule(rolledUp, links, newBatchTasks[0].id);
+        const newProg = computeProjectProgress(scheduled);
+        onUpdateProject?.(selectedProjectId, {
+          progressPercentage: newProg,
+          tasksCount: scheduled.length
+        });
+        return scheduled;
+      });
+
+      newBatchTasks.forEach(t => syncBackend('create', t));
+      setIsNewTaskDraft(false);
+      setEditingTask(null);
+      return;
+    }
 
     const updatedTask: GanttTaskItem = {
       ...editingTask,
-      text: editFormData.text,
+      text: taskNames[0],
       startDate: formatDateISO(sDate),
       endDate: formatDateISO(eDate),
       duration: dur,
       progress: progressVal,
+      weight: Math.max(1, Math.min(100, Number(editFormData.weight) || 25)),
+      constructionPhase: selectedPhaseName,
       type: (dur === 0 || editFormData.type === 'milestone') ? 'milestone' : editFormData.type,
       assignedContractorId: editFormData.assignedContractorId || null,
       contractorName: contractor?.name || editingTask.contractorName || 'CTVill Construction Crew',
@@ -1759,7 +1913,7 @@ export default function GanttTimeline({
 
     if (isNewTaskDraft) {
       setTasks(prev => {
-        const next = [...prev, updatedTask];
+        const next = rollUpParentPhaseProgress([...prev, updatedTask]);
         const scheduled = cascadeDownstreamSchedule(next, updatedLinks, updatedTask.id);
         const newProg = computeProjectProgress(scheduled);
         onUpdateProject?.(selectedProjectId, {
@@ -1774,7 +1928,8 @@ export default function GanttTimeline({
         const idx = prev.findIndex(t => t.id === updatedTask.id);
         const copy = [...prev];
         if (idx !== -1) copy[idx] = updatedTask;
-        const scheduled = cascadeDownstreamSchedule(copy, updatedLinks, updatedTask.id);
+        const rolledUp = rollUpParentPhaseProgress(copy);
+        const scheduled = cascadeDownstreamSchedule(rolledUp, updatedLinks, updatedTask.id);
         const newProg = computeProjectProgress(scheduled);
         onUpdateProject?.(selectedProjectId, {
           progressPercentage: newProg,
@@ -1919,11 +2074,13 @@ export default function GanttTimeline({
     setIsNewTaskDraft(true);
     setEditingTask(draftTask);
     setEditFormData({
-      text: draftTask.text,
+      text: '',
       startDate: draftTask.startDate,
       endDate: draftTask.endDate,
       duration: draftTask.duration,
       progress: 0,
+      weight: 25,
+      constructionPhase: constructionPhases[0] || STANDARD_CONSTRUCTION_PHASES[0],
       type: draftTask.type,
       assignedContractorId: draftTask.assignedContractorId || '',
       predecessorIds: []
@@ -1962,10 +2119,67 @@ export default function GanttTimeline({
       endDate: draftMilestone.endDate,
       duration: 0,
       progress: 0,
+      weight: 10,
+      constructionPhase: constructionPhases[0] || STANDARD_CONSTRUCTION_PHASES[0],
       type: 'milestone',
       assignedContractorId: '',
       predecessorIds: []
     });
+  };
+
+  const handleLoadStandardFitOutTemplate = async () => {
+    if (!selectedProjectId) return;
+    setIsSyncing(true);
+    try {
+      // 1. Generate new task IDs mapped to selectedProjectId
+      // All template tasks strictly initialize at 0% progress per specifications
+      const idMap = new Map<string, string>();
+      DEFAULT_EM_JAY_TASKS.forEach((t, idx) => {
+        idMap.set(t.id, `tsk-${selectedProjectId}-${idx + 1}-${Date.now().toString().slice(-4)}`);
+      });
+
+      const templateTasks: GanttTaskItem[] = DEFAULT_EM_JAY_TASKS.map((t) => {
+        const newId = idMap.get(t.id) || `tsk-${selectedProjectId}-${Date.now().toString().slice(-4)}`;
+        return {
+          ...t,
+          id: newId,
+          projectId: selectedProjectId,
+          progress: 0.0, // Strictly initialize all tasks at 0% progress
+          predecessorIds: (t.predecessorIds || []).map(pId => idMap.get(pId) || pId)
+        };
+      });
+
+      const templateLinks: GanttLinkItem[] = DEFAULT_EM_JAY_LINKS.map((l, idx) => ({
+        id: `lnk-${selectedProjectId}-${idx + 1}-${Date.now().toString().slice(-4)}`,
+        source: idMap.get(l.source) || l.source,
+        target: idMap.get(l.target) || l.target,
+        type: l.type || '0',
+        lag: l.lag || 0
+      }));
+
+      setTasks(templateTasks);
+      setLinks(templateLinks);
+
+      // Persist template tasks to backend
+      for (const t of templateTasks) {
+        await syncBackend('create', t);
+      }
+
+      setSyncFeedback({
+        type: 'success',
+        message: 'Standard Fit-Out Template loaded: All tasks initialized at 0% progress.'
+      });
+      setTimeout(() => setSyncFeedback(null), 3500);
+    } catch (err) {
+      console.error('Failed to load standard fit-out template:', err);
+      setSyncFeedback({
+        type: 'error',
+        message: 'Failed to load standard fit-out template'
+      });
+      setTimeout(() => setSyncFeedback(null), 3500);
+    } finally {
+      setIsSyncing(false);
+    }
   };
 
   // Quick Metrics
@@ -2287,6 +2501,22 @@ export default function GanttTimeline({
               <span className={isDark ? 'text-amber-400 text-xs' : 'text-amber-600 text-xs'}>◆</span>
               <span>Add Milestone</span>
             </button>
+            {tasks.length === 0 && selectedProjectId && (
+              <button
+                type="button"
+                onClick={handleLoadStandardFitOutTemplate}
+                disabled={isSyncing}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
+                  isDark 
+                    ? 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-amber-500/30' 
+                    : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300 shadow-2xs'
+                }`}
+                title="Load Standard Fit-Out Template (initialized at 0% progress)"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                <span>Load Template</span>
+              </button>
+            )}
           </div>
 
           <div className="flex items-center gap-2">
@@ -2787,6 +3017,44 @@ export default function GanttTimeline({
                 </div>
               );
             })}
+            {visibleTasks.length === 0 && !isLoading && (
+              <div className="p-8 text-center flex flex-col items-center justify-center min-h-[340px]">
+                <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-3 ${
+                  isDark ? 'bg-slate-900 text-amber-400 border border-slate-800' : 'bg-amber-50 text-amber-600 border border-amber-200'
+                }`}>
+                  <Layers className="w-6 h-6" />
+                </div>
+                <h4 className={`text-sm font-bold mb-1 ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                  No Tasks in Project Schedule
+                </h4>
+                <p className={`text-xs max-w-xs mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                  This commercial site has 0 tasks (0% complete). Start building the schedule manually or initialize from template.
+                </p>
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleAddNewTask}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition cursor-pointer shadow-xs"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Task</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLoadStandardFitOutTemplate}
+                    disabled={isSyncing}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 font-medium rounded-lg text-xs transition cursor-pointer border ${
+                      isDark 
+                        ? 'bg-slate-900 hover:bg-slate-800 text-amber-400 border-amber-500/30' 
+                        : 'bg-white hover:bg-slate-50 text-amber-700 border-amber-200 shadow-2xs'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    <span>Load Standard Fit-Out Template</span>
+                  </button>
+                </div>
+              </div>
+            )}
               </div>
             </>
           )}
@@ -2801,6 +3069,16 @@ export default function GanttTimeline({
           }`}
         >
           <div style={{ width: `${timelineWidth}px`, height: `${totalGridHeight + 60}px` }} className="relative min-h-full">
+            {/* Empty Timeline Watermark */}
+            {visibleTasks.length === 0 && !isLoading && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 pt-20">
+                <div className={`px-5 py-3 rounded-xl border text-center shadow-xs ${
+                  isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400' : 'bg-white/90 border-slate-200 text-slate-500'
+                }`}>
+                  <p className="text-xs font-mono font-medium">Timeline canvas empty • 0 tasks scheduled (0% complete)</p>
+                </div>
+              </div>
+            )}
             {/* Timeline Multi-Tier Header */}
             <div className={`sticky top-0 z-30 border-b ${
               isDark ? 'bg-slate-900 border-slate-800 shadow-md' : 'bg-slate-50 border-slate-200 shadow-2xs'
@@ -3154,11 +3432,18 @@ export default function GanttTimeline({
             {/* Modal Form */}
             <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
               <div>
-                <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold ${
-                  isDark ? 'text-slate-400' : 'text-slate-600'
-                }`}>
-                  Task Name & Scope
-                </label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className={`uppercase tracking-wider text-[10px] font-bold ${
+                    isDark ? 'text-slate-400' : 'text-slate-600'
+                  }`}>
+                    Task Name & Scope {isNewTaskDraft && '(Supports Comma-Separated Bulk Input)'}
+                  </label>
+                  {isNewTaskDraft && editFormData.text.includes(',') && (
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30 font-semibold">
+                      Batch: {editFormData.text.split(',').map(s => s.trim()).filter(Boolean).length} Tasks
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   value={editFormData.text}
@@ -3166,8 +3451,13 @@ export default function GanttTimeline({
                   className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none border ${
                     isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
                   }`}
-                  placeholder="e.g. Reinforced Footing Concreting"
+                  placeholder={isNewTaskDraft ? 'e.g. Excavation, Land clearing, Land paving' : 'e.g. Reinforced Footing Concreting'}
                 />
+                {isNewTaskDraft && (
+                  <p className={`text-[10px] mt-1 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                    Tip: Enter comma-separated task names (e.g., <em>"Excavation, Land clearing, Land paving"</em>) to batch-create all tasks under the selected Construction Phase at once.
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -3221,7 +3511,7 @@ export default function GanttTimeline({
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold ${
                     isDark ? 'text-slate-400' : 'text-slate-600'
@@ -3251,22 +3541,94 @@ export default function GanttTimeline({
                 </div>
 
                 <div>
-                  <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold ${
-                    isDark ? 'text-slate-400' : 'text-slate-600'
-                  }`}>
-                    Task Classification
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className={`uppercase tracking-wider text-[10px] font-bold ${
+                      isDark ? 'text-slate-400' : 'text-slate-600'
+                    }`}>
+                      Construction Phase
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddPhaseInput(prev => !prev)}
+                      className="text-[10px] font-mono font-bold text-amber-400 hover:text-amber-300 flex items-center gap-0.5 cursor-pointer"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>Add Phase</span>
+                    </button>
+                  </div>
                   <select
-                    value={editFormData.type}
-                    onChange={(e) => setEditFormData(prev => ({ ...prev, type: e.target.value as any }))}
+                    value={editFormData.constructionPhase}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, constructionPhase: e.target.value }))}
                     className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none cursor-pointer border ${
                       isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
                     }`}
                   >
-                    <option value="task">Standard Task</option>
-                    <option value="project">Phase / Summary Bar</option>
-                    <option value="milestone">Milestone (0 Days)</option>
+                    {constructionPhases.map(phase => (
+                      <option key={phase} value={phase}>{phase}</option>
+                    ))}
                   </select>
+                  {showAddPhaseInput && (
+                    <div className="flex items-center gap-1.5 mt-2">
+                      <input
+                        type="text"
+                        value={newCustomPhaseName}
+                        onChange={(e) => setNewCustomPhaseName(e.target.value)}
+                        placeholder="Custom phase name..."
+                        className={`flex-1 rounded-lg px-2.5 py-1 text-xs border focus:border-amber-500 focus:outline-none ${
+                          isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const clean = newCustomPhaseName.trim();
+                          if (clean) {
+                            if (!constructionPhases.includes(clean)) {
+                              setConstructionPhases(prev => [...prev, clean]);
+                            }
+                            setEditFormData(prev => ({ ...prev, constructionPhase: clean }));
+                            setNewCustomPhaseName('');
+                            setShowAddPhaseInput(false);
+                          }
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer"
+                      >
+                        Add
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Subtask / Phase Weight (%) */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className={`uppercase tracking-wider text-[10px] font-bold ${
+                    isDark ? 'text-slate-400' : 'text-slate-600'
+                  }`}>
+                    Phase / Subtask Weight (%) — Weighted Progress Share (e.g. Footing = 80%, Prep = 10%, Pouring = 10%)
+                  </label>
+                  <span className="font-bold text-emerald-400">{editFormData.weight}% Weight</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min="1"
+                    max="100"
+                    value={editFormData.weight}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, weight: parseInt(e.target.value, 10) || 10 }))}
+                    className="flex-1 accent-emerald-500 cursor-pointer"
+                  />
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    value={editFormData.weight}
+                    onChange={(e) => setEditFormData(prev => ({ ...prev, weight: Math.max(1, Math.min(100, parseInt(e.target.value, 10) || 10)) }))}
+                    className={`w-16 rounded-xl px-2 py-1 text-center font-bold border ${
+                      isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
+                    }`}
+                  />
                 </div>
               </div>
 

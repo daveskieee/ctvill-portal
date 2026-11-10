@@ -51,7 +51,7 @@ export function validateProductionSecurityConfig(): void {
   if (!isProduction) return;
 
   const sessionSecret = process.env.SESSION_SECRET;
-  const csrfSecret = process.env.CSRF_SECRET;
+  const csrfSecret = process.env.CSRF_SECRET || process.env.SESSION_SECRET;
 
   if (!sessionSecret || typeof sessionSecret !== 'string' || sessionSecret.trim().length < 32) {
     throw new Error(
@@ -62,7 +62,7 @@ export function validateProductionSecurityConfig(): void {
 
   if (!csrfSecret || typeof csrfSecret !== 'string' || csrfSecret.trim().length < 32) {
     throw new Error(
-      'FATAL CSRF SECURITY CONFIGURATION ERROR: A strong CSRF_SECRET environment variable ' +
+      'FATAL CSRF SECURITY CONFIGURATION ERROR: A strong CSRF_SECRET or SESSION_SECRET environment variable ' +
       '(minimum 32 characters) is strictly required when running in production mode. Refusing application startup.'
     );
   }
