@@ -95,7 +95,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   return (
     <aside
       className={`
-        ${isDark ? 'bg-slate-950 border-r border-slate-800' : 'bg-white border-r border-slate-200 shadow-sm'}
+        ${isDark ? 'bg-slate-950 border-r border-slate-800' : 'bg-[#ffffff] border-r border-[#cbd5e1] shadow-sm'}
         flex flex-col justify-between shrink-0 select-none z-40
         transition-all duration-300 ease-in-out
         ${isMobile
@@ -124,10 +124,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <button
                   type="button"
                   onClick={() => toggleSectionCollapse(section.id)}
-                  className={`w-full flex items-center justify-between px-2.5 py-1 text-[10px] font-mono font-bold tracking-wider uppercase rounded-lg transition-colors group cursor-pointer ${
+                  style={{ letterSpacing: '0.05em' }}
+                  className={`w-full flex items-center justify-between px-2.5 py-1 text-[10px] font-mono font-bold tracking-[0.05em] uppercase rounded-lg transition-colors group cursor-pointer ${
                     isDark
                       ? 'text-slate-400 hover:text-slate-200 hover:bg-slate-900/60'
-                      : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100/70'
+                      : 'text-[#475569] font-bold hover:text-[#0f172a] hover:bg-slate-100'
                   }`}
                 >
                   <div className="flex items-center gap-1.5 truncate">
@@ -135,12 +136,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       <span className={`text-[9px] font-mono font-bold px-1.5 py-0.2 rounded border ${
                         isDark
                           ? 'bg-slate-800/90 text-amber-400/90 border-slate-700/60'
-                          : 'bg-slate-100 text-amber-700 border-slate-200'
+                          : 'bg-slate-100 text-amber-700 border-slate-300'
                       }`}>
                         {(section as any).step}
                       </span>
                     )}
-                    <span className="truncate">{section.title}</span>
+                    <span className="truncate font-bold">{section.title}</span>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
                     {isCollapsed && totalSectionBadges > 0 && (
@@ -154,13 +155,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     )}
                     <ChevronDown
                       className={`w-3.5 h-3.5 transition-transform duration-200 ${
-                        isDark ? 'text-slate-500 group-hover:text-slate-300' : 'text-slate-400 group-hover:text-slate-600'
+                        isDark ? 'text-slate-500 group-hover:text-slate-300' : 'text-[#475569] group-hover:text-[#0f172a]'
                       } ${isCollapsed ? '-rotate-90' : 'rotate-0'}`}
                     />
                   </div>
                 </button>
               ) : (
-                <div className={`h-px my-2 mx-2 ${isDark ? 'bg-slate-800/80' : 'bg-slate-200/80'}`} />
+                <div className={`h-px my-2 mx-2 ${isDark ? 'bg-slate-800/80' : 'bg-[#cbd5e1]'}`} />
               )}
 
               {/* Section Items */}
@@ -177,20 +178,29 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           onSelectTab(item.id);
                         }}
                         title={!isSidebarOpen ? item.label : undefined}
+                        style={
+                          isActive && !isDark
+                            ? {
+                                backgroundColor: '#fff7ed',
+                                color: '#c2410c',
+                                borderLeft: '3px solid #ea580c'
+                              }
+                            : undefined
+                        }
                         className={`
-                          relative w-full flex items-center gap-2.5 rounded-xl transition-all duration-150 cursor-pointer text-left
+                          relative w-full flex items-center gap-2.5 rounded-xl transition-all duration-150 cursor-pointer text-left group
                           ${isSidebarOpen ? 'px-3 py-2 text-xs' : 'px-0 py-2.5 justify-center'}
                           ${isActive
                             ? isDark
                               ? 'bg-amber-500/12 text-amber-300 font-semibold border border-amber-500/30 shadow-xs'
-                              : 'bg-slate-900 text-white font-medium shadow-sm border border-slate-900'
+                              : 'bg-[#fff7ed] text-[#c2410c] font-bold border border-orange-200/80 border-l-[3px] border-l-[#ea580c] shadow-2xs'
                             : isDark
                               ? 'text-slate-400 hover:text-slate-100 hover:bg-slate-900/70 border border-transparent'
-                              : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 border border-transparent transition-colors'
+                              : 'text-[#334155] font-medium hover:text-[#0f172a] hover:bg-slate-100 border border-transparent transition-colors'
                           }
                         `}
                       >
-                        {/* Active Accent Indicator Bar - Dark Mode only */}
+                        {/* Active Accent Indicator Bar - Dark Mode */}
                         {isActive && isSidebarOpen && isDark && (
                           <div className="absolute left-0 top-1.5 bottom-1.5 w-1 rounded-r-full shadow-sm bg-amber-400 shadow-amber-400/50" />
                         )}
@@ -198,8 +208,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <Icon
                           className={`w-4 h-4 shrink-0 transition-colors ${
                             isActive
-                              ? isDark ? 'text-amber-400' : 'text-white'
-                              : isDark ? 'text-slate-400 group-hover:text-slate-200' : 'text-slate-500 group-hover:text-slate-800'
+                              ? isDark ? 'text-amber-400' : 'text-[#ea580c]'
+                              : isDark ? 'text-slate-400 group-hover:text-slate-200' : 'text-[#475569] group-hover:text-[#0f172a]'
                           }`}
                         />
 
@@ -212,10 +222,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                   isActive
                                     ? isDark
                                       ? 'bg-amber-500/25 text-amber-200 border-amber-500/40'
-                                      : 'bg-slate-800 text-slate-200 border-slate-700'
+                                      : 'bg-orange-100 text-[#c2410c] border-orange-300'
                                     : isDark
                                       ? 'bg-slate-800 text-slate-300 border-slate-700/60'
-                                      : 'bg-slate-100 text-slate-600 border-slate-200'
+                                      : 'bg-slate-100 text-[#334155] border-[#cbd5e1]'
                                 }`}
                               >
                                 {(item as any).badge}
@@ -235,7 +245,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Bottom Sidebar User Profile Card */}
       <div className={`border-t ${
-        isDark ? 'border-slate-800/80 bg-slate-950/80' : 'border-slate-200 bg-slate-50/70'
+        isDark ? 'border-slate-800/80 bg-slate-950/80' : 'border-[#cbd5e1] bg-[#f8fafc]'
       } ${isSidebarOpen ? 'p-3' : 'p-2'}`}>
         <div
           onClick={() => onSelectTab('account-settings')}

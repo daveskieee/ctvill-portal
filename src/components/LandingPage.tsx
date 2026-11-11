@@ -9,9 +9,27 @@ import {
   MapPin, Activity, FileText, CheckCircle2, Calendar, Calculator, 
   Compass, Layers, Eye, X, Check, Send, ChevronLeft, ChevronRight, HardHat, 
   Scale, Briefcase, Ruler, Clock, ExternalLink, Hammer, Wrench,
-  CheckSquare, FileCheck, Users, HelpCircle, AlertTriangle, RefreshCw
+  CheckSquare, FileCheck, Users, HelpCircle, AlertTriangle, RefreshCw, Star, MessageSquarePlus
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
+import {
+  getEstimatorConfig,
+  ESTIMATOR_CONFIG_EVENT,
+  EstimatorConfig,
+  SpaceCategoryKey,
+  FinishTierKey,
+} from '../utils/estimatorConfig';
+import {
+  getClientReviews,
+  submitClientReview,
+  getReviewCooldownRemainingSeconds,
+  CLIENT_REVIEWS_EVENT,
+  ClientReviewItem,
+} from '../utils/clientReviews';
+import {
+  STRICT_EMAIL_REGEX,
+  validateEmailPreFlight,
+} from '../utils/securityValidation';
 
 // Authentic CTVill Local Assets
 import logoJpg from '../assets/images/ctvill/logo.jpg';
@@ -561,35 +579,137 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
     setShowQuoteModal(true);
   };
   
-  // Quotation Modal State
+  // Quotation Modal & Pre-Flight Anti-Spam Cooldown State
   const [showQuoteModal, setShowQuoteModal] = useState<boolean>(false);
   const [quoteSubmitted, setQuoteSubmitted] = useState<boolean>(false);
   const [quoteSubmittedEmail, setQuoteSubmittedEmail] = useState<string>('');
   const [isSubmittingQuote, setIsSubmittingQuote] = useState<boolean>(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoteCooldownSec, setQuoteCooldownSec] = useState<number>(0);
   const [clientName, setClientName] = useState('');
   const [clientEmail, setClientEmail] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [projectScope, setProjectScope] = useState('Full Turnkey Fit-Out (Design + Build)');
   const [projectNotes, setProjectNotes] = useState('');
 
-  // Interactive Fit-Out Cost & Timeline Estimator State
-  const [estimatorSpaceType, setEstimatorSpaceType] = useState<'bpo' | 'tech' | 'retail' | 'corporate'>('corporate');
-  const [estimatorArea, setEstimatorArea] = useState<number>(180);
-  const [estimatorTier, setEstimatorTier] = useState<'standard' | 'premium' | 'bespoke'>('premium');
+  // Client Feedback / Review Submission & Moderation Queue State
+  const [clientReviews, setClientReviews] = useState<ClientReviewItem[]>(() => getClientReviews());
+  const [showReviewModal, setShowReviewModal] = useState<boolean>(false);
+  const [reviewClientName, setReviewClientName] = useState<string>('');
+  const [reviewCompanyProject, setReviewCompanyProject] = useState<string>('');
+  const [reviewEmail, setReviewEmail] = useState<string>('');
+  const [reviewRating, setReviewRating] = useState<number>(5);
+  const [reviewHoverRating, setReviewHoverRating] = useState<number>(0);
+  const [reviewMessage, setReviewMessage] = useState<string>('');
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewSubmittedSuccess, setReviewSubmittedSuccess] = useState<boolean>(false);
+  const [reviewCooldownSec, setReviewCooldownSec] = useState<number>(() => getReviewCooldownRemainingSeconds());
 
-  // Calculation Logic for Fit-Out
-  const rateMatrix = {
-    corporate: { standard: 14500, premium: 19500, bespoke: 25000, baseWeeks: 5, weekPer100Sqm: 1.2 },
-    bpo: { standard: 12500, premium: 16800, bespoke: 21500, baseWeeks: 6, weekPer100Sqm: 1.0 },
-    tech: { standard: 15500, premium: 21000, bespoke: 27500, baseWeeks: 5, weekPer100Sqm: 1.3 },
-    retail: { standard: 16500, premium: 23000, bespoke: 29500, baseWeeks: 4, weekPer100Sqm: 1.4 }
+  // Interactive Fit-Out Cost & Timeline Estimator State (Admin-Configurable)
+  const [estimatorConfig, setEstimatorConfig] = useState<EstimatorConfig>(() => getEstimatorConfig());
+  const [estimatorSpaceType, setEstimatorSpaceType] = useState<SpaceCategoryKey>('corporate');
+  const [estimatorArea, setEstimatorArea] = useState<number>(180);
+  const [estimatorTier, setEstimatorTier] = useState<FinishTierKey>('premium');
+
+  // Subscribe to live Admin Estimator Config & Client Review updates
+  useEffect(() => {
+    const syncEstimator = () => setEstimatorConfig(getEstimatorConfig());
+    const syncReviews = () => setClientReviews(getClientReviews());
+    const onStorage = (e: StorageEvent) => {
+      if (!e.key || e.key.includes('estimator')) syncEstimator();
+      if (!e.key || e.key.includes('reviews')) syncReviews();
+    };
+    window.addEventListener(ESTIMATOR_CONFIG_EVENT, syncEstimator);
+    window.addEventListener(CLIENT_REVIEWS_EVENT, syncReviews);
+    window.addEventListener('storage', onStorage);
+    return () => {
+      window.removeEventListener(ESTIMATOR_CONFIG_EVENT, syncEstimator);
+      window.removeEventListener(CLIENT_REVIEWS_EVENT, syncReviews);
+      window.removeEventListener('storage', onStorage);
+    };
+  }, []);
+
+  // Tick anti-spam cooldown timers
+  useEffect(() => {
+    if (quoteCooldownSec <= 0 && reviewCooldownSec <= 0) return;
+    const t = setInterval(() => {
+      setQuoteCooldownSec((prev) => Math.max(0, prev - 1));
+      setReviewCooldownSec(getReviewCooldownRemainingSeconds());
+    }, 1000);
+    return () => clearInterval(t);
+  }, [quoteCooldownSec, reviewCooldownSec]);
+
+  // Calculation Logic for Fit-Out driven directly by Admin Estimator Config
+  const currentRates = estimatorConfig.categories[estimatorSpaceType] || estimatorConfig.categories.corporate;
+  const ratePerSqm = Number(currentRates[estimatorTier]) || Math.round(currentRates.baseRatePerSqm * (estimatorConfig.tierMultipliers[estimatorTier] || 1));
+  const safeEstimatorArea = Math.min(5000, Math.max(1, Number(estimatorArea) || 1));
+  const estimatedCost = Math.round(safeEstimatorArea * ratePerSqm);
+  const estimatedWeeks = Math.max(
+    3,
+    Math.round(currentRates.baseWeeks + (safeEstimatorArea / 100) * currentRates.weekPer100Sqm)
+  );
+
+  const handleAreaChange = (rawVal: string | number) => {
+    const parsed = typeof rawVal === 'number' ? rawVal : parseInt(String(rawVal), 10);
+    if (isNaN(parsed)) {
+      setEstimatorArea(1);
+      return;
+    }
+    setEstimatorArea(Math.min(5000, Math.max(1, parsed)));
   };
 
-  const currentRates = rateMatrix[estimatorSpaceType];
-  const ratePerSqm = currentRates[estimatorTier];
-  const estimatedCost = estimatorArea * ratePerSqm;
-  const estimatedWeeks = Math.max(3, Math.round(currentRates.baseWeeks + (estimatorArea / 100) * currentRates.weekPer100Sqm));
+  const approvedReviews = clientReviews.filter((r) => r.status === 'Approved');
+
+  const handleReviewSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setReviewError(null);
+
+    const remainingCooldown = getReviewCooldownRemainingSeconds();
+    if (remainingCooldown > 0) {
+      setReviewCooldownSec(remainingCooldown);
+      setReviewError(`Anti-spam protection active: Please wait ${remainingCooldown}s before submitting another review.`);
+      return;
+    }
+
+    const cleanName = reviewClientName.trim();
+    const cleanCompany = reviewCompanyProject.trim();
+    const cleanMsg = reviewMessage.trim();
+    const cleanRevEmail = reviewEmail.trim();
+
+    if (cleanName.length < 2) {
+      setReviewError('Please enter your full name or executive title (minimum 2 characters).');
+      return;
+    }
+    if (cleanCompany.length < 2) {
+      setReviewError('Please specify your company or completed fit-out project name.');
+      return;
+    }
+    if (cleanRevEmail && !STRICT_EMAIL_REGEX.test(cleanRevEmail)) {
+      setReviewError('Please enter a valid corporate email address with a domain (e.g., client@company.com).');
+      return;
+    }
+    if (reviewRating < 1 || reviewRating > 5) {
+      setReviewError('Please select a star rating between 1 and 5 stars.');
+      return;
+    }
+    if (cleanMsg.length < 15) {
+      setReviewError('Please write a brief review message (at least 15 characters) describing your project experience.');
+      return;
+    }
+
+    submitClientReview({
+      clientName: cleanName,
+      companyOrProject: cleanCompany,
+      roleOrLocation: cleanCompany,
+      rating: reviewRating,
+      message: cleanMsg,
+      email: cleanRevEmail || undefined,
+    });
+
+    setClientReviews(getClientReviews());
+    setReviewCooldownSec(getReviewCooldownRemainingSeconds());
+    setReviewSubmittedSuccess(true);
+  };
 
   const handleSmoothEnterPortal = () => {
     setIsNavigating(true);
@@ -610,11 +730,38 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
     e.preventDefault();
     setQuoteError(null);
 
-    const cleanEmail = clientEmail.trim();
-    if (!cleanEmail) {
-      setQuoteError('Please enter a valid email address.');
+    if (isSubmittingQuote || quoteCooldownSec > 0) {
+      setQuoteError(`Submission lock active. Please wait ${quoteCooldownSec}s before sending another inquiry.`);
       return;
     }
+
+    const cleanName = clientName.trim();
+    const cleanPhone = clientPhone.trim();
+    const cleanScope = projectScope.trim();
+    const emailValidation = validateEmailPreFlight(clientEmail);
+
+    // Pre-Flight Required-Field & Strict Email Regex Check BEFORE firing any network call
+    if (!cleanName || cleanName.length < 2) {
+      setQuoteError('Please enter your Company or Client Name before submitting.');
+      return;
+    }
+    if (!emailValidation.valid || !STRICT_EMAIL_REGEX.test(emailValidation.cleanEmail)) {
+      setQuoteError(
+        emailValidation.error ||
+          'Invalid email address. Please include a valid domain (e.g., operations@company.com).'
+      );
+      return;
+    }
+    if (!cleanPhone || cleanPhone.length < 7) {
+      setQuoteError('Please provide a valid contact phone or mobile number.');
+      return;
+    }
+    if (!cleanScope) {
+      setQuoteError('Please specify your project scope or estimated floor area.');
+      return;
+    }
+
+    const cleanEmail = emailValidation.cleanEmail;
 
     setIsSubmittingQuote(true);
     try {
@@ -622,14 +769,14 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          clientName: clientName.trim(),
+          clientName: cleanName,
           clientEmail: cleanEmail,
-          clientPhone: clientPhone.trim(),
-          projectScope: projectScope.trim(),
+          clientPhone: cleanPhone,
+          projectScope: cleanScope,
           projectNotes: projectNotes.trim(),
           estimatedCost,
           estimatedWeeks,
-          estimatorArea,
+          estimatorArea: safeEstimatorArea,
           spaceType: estimatorSpaceType,
           finishTier: estimatorTier,
         }),
@@ -642,6 +789,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
 
       setQuoteSubmittedEmail(cleanEmail);
       setQuoteSubmitted(true);
+      setQuoteCooldownSec(30);
     } catch (err: any) {
       console.error('Quotation submission error:', err);
       setQuoteError(err.message || 'Error connecting to estimating server. Please try again or reach out to estimate@ctvill.com directly.');
@@ -1358,13 +1506,13 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
           
           <div className="text-center space-y-3 mb-12">
             <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full px-4 py-1 text-xs font-mono font-bold uppercase inline-block">
-              COMMERCIAL TOOLS
+              COMMERCIAL TOOLS • ADMIN-CONFIGURED BENCHMARKS
             </span>
             <h2 className="font-sans font-black text-3xl sm:text-4xl text-white tracking-tight">
               Commercial Fit-Out Cost & Timeline Estimator
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 max-w-xl mx-auto">
-              Configure your space category, square meterage, and architectural finish grade to preview benchmark timelines and budget estimates.
+              Configure your space category, exact floor area (drag the slider or type an exact square meterage), and architectural finish grade to preview live timelines and budget estimates.
             </p>
           </div>
 
@@ -1379,47 +1527,77 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   1. SELECT FACILITY TYPOLOGY
                 </label>
                 <div className="grid grid-cols-2 gap-2">
-                  {[
-                    { id: 'corporate', label: 'Corporate Office' },
-                    { id: 'bpo', label: 'BPO / Call Center' },
-                    { id: 'tech', label: 'Tech & Dev Studio' },
-                    { id: 'retail', label: 'Retail Store / F&B' }
-                  ].map(item => (
+                  {(
+                    [
+                      { id: 'corporate', label: estimatorConfig.categories.corporate.label },
+                      { id: 'bpo', label: estimatorConfig.categories.bpo.label },
+                      { id: 'tech', label: estimatorConfig.categories.tech.label },
+                      { id: 'retail', label: estimatorConfig.categories.retail.label }
+                    ] as const
+                  ).map(item => (
                     <button
                       key={item.id}
                       type="button"
-                      onClick={() => setEstimatorSpaceType(item.id as any)}
-                      className={`p-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-all text-left ${
+                      onClick={() => setEstimatorSpaceType(item.id)}
+                      className={`p-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-all text-left flex items-center justify-between ${
                         estimatorSpaceType === item.id
                           ? 'bg-amber-500 text-slate-950 font-bold shadow-md'
                           : 'bg-slate-950 border border-slate-800 text-slate-300 hover:border-slate-700'
                       }`}
                     >
-                      {item.label}
+                      <span>{item.label}</span>
+                      <span className={`text-[10px] font-mono ${estimatorSpaceType === item.id ? 'text-slate-950/80 font-extrabold' : 'text-slate-500'}`}>
+                        ₱{Number(estimatorConfig.categories[item.id].baseRatePerSqm).toLocaleString()}/sqm
+                      </span>
                     </button>
                   ))}
                 </div>
               </div>
 
-              {/* Area Slider */}
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs font-mono">
-                  <span className="text-slate-400">2. FLOOR AREA (SQM):</span>
-                  <span className="text-amber-400 font-bold">{estimatorArea} SQM</span>
+              {/* Dual Floor Area Control: Synchronized Slider + Exact Numeric Input */}
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+                  <span className="text-slate-400 font-bold">2. FLOOR AREA (EXACT SQM):</span>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex items-center">
+                      <input
+                        type="number"
+                        min="1"
+                        max="5000"
+                        step="1"
+                        value={estimatorArea}
+                        onChange={(e) => handleAreaChange(e.target.value)}
+                        aria-label="Exact Floor Area in Square Meters"
+                        className="w-28 bg-slate-950 border border-amber-500/60 focus:border-amber-400 rounded-xl pl-3 pr-11 py-1.5 text-sm font-mono font-black text-amber-400 text-right focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                      />
+                      <span className="absolute right-2.5 text-[10px] font-mono font-bold text-slate-400 pointer-events-none">
+                        SQM
+                      </span>
+                    </div>
+                  </div>
                 </div>
                 <input
                   type="range"
-                  min="40"
-                  max="1200"
-                  step="10"
-                  value={estimatorArea}
-                  onChange={(e) => setEstimatorArea(parseInt(e.target.value))}
+                  min="1"
+                  max="5000"
+                  step="1"
+                  value={Math.min(5000, Math.max(1, estimatorArea))}
+                  onChange={(e) => handleAreaChange(e.target.value)}
                   className="w-full h-2 bg-slate-950 rounded-lg cursor-pointer accent-amber-500"
                 />
                 <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                  <span>40 sqm (Small Studio)</span>
-                  <span>500 sqm (Mid Office)</span>
-                  <span>1,200 sqm (BPO Floor)</span>
+                  <button type="button" onClick={() => handleAreaChange(67)} className="hover:text-amber-400 transition-colors cursor-pointer">
+                    67 sqm (Boutique/Retail)
+                  </button>
+                  <button type="button" onClick={() => handleAreaChange(350)} className="hover:text-amber-400 transition-colors cursor-pointer">
+                    350 sqm (Tech HQ)
+                  </button>
+                  <button type="button" onClick={() => handleAreaChange(1000)} className="hover:text-amber-400 transition-colors cursor-pointer">
+                    1,000 sqm (BPO Floor)
+                  </button>
+                  <button type="button" onClick={() => handleAreaChange(2500)} className="hover:text-amber-400 transition-colors cursor-pointer">
+                    2,500+ sqm (Enterprise)
+                  </button>
                 </div>
               </div>
 
@@ -1429,22 +1607,27 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   3. SPECIFICATION & FINISH TIER
                 </label>
                 <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'standard', label: 'Standard Commercial' },
-                    { id: 'premium', label: 'Premium Modern' },
-                    { id: 'bespoke', label: 'Bespoke Executive' }
-                  ].map(tier => (
+                  {(
+                    [
+                      { id: 'standard', label: estimatorConfig.tierLabels.standard, mult: estimatorConfig.tierMultipliers.standard },
+                      { id: 'premium', label: estimatorConfig.tierLabels.premium, mult: estimatorConfig.tierMultipliers.premium },
+                      { id: 'bespoke', label: estimatorConfig.tierLabels.bespoke, mult: estimatorConfig.tierMultipliers.bespoke }
+                    ] as const
+                  ).map(tier => (
                     <button
                       key={tier.id}
                       type="button"
-                      onClick={() => setEstimatorTier(tier.id as any)}
-                      className={`p-2.5 rounded-xl text-[11px] font-mono cursor-pointer transition-all text-center ${
+                      onClick={() => setEstimatorTier(tier.id)}
+                      className={`p-2.5 rounded-xl text-[11px] font-mono cursor-pointer transition-all text-center flex flex-col items-center justify-center gap-0.5 ${
                         estimatorTier === tier.id
                           ? 'bg-amber-500 text-slate-950 font-bold shadow-md'
                           : 'bg-slate-950 border border-slate-800 text-slate-400 hover:border-slate-700'
                       }`}
                     >
-                      {tier.label}
+                      <span>{tier.label}</span>
+                      <span className={`text-[9px] ${estimatorTier === tier.id ? 'text-slate-950/80 font-extrabold' : 'text-slate-500'}`}>
+                        ₱{Number(currentRates[tier.id]).toLocaleString()}/sqm ({tier.mult}x)
+                      </span>
                     </button>
                   ))}
                 </div>
@@ -1455,7 +1638,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
             {/* Results Preview Box */}
             <div className="md:col-span-5 bg-gradient-to-b from-slate-950 to-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5 text-center shadow-inner">
               <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold block">
-                PRELIMINARY BALLPARK ESTIMATE
+                PRELIMINARY BALLPARK ESTIMATE ({safeEstimatorArea.toLocaleString()} SQM)
               </span>
 
               <div className="space-y-1">
@@ -1463,7 +1646,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   ₱{estimatedCost.toLocaleString()}
                 </div>
                 <p className="text-[11px] text-slate-400 font-mono">
-                  Estimated Turnkey Fit-Out Investment
+                  {safeEstimatorArea.toLocaleString()} sqm &times; ₱{ratePerSqm.toLocaleString()}/sqm ({estimatorConfig.tierLabels[estimatorTier]})
                 </p>
               </div>
 
@@ -1486,7 +1669,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
 
               <button
                 onClick={() => {
-                  setProjectScope(`Turnkey Fit-Out (${estimatorArea} sqm ${estimatorSpaceType.toUpperCase()} - ${estimatorTier} tier)`);
+                  setProjectScope(`Turnkey Fit-Out (${safeEstimatorArea} sqm ${currentRates.label} - ${estimatorConfig.tierLabels[estimatorTier]})`);
                   setShowQuoteModal(true);
                 }}
                 className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-1.5"
@@ -1500,59 +1683,93 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
         </div>
       </section>
 
-      {/* 8. TESTIMONIALS & DESIGN PARTNER ENDORSEMENTS */}
+      {/* 8. TESTIMONIALS & DESIGN PARTNER ENDORSEMENTS (WITH MODERATED CLIENT REVIEWS) */}
       <section className="py-20 bg-slate-900/60 border-b border-slate-800" id="testimonials">
         <div className="max-w-7xl mx-auto px-6">
           
-          <div className="text-center space-y-3 max-w-2xl mx-auto mb-14">
-            <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full px-4 py-1 text-xs font-mono font-bold uppercase inline-block">
-              REPUTATION & PARTNERSHIPS
-            </span>
-            <h2 className="font-sans font-black text-3xl sm:text-4xl text-white tracking-tight">
-              Endorsed by Fast-Growing Enterprises
-            </h2>
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 max-w-5xl mx-auto mb-12">
+            <div className="space-y-2 text-left">
+              <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full px-4 py-1 text-xs font-mono font-bold uppercase inline-block">
+                REPUTATION & PARTNERSHIPS • VERIFIED CLIENT FEEDBACK
+              </span>
+              <h2 className="font-sans font-black text-3xl sm:text-4xl text-white tracking-tight">
+                Endorsed by Fast-Growing Enterprises
+              </h2>
+              <p className="text-xs text-slate-400 max-w-xl">
+                Read verified post-handover testimonials from our commercial fit-out clients and partner design studios.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setReviewSubmittedSuccess(false);
+                setReviewError(null);
+                setShowReviewModal(true);
+              }}
+              className="px-5 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2 self-start md:self-auto shrink-0"
+            >
+              <MessageSquarePlus className="w-4 h-4" />
+              <span>Leave a Client Review</span>
+            </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-4xl mx-auto">
-            
-            {/* Testimonial 1 */}
-            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 sm:p-7 space-y-4 shadow-xl">
-              <div className="text-amber-400 flex gap-1 text-sm">★★★★★</div>
-              <p className="text-xs text-slate-300 italic leading-relaxed">
-                "CTVill constructed our 75 sqm office in 5 days, and when we tripled in size they built out our 350 sqm headquarters in Bulacan. Their detail-oriented craftsmanship — from binary decals to acoustic pods — gave our engineers a real sanctuary."
-              </p>
-              <div className="pt-3 border-t border-slate-800 flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-xs">
-                  NB
-                </div>
-                <div>
-                  <h4 className="font-bold text-xs text-white">NexBridge Technologies</h4>
-                  <p className="text-[10px] text-slate-400 font-mono">System Developer • Malolos, Bulacan</p>
-                </div>
-              </div>
-            </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
+            {approvedReviews.map((rev) => {
+              const initials = rev.clientName
+                .split(' ')
+                .map((w) => w[0])
+                .join('')
+                .toUpperCase()
+                .slice(0, 2);
+              const isMakePlace = rev.clientName.toLowerCase().includes('make place');
+              return (
+                <div
+                  key={rev.id}
+                  className="bg-slate-950 border border-slate-800 rounded-2xl p-6 sm:p-7 space-y-4 shadow-xl flex flex-col justify-between"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="text-amber-400 flex gap-0.5 text-sm" aria-label={`${rev.rating} out of 5 stars`}>
+                        {Array.from({ length: 5 }).map((_, i) => (
+                          <span key={i} className={i < rev.rating ? 'text-amber-400' : 'text-slate-700'}>
+                            ★
+                          </span>
+                        ))}
+                      </div>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-medium">
+                        Verified Client
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-300 italic leading-relaxed">
+                      &ldquo;{rev.message}&rdquo;
+                    </p>
+                  </div>
 
-            {/* Testimonial 2 */}
-            <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 sm:p-7 space-y-4 shadow-xl">
-              <div className="text-amber-400 flex gap-1 text-sm">★★★★★</div>
-              <p className="text-xs text-slate-300 italic leading-relaxed">
-                "Collaborating with CTVill as our construction arm has allowed our interior design visions to become reality without friction. Their problem-solving on the ground — like tile-printed terrazzo at Owl Milk Tea — makes them our go-to partner."
-              </p>
-              <div className="pt-3 border-t border-slate-800 flex items-center gap-3">
-                <img 
-                  src={designerMakeplace} 
-                  alt="Make Place Studio" 
-                  className="w-10 h-10 rounded-xl object-cover border border-slate-700"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <div>
-                  <h4 className="font-bold text-xs text-white">Make Place Studio</h4>
-                  <p className="text-[10px] text-slate-400 font-mono">Interior Design Firm • Est. 2016</p>
+                  <div className="pt-3 border-t border-slate-800 flex items-center gap-3">
+                    {isMakePlace ? (
+                      <img
+                        src={designerMakeplace}
+                        alt="Make Place Studio"
+                        className="w-10 h-10 rounded-xl object-cover border border-slate-700 shrink-0"
+                        loading="lazy"
+                        decoding="async"
+                      />
+                    ) : (
+                      <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-xs shrink-0">
+                        {initials}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <h4 className="font-bold text-xs text-white truncate">{rev.clientName}</h4>
+                      <p className="text-[10px] text-slate-400 font-mono truncate">
+                        {rev.roleOrLocation || rev.companyOrProject}
+                      </p>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
-
+              );
+            })}
           </div>
 
         </div>
@@ -1614,9 +1831,32 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   Fill in your project basics to route directly to our Laguna estimating engineering desk.
                 </p>
 
-                <form onSubmit={handleQuoteSubmit} className="space-y-3.5 text-xs">
+                {quoteError && !showQuoteModal && (
+                  <div className="p-3 bg-red-950/80 border border-red-500/80 rounded-xl text-xs text-red-200 flex items-center gap-2.5">
+                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span className="font-medium">{quoteError}</span>
+                  </div>
+                )}
+
+                {quoteSubmitted && !showQuoteModal && (
+                  <div className="p-3.5 bg-emerald-950/80 border border-emerald-600/80 rounded-xl text-xs text-emerald-200 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                      <span>Quotation request dispatched to <strong>{quoteSubmittedEmail}</strong>!</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setQuoteSubmitted(false)}
+                      className="text-[11px] font-mono underline text-emerald-300 hover:text-white cursor-pointer"
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+
+                <form onSubmit={handleQuoteSubmit} noValidate className="space-y-3.5 text-xs">
                   <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Company / Client Name</label>
+                    <label className="block text-slate-400 font-semibold mb-1">Company / Client Name *</label>
                     <input 
                       type="text"
                       required
@@ -1628,7 +1868,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
-                      <label className="block text-slate-400 font-semibold mb-1">Email Address</label>
+                      <label className="block text-slate-400 font-semibold mb-1">Email Address (with domain) *</label>
                       <input 
                         type="email"
                         required
@@ -1639,7 +1879,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                       />
                     </div>
                     <div>
-                      <label className="block text-slate-400 font-semibold mb-1">Phone / Mobile</label>
+                      <label className="block text-slate-400 font-semibold mb-1">Phone / Mobile *</label>
                       <input 
                         type="tel"
                         required
@@ -1651,7 +1891,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                     </div>
                   </div>
                   <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Scope / Space Details</label>
+                    <label className="block text-slate-400 font-semibold mb-1">Scope / Space Details *</label>
                     <input 
                       type="text"
                       required
@@ -1664,10 +1904,17 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
 
                   <button
                     type="submit"
-                    className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2"
+                    disabled={isSubmittingQuote || quoteCooldownSec > 0}
+                    className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                   >
                     <Send className="w-3.5 h-3.5" />
-                    <span>Submit to Estimating Desk (estimate@ctvill.com)</span>
+                    <span>
+                      {isSubmittingQuote
+                        ? 'Validating & Dispatching...'
+                        : quoteCooldownSec > 0
+                        ? `Request Sent • Cooldown (${quoteCooldownSec}s)`
+                        : 'Submit to Estimating Desk (estimate@ctvill.com)'}
+                    </span>
                   </button>
                 </form>
               </div>
@@ -2160,7 +2407,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleQuoteSubmit} className="space-y-3.5 text-xs">
+              <form onSubmit={handleQuoteSubmit} noValidate className="space-y-3.5 text-xs">
                 {quoteError && (
                   <div className="p-3 bg-red-950/80 border border-red-500/80 rounded-xl text-xs text-red-200 flex items-center gap-2.5 animate-fadeIn">
                     <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
@@ -2169,7 +2416,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                 )}
 
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Company or Individual Name</label>
+                  <label className="block text-slate-400 font-semibold mb-1">Company or Individual Name *</label>
                   <input
                     type="text"
                     required
@@ -2182,7 +2429,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Email Address (for Quotation Delivery)</label>
+                    <label className="block text-slate-400 font-semibold mb-1">Email Address (with domain) *</label>
                     <input
                       type="email"
                       required
@@ -2193,7 +2440,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Mobile / WhatsApp</label>
+                    <label className="block text-slate-400 font-semibold mb-1">Mobile / WhatsApp *</label>
                     <input
                       type="tel"
                       required
@@ -2206,7 +2453,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Project Scope / Estimated Area</label>
+                  <label className="block text-slate-400 font-semibold mb-1">Project Scope / Estimated Area *</label>
                   <input
                     type="text"
                     required
@@ -2230,13 +2477,18 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
 
                 <button
                   type="submit"
-                  disabled={isSubmittingQuote}
+                  disabled={isSubmittingQuote || quoteCooldownSec > 0}
                   className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-xl font-black shadow-lg shadow-amber-500/20 transition-all cursor-pointer mt-2 flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {isSubmittingQuote ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
                       <span>Dispatching & Sending Email...</span>
+                    </>
+                  ) : quoteCooldownSec > 0 ? (
+                    <>
+                      <Clock className="w-4 h-4" />
+                      <span>Submission Cooldown ({quoteCooldownSec}s)</span>
                     </>
                   ) : (
                     <>
@@ -2248,6 +2500,165 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
               </form>
             )}
 
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: LEAVE A CLIENT REVIEW (PUBLIC SUBMISSION -> ADMIN APPROVAL QUEUE) */}
+      {showReviewModal && (
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50 animate-fadeIn overscroll-contain">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 sm:p-8 space-y-5 shadow-2xl animate-slideUp">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                  <Star className="w-4 h-4 fill-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white">Submit a Client Fit-Out Review</h3>
+                  <p className="text-[10px] text-slate-400 font-mono">Moderated Quality Assurance & Client Feedback</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowReviewModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {reviewSubmittedSuccess ? (
+              <div className="bg-emerald-950/80 border border-emerald-600 text-emerald-200 text-xs p-6 rounded-2xl text-center space-y-4">
+                <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto" />
+                <div>
+                  <h4 className="font-bold text-lg text-white">Client Review Submitted for Verification!</h4>
+                  <p className="text-[11px] font-mono text-emerald-400 mt-0.5">Status: Pending Admin Moderation</p>
+                </div>
+                <p className="leading-relaxed text-slate-300">
+                  Thank you for sharing your experience with <strong>CTVill Design &amp; Construction</strong>. To protect our portfolio against spam, all public reviews enter the <strong>Admin Moderation Queue</strong> and are published immediately upon verification.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowReviewModal(false);
+                    setReviewSubmittedSuccess(false);
+                    setReviewClientName('');
+                    setReviewCompanyProject('');
+                    setReviewEmail('');
+                    setReviewMessage('');
+                    setReviewRating(5);
+                  }}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                >
+                  Done
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={handleReviewSubmit} noValidate className="space-y-3.5 text-xs">
+                {reviewError && (
+                  <div className="p-3 bg-red-950/80 border border-red-500/80 rounded-xl text-xs text-red-200 flex items-center gap-2.5">
+                    <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span className="font-medium">{reviewError}</span>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1">Client / Executive Name *</label>
+                    <input
+                      type="text"
+                      required
+                      value={reviewClientName}
+                      onChange={(e) => setReviewClientName(e.target.value)}
+                      placeholder="e.g. Engr. Paolo Villanueva"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1">Company / Fit-Out Project *</label>
+                    <input
+                      type="text"
+                      required
+                      value={reviewCompanyProject}
+                      onChange={(e) => setReviewCompanyProject(e.target.value)}
+                      placeholder="e.g. Vertex BPO Hub • BGC"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1">Corporate Email (Optional)</label>
+                    <input
+                      type="email"
+                      value={reviewEmail}
+                      onChange={(e) => setReviewEmail(e.target.value)}
+                      placeholder="name@company.com"
+                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-500 font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 font-semibold mb-1">Overall Satisfaction Rating *</label>
+                    <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2">
+                      {[1, 2, 3, 4, 5].map((star) => {
+                        const active = (reviewHoverRating || reviewRating) >= star;
+                        return (
+                          <button
+                            key={star}
+                            type="button"
+                            onClick={() => setReviewRating(star)}
+                            onMouseEnter={() => setReviewHoverRating(star)}
+                            onMouseLeave={() => setReviewHoverRating(0)}
+                            className={`text-lg leading-none cursor-pointer transition-transform hover:scale-110 ${
+                              active ? 'text-amber-400' : 'text-slate-700'
+                            }`}
+                            aria-label={`Rate ${star} stars`}
+                          >
+                            ★
+                          </button>
+                        );
+                      })}
+                      <span className="ml-auto text-[11px] font-mono font-bold text-amber-400">
+                        {reviewRating}.0 / 5.0
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-slate-400 font-semibold mb-1">
+                    Project Handover &amp; Craftsmanship Review *
+                  </label>
+                  <textarea
+                    rows={4}
+                    required
+                    value={reviewMessage}
+                    onChange={(e) => setReviewMessage(e.target.value)}
+                    placeholder="Share your feedback on our engineering execution, schedule adherence, permitting support, and post-turnover aftercare..."
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-500"
+                  />
+                  <div className="flex justify-between text-[10px] font-mono text-slate-500 mt-1">
+                    <span>Minimum 15 characters • Reviewed by Admin before public display</span>
+                    <span>{reviewMessage.trim().length} / 600</span>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={reviewCooldownSec > 0}
+                  className="w-full py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-xl font-black shadow-lg shadow-amber-500/20 transition-all cursor-pointer mt-2 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>
+                    {reviewCooldownSec > 0
+                      ? `Rate-Limit Cooldown (${reviewCooldownSec}s)`
+                      : 'Submit Client Review for Admin Approval'}
+                  </span>
+                </button>
+              </form>
+            )}
           </div>
         </div>
       )}

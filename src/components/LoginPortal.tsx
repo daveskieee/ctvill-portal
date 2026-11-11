@@ -11,6 +11,11 @@ import {
 import { UserSession } from '../types';
 import logoJpg from '../assets/images/ctvill/logo.jpg';
 import { ThemeToggle } from './ThemeToggle';
+import {
+  STRICT_EMAIL_REGEX,
+  validateEmailPreFlight,
+  encodePasswordTransportPayload,
+} from '../utils/securityValidation';
 
 interface LoginPortalProps {
   onLoginSuccess: (session: UserSession) => void;
@@ -26,23 +31,48 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
-  // --- LOGIN HANDLER ---
+  // --- LOGIN HANDLER (Strict Pre-Flight Validation & Payload Hardening) ---
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
 
-    const cleanEmail = email.trim();
-    if (!cleanEmail) {
-      setErrorMsg('Please enter your email address.');
+    const emailCheck = validateEmailPreFlight(email);
+    if (!emailCheck.valid || !STRICT_EMAIL_REGEX.test(emailCheck.cleanEmail)) {
+      // Block network request completely if email is blank or missing valid domain (.com, .ph, etc.)
+      setErrorMsg(
+        emailCheck.error ||
+          'Invalid email format. Please enter a complete email address with domain (e.g., name@ctvill.com).'
+      );
       return;
     }
 
+    if (!password || password.trim().length === 0) {
+      // Block network request completely if password is empty
+      setErrorMsg('Please enter your security passkey before signing in.');
+      return;
+    }
+
+    const cleanEmail = emailCheck.cleanEmail;
+
     setIsSubmitting(true);
     try {
+      const transportCreds = await encodePasswordTransportPayload(password);
+
       const res = await fetch('/api/auth/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, password }),
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Auth-Transport': transportCreds.encoding,
+        },
+        body: JSON.stringify({
+          email: cleanEmail,
+          password: transportCreds.maskedPassword,
+          encodedPayload: transportCreds.encodedPayload,
+          transportDigest: transportCreds.transportDigest,
+          nonce: transportCreds.nonce,
+          encoding: transportCreds.encoding,
+          rememberMe,
+        }),
       });
       const data = await res.json();
 
@@ -194,7 +224,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
               </p>
             </div>
 
-            <form onSubmit={handleLoginSubmit} autoComplete="off" className="space-y-4 mt-6 text-xs">
+            <form onSubmit={handleLoginSubmit} noValidate autoComplete="off" className="space-y-4 mt-6 text-xs">
               {errorMsg && (
                 <div className="bg-red-950/60 border border-red-800 text-red-300 p-3 rounded-xl flex items-start gap-2">
                   <ShieldAlert className="w-4 h-4 shrink-0 text-red-400 mt-0.5" />

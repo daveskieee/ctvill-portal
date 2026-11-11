@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import {
   ResponsiveContainer, BarChart as ReBarChart, Bar, XAxis, YAxis, Tooltip,
-  CartesianGrid, Cell, PieChart as RePieChart, Pie
+  CartesianGrid, Cell, PieChart as RePieChart, Pie, LabelList
 } from 'recharts';
 import {
   Contractor, DailyManpowerAudit, AIManpowerRecommendation,
@@ -1835,45 +1835,69 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                 </div>
               ) : (
                 <>
-                  <div className="h-52 w-full pt-1">
+                  <div className="h-60 w-full pt-1">
                     <ResponsiveContainer width="100%" height="100%">
-                      <ReBarChart data={liveProjectLaborChartData} margin={{ top: 10, right: 10, left: -15, bottom: 25 }}>
+                      <ReBarChart data={liveProjectLaborChartData} margin={{ top: 20, right: 16, left: -12, bottom: 42 }}>
                         <defs>
                           <linearGradient id="blueAllocBarGrad" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.95} />
-                            <stop offset="100%" stopColor="#0284c7" stopOpacity={0.8} />
+                            <stop offset="0%" stopColor={isDark ? '#38bdf8' : '#0284c7'} stopOpacity={0.98} />
+                            <stop offset="100%" stopColor={isDark ? '#0284c7' : '#0369a1'} stopOpacity={0.92} />
                           </linearGradient>
                         </defs>
                         <CartesianGrid
                           strokeDasharray="3 3"
                           stroke={isDark ? '#1e293b' : '#e2e8f0'}
-                          strokeOpacity={isDark ? 0.8 : 0.5}
+                          strokeOpacity={isDark ? 0.8 : 0.9}
                           vertical={false}
                         />
-                        <XAxis dataKey="name" stroke={isDark ? '#64748b' : '#94a3b8'} fontSize={11} tickLine={false} interval={0} angle={-15} textAnchor="end" />
-                        <YAxis stroke={isDark ? '#64748b' : '#94a3b8'} fontSize={11} tickLine={false} />
+                        <XAxis
+                          dataKey="name"
+                          stroke={isDark ? '#64748b' : '#334155'}
+                          tick={{ fill: isDark ? '#cbd5e1' : '#334155', fontSize: 11, fontWeight: 600 }}
+                          tickLine={false}
+                          interval={0}
+                          angle={-15}
+                          textAnchor="end"
+                          height={46}
+                          dy={6}
+                        />
+                        <YAxis
+                          stroke={isDark ? '#64748b' : '#334155'}
+                          tick={{ fill: isDark ? '#94a3b8' : '#334155', fontSize: 11, fontWeight: 600 }}
+                          tickLine={false}
+                          allowDecimals={false}
+                        />
                         <Tooltip
                           content={({ active, payload }) => {
                             if (active && payload && payload.length) {
                               const data = payload[0].payload;
                               return (
-                                <div className={`${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-xl'} border p-3 rounded-xl text-xs space-y-1 font-sans pointer-events-none select-none`}>
+                                <div className={`${isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-900 shadow-xl'} border p-3 rounded-xl text-xs space-y-1 font-sans pointer-events-none select-none`}>
                                   <div className="font-bold">{data.fullName}</div>
-                                  <div className={`${isDark ? 'text-teal-400' : 'text-blue-600'} font-mono font-bold`}>
+                                  <div className={`${isDark ? 'text-teal-400' : 'text-blue-800'} font-mono font-bold`}>
                                     Personnel Headcount: {data.workers} Active Workers
                                   </div>
-                                  <div className="text-amber-400 font-mono font-semibold">
+                                  <div className={`${isDark ? 'text-amber-400' : 'text-amber-800'} font-mono font-semibold`}>
                                     Cumulative Daily Burn: ₱{Number(data.dailyBurn || 0).toLocaleString()}/day
                                   </div>
-                                  <div className={`${isDark ? 'text-slate-300' : 'text-slate-600'} font-mono`}>Completion: {data.progress}%</div>
-                                  <div className="text-[10px] text-slate-400 font-mono uppercase">{data.status}</div>
+                                  <div className={`${isDark ? 'text-slate-300' : 'text-slate-700'} font-mono`}>Completion: {data.progress}%</div>
+                                  <div className="text-[10px] text-slate-500 font-mono uppercase">{data.status}</div>
                                 </div>
                               );
                             }
                             return null;
                           }}
                         />
-                        <Bar dataKey="workers" fill="url(#blueAllocBarGrad)" radius={[6, 6, 0, 0]} />
+                        <Bar dataKey="workers" fill="url(#blueAllocBarGrad)" radius={[6, 6, 0, 0]} maxBarSize={54}>
+                          <LabelList
+                            dataKey="workers"
+                            position="top"
+                            fill={isDark ? '#f8fafc' : '#0f172a'}
+                            fontSize={11}
+                            fontWeight={700}
+                            formatter={(val: any) => `${val} pax`}
+                          />
+                        </Bar>
                       </ReBarChart>
                     </ResponsiveContainer>
                   </div>
@@ -1936,7 +1960,7 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                               dataKey="value"
                             >
                               {liveTradeManpowerChartData.map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={entry.color} stroke="#0f172a" strokeWidth={2} />
+                                <Cell key={`cell-${index}`} fill={entry.color} stroke={isDark ? '#0f172a' : '#ffffff'} strokeWidth={2} />
                               ))}
                             </Pie>
                             <Tooltip
@@ -2028,7 +2052,7 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                           dataKey="value"
                         >
                           {liveInHouseAndOutsourced.chartData.map((entry, index) => (
-                            <Cell key={`cell-${index}`} fill={entry.color} stroke="#0f172a" strokeWidth={2} />
+                            <Cell key={`cell-${index}`} fill={entry.color} stroke={isDark ? '#0f172a' : '#ffffff'} strokeWidth={2} />
                           ))}
                         </Pie>
                         <Tooltip

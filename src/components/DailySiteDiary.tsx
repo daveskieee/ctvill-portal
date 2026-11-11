@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { DailySiteLog, ProjectProfile, Contractor } from '../types';
 import { resolveProjectCoordinatesSync } from '../utils/geocoding';
+import { useTheme } from '../context/ThemeContext';
 
 interface DailySiteDiaryProps {
   logs: DailySiteLog[];
@@ -274,6 +275,8 @@ export function getSmoothCurvePath(points: { x: number; y: number }[]): string {
 }
 
 export default function DailySiteDiary({ logs, projects = [], contractors = [], onAddLog, onToggleWeatherSuspension }: DailySiteDiaryProps) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   // Coordinate resolver for project sites (explicit lat/lon or comprehensive geocoding)
   const resolveProjectCoordinates = useCallback((p: ProjectProfile): { lat: number; lon: number; name: string } => {
     return resolveProjectCoordinatesSync(p.location, p.name, p.latitude, p.longitude);
@@ -1717,7 +1720,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                             y1={padTop - 10}
                             x2={pt.x}
                             y2={svgHeight - padBottom}
-                            stroke="#475569"
+                            stroke={isDark ? '#475569' : '#cbd5e1'}
                             strokeWidth="1"
                             strokeDasharray="3 3"
                           />
@@ -1728,7 +1731,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                           x={pt.x}
                           y={pt.y - 12}
                           textAnchor="middle"
-                          fill={isHovered ? '#ffffff' : '#cbd5e1'}
+                          fill={isDark ? (isHovered ? '#ffffff' : '#cbd5e1') : (isHovered ? '#0f172a' : '#334155')}
                           fontSize={isHovered ? '13' : '11'}
                           fontWeight="700"
                           fontFamily="monospace"
@@ -1742,7 +1745,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                           cx={pt.x}
                           cy={pt.y}
                           r={isHovered ? 5.5 : 3.5}
-                          fill="#090d16"
+                          fill={isDark ? '#090d16' : '#ffffff'}
                           stroke={themeConfig.stroke}
                           strokeWidth={isHovered ? 2.5 : 2}
                           className="transition-all"
@@ -1755,9 +1758,9 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                           x={pt.x}
                           y={svgHeight - 10}
                           textAnchor="middle"
-                          fill={isHovered ? '#ffffff' : '#64748b'}
+                          fill={isDark ? (isHovered ? '#ffffff' : '#64748b') : (isHovered ? '#0f172a' : '#334155')}
                           fontSize="11"
-                          fontWeight={isHovered ? '700' : '500'}
+                          fontWeight={isHovered ? '700' : '600'}
                           fontFamily="sans-serif"
                           className="transition-all select-none"
                         >

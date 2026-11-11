@@ -513,7 +513,10 @@ export interface ProjectDocument {
   title: string;
   category: 'CAD_DRAWING' | 'PERMIT_DHSUD' | 'LGU_CLEARANCE' | 'STRUCTURAL_PLAN' | 'DEED_LEGAL' | 'SPECIFICATIONS' | 'ARCHITECTURAL' | 'OTHER';
   fileUrl?: string;
+  fileName?: string;
+  mimeType?: string;
   fileSize?: string;
+  uploadedAt?: string;
   version: string;
   status: 'APPROVED' | 'UNDER_REVIEW' | 'IN_REVIEW' | 'DRAFT' | 'ARCHIVED';
   uploadedBy: string;
@@ -611,6 +614,10 @@ export interface GovernmentPermit {
   expiryDate?: string | null;
   notes?: string;
   documentUrl?: string;
+  fileName?: string;
+  mimeType?: string;
+  fileSize?: string;
+  uploadedAt?: string;
   createdAt?: string;
 }
 

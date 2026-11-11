@@ -13,10 +13,11 @@ import {
   CreditCard, Building2, HardHat, Users, DollarSign, FileText, ChevronDown,
   ChevronUp, X, Check, Eye, Send, Banknote, ShieldCheck, ExternalLink,
   Download, TrendingDown, ArrowUpRight, Calendar, Hash, Info, Loader2,
-  ShieldAlert
+  ShieldAlert, Printer
 } from 'lucide-react';
 import { SubcontractorPayable, SubcontractorPayableStatus, DailyManpowerAudit, Contractor, ProjectProfile } from '../types';
 import { isTradeGroupOrOutsourcedContractor } from '../types';
+import { openEnterprisePrintWindow, escapePrintHtml } from '../utils/printEngine';
 
 interface SubcontractorBillingsDisbursementsProps {
   manpowerAudits?: DailyManpowerAudit[];
@@ -444,6 +445,72 @@ export default function SubcontractorBillingsDisbursements({
     URL.revokeObjectURL(url);
   };
 
+  const handlePrintPayablesLedger = () => {
+    const rowsHtml = filtered
+      .map(
+        (r, idx) => `<tr>
+          <td class="center">${idx + 1}</td>
+          <td><strong>${escapePrintHtml(r.id)}</strong><br/>${escapePrintHtml(fmtDate(r.disbursementDate || r.createdAt))}</td>
+          <td><strong>${escapePrintHtml(r.payeeContractorName)}</strong><br/><span style="font-size:9px;color:#475569;">${escapePrintHtml(r.tradeSpecialty)}</span></td>
+          <td>${escapePrintHtml(r.projectSite)}</td>
+          <td class="center">${r.verifiedHeadcount} / ${r.claimedHeadcount}</td>
+          <td class="center">${r.billedDays} d @ ${fmt(r.ratePerDay)}</td>
+          <td class="num">${fmt(r.billedAmount)}</td>
+          <td class="num">${fmt(r.approvedAmount ?? r.billedAmount)}</td>
+          <td class="num"><strong>${fmt(r.disbursedAmount ?? 0)}</strong></td>
+          <td>${escapePrintHtml(r.paymentMethod)}<br/><span style="font-family:monospace;font-size:9px;">${escapePrintHtml(r.referenceNo || 'Pending')}</span></td>
+          <td class="center">${escapePrintHtml(STATUS_CONFIG[r.status]?.label || r.status)}</td>
+        </tr>`
+      )
+      .join('');
+
+    const bodyHtml = `<table class="ent-table">
+      <thead>
+        <tr>
+          <th class="center">#</th>
+          <th>Billing ID &amp; Date</th>
+          <th>Subcontractor &amp; Trade</th>
+          <th>Project Site</th>
+          <th class="center">Verified / Claimed HC</th>
+          <th class="center">Days &amp; Rate</th>
+          <th class="num">Billed Amount</th>
+          <th class="num">Approved Amount</th>
+          <th class="num">Disbursed</th>
+          <th>Method &amp; Ref</th>
+          <th class="center">Audit Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHtml}
+        <tr class="total-row">
+          <td colspan="6" class="num">TOTAL SUBCONTRACTOR PAYABLES SUMMARY:</td>
+          <td class="num">${fmt(kpis.totalBilled)}</td>
+          <td class="num">${fmt(kpis.approved)}</td>
+          <td class="num">${fmt(kpis.disbursed)}</td>
+          <td colspan="2"></td>
+        </tr>
+      </tbody>
+    </table>`;
+
+    openEnterprisePrintWindow({
+      title: 'Official Subcontractor Payables & Progress Disbursements Ledger',
+      subtitle: 'Outsourced Trade Crew Billing Verification & Milestone Release Register',
+      docRef: `AP-SUB-${Date.now().toString().slice(-6)}`,
+      orientation: 'landscape',
+      projectMeta: {
+        name: projectFilter === 'ALL' ? 'All Active CTVill Commercial Sites' : projectFilter,
+        period: new Date().toLocaleDateString('en-PH'),
+      },
+      kpiSummary: [
+        { label: 'Total Subcontractor Billed', value: fmt(kpis.totalBilled) },
+        { label: 'Approved for Payout', value: fmt(kpis.approved) },
+        { label: 'Pending Audit Release', value: fmt(kpis.pending) },
+        { label: 'Total Disbursed', value: fmt(kpis.disbursed) },
+      ],
+      bodyHtml,
+    });
+  };
+
   const cycleSort = (field: typeof sortField) => {
     if (sortField === field) setSortDir(d => d === 'desc' ? 'asc' : 'desc');
     else { setSortField(field); setSortDir('desc'); }
@@ -481,6 +548,14 @@ export default function SubcontractorBillingsDisbursements({
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={handlePrintPayablesLedger}
+            className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer"
+          >
+            <Printer className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Print AP Ledger</span>
+          </button>
           <button onClick={handleExport} className="flex items-center gap-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer">
             <Download className="w-3.5 h-3.5 text-amber-400" />
             <span>Export CSV</span>

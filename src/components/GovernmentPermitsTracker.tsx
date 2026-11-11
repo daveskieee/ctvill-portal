@@ -107,7 +107,30 @@ export default function GovernmentPermitsTracker({
   const [newAppDate, setNewAppDate] = useState(new Date().toISOString().split('T')[0]);
   const [newExpDate, setNewExpDate] = useState('2027-02-28');
   const [newNotes, setNewNotes] = useState('');
+  const [newFileMeta, setNewFileMeta] = useState<{
+    fileName: string;
+    mimeType: string;
+    fileSize: string;
+    uploadedAt: string;
+    documentUrl: string;
+  } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handlePermitFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const sizeStr =
+      file.size >= 1024 * 1024
+        ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
+        : `${Math.max(1, Math.round(file.size / 1024))} KB`;
+    setNewFileMeta({
+      fileName: file.name,
+      mimeType: file.type || 'application/pdf',
+      fileSize: sizeStr,
+      uploadedAt: new Date().toISOString(),
+      documentUrl: URL.createObjectURL(file),
+    });
+  };
 
   // Sync default new project when projects change
   useEffect(() => {
@@ -168,7 +191,14 @@ export default function GovernmentPermitsTracker({
         status: 'PENDING',
         applicationDate: newAppDate,
         expiryDate: newExpDate,
-        notes: newNotes.trim()
+        notes: newNotes.trim(),
+        ...(newFileMeta ? {
+          fileName: newFileMeta.fileName,
+          mimeType: newFileMeta.mimeType,
+          fileSize: newFileMeta.fileSize,
+          uploadedAt: newFileMeta.uploadedAt,
+          documentUrl: newFileMeta.documentUrl,
+        } : {}),
       };
 
       if (onAddPermit) {
@@ -185,6 +215,7 @@ export default function GovernmentPermitsTracker({
       setNewName('');
       setNewRef('');
       setNewNotes('');
+      setNewFileMeta(null);
     } catch (err) {
       console.error('Failed to add permit:', err);
     } finally {
@@ -740,6 +771,23 @@ export default function GovernmentPermitsTracker({
                   onChange={(e) => setNewNotes(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">
+                  Scanned Permit / Clearance Document (Lightweight Reference)
+                </label>
+                <input
+                  type="file"
+                  accept=".pdf,.png,.jpg,.jpeg,.doc,.docx"
+                  onChange={handlePermitFileChange}
+                  className="w-full bg-slate-950 border border-slate-700 text-slate-300 rounded-xl px-3 py-1.5 text-xs file:mr-3 file:py-1 file:px-2.5 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-slate-800 file:text-amber-400 hover:file:bg-slate-700 cursor-pointer"
+                />
+                {newFileMeta && (
+                  <div className="mt-1.5 text-[11px] font-mono text-emerald-400">
+                    ✓ Indexed: {newFileMeta.fileName} ({newFileMeta.mimeType}, {newFileMeta.fileSize})
+                  </div>
+                )}
               </div>
 
               <div className="pt-3 flex justify-end gap-3">

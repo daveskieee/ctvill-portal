@@ -7,9 +7,10 @@ import React, { useState } from 'react';
 import {
   Plus, CheckCircle2, Clock, AlertTriangle, Search,
   ShieldCheck, Building2, FileText, Check, X, Truck,
-  Package, ShoppingCart, ClipboardCheck, ArrowRight
+  Package, ShoppingCart, ClipboardCheck, ArrowRight, Printer
 } from 'lucide-react';
 import { ProjectRFI, ProjectProfile } from '../types';
+import { openEnterprisePrintWindow, escapePrintHtml } from '../utils/printEngine';
 
 interface RfiManagerProps {
   rfis: ProjectRFI[];
@@ -242,6 +243,110 @@ export default function RfiManager({
     );
   });
 
+  const handlePrintPurchaseOrderSheet = (targetReq?: MaterialPurchaseRequest) => {
+    const itemsToPrint = targetReq ? [targetReq] : filteredRequests;
+    if (itemsToPrint.length === 0) return;
+
+    const totalCost = itemsToPrint.reduce((s, r) => s + r.estimatedCostPhp, 0);
+    const rowsHtml = itemsToPrint
+      .map(
+        (req) => `
+        <tr>
+          <td class="mono font-bold">${escapePrintHtml(req.id)}</td>
+          <td><strong>${escapePrintHtml(req.projectName)}</strong></td>
+          <td>
+            <div><strong>${escapePrintHtml(req.materialType)}</strong></div>
+            <div style="font-size: 7.5pt; color: #475569;">Specs / Phase: ${escapePrintHtml(req.purposePhase)} • Supplier: ${escapePrintHtml(req.supplierName || 'Approved Vendor')}</div>
+          </td>
+          <td class="text-center mono font-bold">${req.quantity} ${escapePrintHtml(req.unit)}</td>
+          <td class="text-right mono font-bold">₱${req.estimatedCostPhp.toLocaleString()}</td>
+          <td class="text-center">
+            <span class="badge ${
+              req.urgency === 'CRITICAL'
+                ? 'badge-rose'
+                : req.urgency === 'URGENT'
+                ? 'badge-amber'
+                : 'badge-slate'
+            }">${escapePrintHtml(req.urgency)}</span>
+          </td>
+          <td class="text-center">
+            <span class="badge ${
+              req.approvalStatus === 'APPROVED'
+                ? 'badge-emerald'
+                : req.approvalStatus === 'DENIED'
+                ? 'badge-rose'
+                : 'badge-amber'
+            }">${escapePrintHtml(req.approvalStatus)}</span>
+          </td>
+          <td class="text-center">
+            <span class="badge ${
+              req.deliveryStatus === 'Accepted'
+                ? 'badge-emerald'
+                : req.deliveryStatus === 'Delayed'
+                ? 'badge-rose'
+                : 'badge-sky'
+            }">${escapePrintHtml(req.deliveryStatus || 'Pending PO')}</span>
+          </td>
+        </tr>`
+      )
+      .join('');
+
+    const bodyHtml = `
+      <div class="section-title">Material Requisition & Purchase Order Specification Schedule</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Requisition ID</th>
+            <th>Project Site</th>
+            <th>Requested Material Items, Specifications & Supplier</th>
+            <th class="text-center">Quantity & Unit</th>
+            <th class="text-right">Estimated Cost (₱)</th>
+            <th class="text-center">Urgency</th>
+            <th class="text-center">Approval Status</th>
+            <th class="text-center">Delivery Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="4" class="text-right">TOTAL ESTIMATED REQUISITION / PO VALUE:</td>
+            <td class="text-right mono">₱${totalCost.toLocaleString()}</td>
+            <td colspan="3"></td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+
+    openEnterprisePrintWindow({
+      title: 'Material Requisition & Purchase Order Sheet',
+      subtitle: targetReq
+        ? `Official Requisition & Purchase Order Form — ${targetReq.id} (${targetReq.materialType})`
+        : 'Consolidated Site Material Requisition & Purchase Order Register',
+      docRef: targetReq ? targetReq.id : `PR-PO-REG-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`,
+      orientation: targetReq ? 'portrait' : 'landscape',
+      projectMeta: {
+        name: targetReq ? targetReq.projectName : selectedProjectName || 'All Active Commercial Sites',
+        location: 'Metro Manila Commercial Fit-Out Operations',
+        period: targetReq ? `Date Requested: ${targetReq.dateRequested}` : new Date().toLocaleDateString('en-PH'),
+        client: targetReq ? `Supplier: ${targetReq.supplierName || 'Approved Vendor'}` : 'Procurement & Logistics Division'
+      },
+      kpiSummary: [
+        { label: 'Requisition Count', value: `${itemsToPrint.length} Item(s)` },
+        { label: 'Approved Orders', value: `${itemsToPrint.filter((i) => i.approvalStatus === 'APPROVED').length}` },
+        { label: 'Pending Review', value: `${itemsToPrint.filter((i) => i.approvalStatus === 'PENDING').length}` },
+        { label: 'Total Estimated Value', value: `₱${totalCost.toLocaleString()}` }
+      ],
+      bodyHtml,
+      signatures: [
+        { role: 'Requested By (Site Engineer)', name: 'Engr. Carlos Mendoza', title: 'Site Engineer' },
+        { role: 'Reviewed & Approved By (PM / Head Engr)', name: 'Engr. Ricardo Ramos', title: 'Project Manager / Head Engineer' },
+        { role: 'Budget & PO Released By (Finance)', name: 'Ma. Theresa Santos, CPA', title: 'Finance & Accounting Lead' }
+      ]
+    });
+  };
+
   return (
     <div className="space-y-5">
       {toastBanner && (
@@ -344,15 +449,25 @@ export default function RfiManager({
           </button>
         </div>
 
-        <div className="relative w-full sm:w-64">
-          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Filter material, PR#, site..."
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white focus:border-amber-500 focus:outline-none"
-          />
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <div className="relative flex-1 sm:w-64">
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Filter material, PR#, site..."
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => handlePrintPurchaseOrderSheet()}
+            className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer shrink-0"
+          >
+            <Printer className="w-3.5 h-3.5 text-amber-400" />
+            <span>Print PR / PO Form</span>
+          </button>
         </div>
       </div>
 
@@ -546,15 +661,26 @@ export default function RfiManager({
                 </div>
 
                 <div className="flex flex-col sm:items-end gap-2 shrink-0">
-                  <span className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold border ${
-                    req.approvalStatus === 'APPROVED'
-                      ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                      : req.approvalStatus === 'DENIED'
-                      ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                      : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                  }`}>
-                    {req.approvalStatus}
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handlePrintPurchaseOrderSheet(req)}
+                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-mono font-semibold flex items-center gap-1 cursor-pointer"
+                      title="Print Official PR / PO Sheet"
+                    >
+                      <Printer className="w-3 h-3 text-amber-400" />
+                      <span>Print PR / PO Form</span>
+                    </button>
+                    <span className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold border ${
+                      req.approvalStatus === 'APPROVED'
+                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                        : req.approvalStatus === 'DENIED'
+                        ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                        : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                    }`}>
+                      {req.approvalStatus}
+                    </span>
+                  </div>
                   {req.approvalStatus === 'PENDING' && (
                     <div className="flex items-center gap-1.5">
                       <button

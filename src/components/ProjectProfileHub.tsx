@@ -2025,12 +2025,11 @@ export default function ProjectProfileHub({
                                 'Painting, Fixtures & Handover QA';
                       const assignedCrewList = contractors.filter(c =>
                         (selectedProject.assignedContractorIds || []).includes(c.id) ||
-                        (selectedProject.assignedWorkforceIds || []).includes(c.id) ||
-                        (c.assignedProjects || []).includes(selectedProject.id) ||
-                        (c.assignedProjectIds || []).includes(selectedProject.id)
+                        c.assignedProjectId === selectedProject.id ||
+                        (c.activeProjectSite || '').toLowerCase() === selectedProject.name.toLowerCase()
                       );
                       const crewHeadcount = assignedCrewList.length || selectedProject.assignedWorkersCount || 0;
-                      const dailyLaborBurn = assignedCrewList.reduce((acc, w) => acc + Number(w.dailyRatePhp || 750), 0) || (crewHeadcount * 780);
+                      const dailyLaborBurn = assignedCrewList.reduce((acc, w) => acc + Number(w.dailyRate || 750), 0) || (crewHeadcount * 780);
                       const siteRequests = rfis.filter(r => r.projectId === selectedProject.id || (r.projectName && r.projectName.toLowerCase() === selectedProject.name.toLowerCase()));
                       const pendingReqCount = siteRequests.filter(r => r.status === 'OPEN' || r.status === 'UNDER_REVIEW').length || 2;
 

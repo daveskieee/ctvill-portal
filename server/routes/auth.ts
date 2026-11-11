@@ -104,8 +104,26 @@ authRouter.get('/auth/csrf', (req: Request, res: Response) => {
 // ============================================================================
 // POST /api/auth/login — Secure Credential Verification with PostgreSQL Sessions
 // ============================================================================
+function decodeTransportPassword(body: any): string {
+  if (body?.encoding === 'CTVILL-B64-SHA256-V1' && body?.encodedPayload && body?.nonce) {
+    try {
+      const binaryBuf = Buffer.from(String(body.encodedPayload), 'base64');
+      const nonceBytes = Buffer.from(String(body.nonce), 'utf-8');
+      const out = Buffer.alloc(binaryBuf.length);
+      for (let i = 0; i < binaryBuf.length; i++) {
+        out[i] = binaryBuf[i] ^ nonceBytes[i % nonceBytes.length];
+      }
+      return out.toString('utf-8');
+    } catch {
+      return String(body?.password || '');
+    }
+  }
+  return String(body?.password || '');
+}
+
 authRouter.post('/auth/login', loginRateLimiter, async (req: Request, res: Response) => {
-  const { email, password, rememberMe } = req.body;
+  const { email, rememberMe } = req.body;
+  const password = decodeTransportPassword(req.body);
   try {
     const normalizedEmail = (email || '').trim().toLowerCase();
     if (!normalizedEmail || !password) {

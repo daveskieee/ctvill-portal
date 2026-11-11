@@ -3,15 +3,32 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Briefcase, CheckCircle2, Clock, DollarSign, Mail,
   Phone, Building2, User, Search, Filter, Sparkles,
-  ArrowRight, Check, X, Tag, Calculator, Award, Download, Printer
+  ArrowRight, Check, X, Tag, Calculator, Award, Download, Printer,
+  Star, MessageSquare, ShieldCheck, Trash2, Sliders, RotateCcw, Save
 } from 'lucide-react';
 import { FitoutQuotationItem } from '../types';
 import { exportToCsv, printRegisterTable } from '../utils/exportUtils';
 import { useTheme } from '../context/ThemeContext';
+import {
+  EstimatorConfig,
+  SpaceCategoryKey,
+  FinishTierKey,
+  getEstimatorConfig,
+  saveEstimatorConfig,
+  resetEstimatorConfig,
+  ESTIMATOR_CONFIG_EVENT,
+} from '../utils/estimatorConfig';
+import {
+  ClientReviewItem,
+  getClientReviews,
+  moderateClientReview,
+  deleteClientReview,
+  CLIENT_REVIEWS_EVENT,
+} from '../utils/clientReviews';
 
 interface QuotationLeadsManagerProps {
   quotations: FitoutQuotationItem[];
@@ -41,6 +58,99 @@ export default function QuotationLeadsManager({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedQuote, setSelectedQuote] = useState<FitoutQuotationItem | null>(null);
   const [isConvertingId, setIsConvertingId] = useState<string | null>(null);
+  const [activeSubTab, setActiveSubTab] = useState<'all' | 'leads' | 'reviews' | 'estimator'>('all');
+
+  // Estimator Configuration State
+  const [estimatorConfig, setEstimatorConfig] = useState<EstimatorConfig>(() => getEstimatorConfig());
+  const [estimatorSavedMsg, setEstimatorSavedMsg] = useState<string | null>(null);
+
+  // Client Reviews Moderation State
+  const [clientReviews, setClientReviews] = useState<ClientReviewItem[]>(() => getClientReviews());
+  const [reviewFilter, setReviewFilter] = useState<'ALL' | 'Pending' | 'Approved' | 'Rejected'>('ALL');
+
+  useEffect(() => {
+    const syncEstimator = () => setEstimatorConfig(getEstimatorConfig());
+    const syncReviews = () => setClientReviews(getClientReviews());
+    window.addEventListener(ESTIMATOR_CONFIG_EVENT, syncEstimator);
+    window.addEventListener(CLIENT_REVIEWS_EVENT, syncReviews);
+    window.addEventListener('storage', syncEstimator);
+    window.addEventListener('storage', syncReviews);
+    return () => {
+      window.removeEventListener(ESTIMATOR_CONFIG_EVENT, syncEstimator);
+      window.removeEventListener(CLIENT_REVIEWS_EVENT, syncReviews);
+      window.removeEventListener('storage', syncEstimator);
+      window.removeEventListener('storage', syncReviews);
+    };
+  }, []);
+
+  const handleSpaceRateChange = (key: SpaceCategoryKey, newRate: number) => {
+    const clamped = Math.max(1000, Math.min(250000, Math.round(Number(newRate) || 0)));
+    setEstimatorConfig((prev) => ({
+      ...prev,
+      categories: {
+        ...prev.categories,
+        [key]: {
+          ...prev.categories[key],
+          baseRatePerSqm: clamped,
+          standard: Math.round(clamped * prev.tierMultipliers.standard),
+          premium: Math.round(clamped * prev.tierMultipliers.premium),
+          bespoke: Math.round(clamped * prev.tierMultipliers.bespoke),
+        },
+      },
+    }));
+  };
+
+  const handleTierMultiplierChange = (key: FinishTierKey, newMult: number) => {
+    const clamped = Math.max(0.5, Math.min(5.0, Number(newMult) || 1));
+    setEstimatorConfig((prev) => {
+      const nextMults = { ...prev.tierMultipliers, [key]: clamped };
+      const nextCategories = { ...prev.categories };
+      (Object.keys(nextCategories) as SpaceCategoryKey[]).forEach((catKey) => {
+        const base = nextCategories[catKey].baseRatePerSqm;
+        nextCategories[catKey] = {
+          ...nextCategories[catKey],
+          standard: Math.round(base * nextMults.standard),
+          premium: Math.round(base * nextMults.premium),
+          bespoke: Math.round(base * nextMults.bespoke),
+        };
+      });
+      return {
+        ...prev,
+        categories: nextCategories,
+        tierMultipliers: nextMults,
+      };
+    });
+  };
+
+  const handleSaveEstimatorRates = () => {
+    const updated = saveEstimatorConfig(estimatorConfig, 'Operations Admin');
+    setEstimatorConfig(updated);
+    setEstimatorSavedMsg('Estimator rates & tier multipliers saved! Public Landing Page updated live.');
+    setTimeout(() => setEstimatorSavedMsg(null), 4000);
+  };
+
+  const handleResetEstimatorRates = () => {
+    const defaults = resetEstimatorConfig();
+    setEstimatorConfig(defaults);
+    setEstimatorSavedMsg('Estimator rates restored to default baseline.');
+    setTimeout(() => setEstimatorSavedMsg(null), 4000);
+  };
+
+  const handleModerateReview = (reviewId: string, newStatus: 'Approved' | 'Rejected') => {
+    const updated = moderateClientReview(reviewId, newStatus, 'Admin Portal Moderator');
+    setClientReviews(updated);
+  };
+
+  const handleDeleteReview = (reviewId: string) => {
+    const updated = deleteClientReview(reviewId);
+    setClientReviews(updated);
+  };
+
+  const pendingReviewsCount = clientReviews.filter((r) => r.status === 'Pending').length;
+  const approvedReviewsCount = clientReviews.filter((r) => r.status === 'Approved').length;
+  const filteredReviews = clientReviews.filter((r) =>
+    reviewFilter === 'ALL' ? true : r.status === reviewFilter
+  );
 
   const filteredQuotes = quotations.filter(q => {
     if (statusFilter !== 'ALL' && q.status !== statusFilter) return false;
@@ -136,14 +246,39 @@ export default function QuotationLeadsManager({
           </p>
         </div>
 
-        <div className="bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-lg font-mono text-xs text-cyan-300 font-bold self-start sm:self-auto shrink-0 flex items-center gap-2">
-          <Calculator className="w-4 h-4 text-cyan-400" />
-          <span>Pipeline: ₱{pipelineValue.toLocaleString()}</span>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto shrink-0">
+          <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-1 gap-1">
+            {[
+              { id: 'all', label: 'All CRM & Config' },
+              { id: 'leads', label: `Quotation Leads (${totalQuotes})` },
+              { id: 'reviews', label: `Client Reviews (${pendingReviewsCount} Pending)` },
+              { id: 'estimator', label: 'Estimator Rates Config' },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveSubTab(tab.id as any)}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-bold transition-colors cursor-pointer ${
+                  activeSubTab === tab.id
+                    ? 'bg-cyan-500 text-slate-950'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-lg font-mono text-xs text-cyan-300 font-bold flex items-center gap-2">
+            <Calculator className="w-4 h-4 text-cyan-400" />
+            <span>Pipeline: ₱{pipelineValue.toLocaleString()}</span>
+          </div>
         </div>
       </div>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+      {(activeSubTab === 'all' || activeSubTab === 'leads') && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
         <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
           <div className="flex justify-between items-center text-slate-400 text-xs font-mono">
             <span>TOTAL ONLINE INQUIRIES</span>
@@ -380,6 +515,261 @@ export default function QuotationLeadsManager({
           </table>
         </div>
       </div>
+        </>
+      )}
+
+      {/* Client Reviews & Inquiries Moderation Panel */}
+      {(activeSubTab === 'all' || activeSubTab === 'reviews') && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <MessageSquare className="w-4 h-4 text-amber-400" />
+                <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider">
+                  PUBLIC TESTIMONIAL APPROVAL QUEUE
+                </span>
+              </div>
+              <h4 className="text-base font-bold text-white flex items-center gap-2">
+                Client Reviews & Inquiries Moderation
+                {pendingReviewsCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-mono font-bold">
+                    {pendingReviewsCount} Pending Review{pendingReviewsCount > 1 ? 's' : ''}
+                  </span>
+                )}
+              </h4>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Moderate public reviews submitted on the Landing Page before they appear live under Verified Client Testimonials ({approvedReviewsCount} currently published).
+              </p>
+            </div>
+
+            <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg p-1 self-start sm:self-auto">
+              {(['ALL', 'Pending', 'Approved', 'Rejected'] as const).map((status) => (
+                <button
+                  key={status}
+                  type="button"
+                  onClick={() => setReviewFilter(status)}
+                  className={`px-2.5 py-1 rounded-md text-xs font-mono font-bold transition-colors cursor-pointer ${
+                    reviewFilter === status
+                      ? 'bg-amber-500 text-slate-950'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  {status === 'ALL' ? `All (${clientReviews.length})` : status}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {filteredReviews.length === 0 ? (
+              <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center text-slate-500 text-xs">
+                No client reviews matching filter "{reviewFilter}".
+              </div>
+            ) : (
+              filteredReviews.map((rev) => (
+                <div
+                  key={rev.id}
+                  className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
+                >
+                  <div className="space-y-1.5 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm font-bold text-white">{rev.clientName}</span>
+                      <span className="text-xs text-cyan-400 font-semibold">• {rev.companyOrProject}</span>
+                      {rev.roleOrLocation && (
+                        <span className="text-[11px] text-slate-400 font-mono">({rev.roleOrLocation})</span>
+                      )}
+                      <span
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border ${
+                          rev.status === 'Approved'
+                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                            : rev.status === 'Rejected'
+                            ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                            : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                        }`}
+                      >
+                        {rev.status.toUpperCase()}
+                      </span>
+                      <div className="flex items-center gap-0.5 ml-1">
+                        {[1, 2, 3, 4, 5].map((s) => (
+                          <Star
+                            key={s}
+                            className={`w-3.5 h-3.5 ${
+                              s <= rev.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-700'
+                            }`}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed italic">"{rev.message}"</p>
+                    <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono text-slate-500">
+                      <span>ID: {rev.id}</span>
+                      <span>Submitted: {new Date(rev.createdAt).toLocaleDateString()}</span>
+                      {rev.email && <span>Email: {rev.email}</span>}
+                      {rev.moderatedBy && <span>Moderated by: {rev.moderatedBy}</span>}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 shrink-0">
+                    {rev.status !== 'Approved' && (
+                      <button
+                        type="button"
+                        onClick={() => handleModerateReview(rev.id, 'Approved')}
+                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        Approve & Publish
+                      </button>
+                    )}
+                    {rev.status !== 'Rejected' && (
+                      <button
+                        type="button"
+                        onClick={() => handleModerateReview(rev.id, 'Rejected')}
+                        className="px-3 py-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                        Reject
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteReview(rev.id)}
+                      className="px-2.5 py-1.5 rounded-lg bg-rose-600/15 hover:bg-rose-600/25 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
+                      title="Permanently Delete Review"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Admin Estimator Pricing & Tier Configuration Panel */}
+      {(activeSubTab === 'all' || activeSubTab === 'estimator') && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xs space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <Sliders className="w-4 h-4 text-cyan-400" />
+                <span className="text-[10px] font-mono text-cyan-400 font-bold uppercase tracking-wider">
+                  LIVE LANDING PAGE PRICING ENGINE
+                </span>
+              </div>
+              <h4 className="text-base font-bold text-white">
+                Cost Estimator Rate & Finish Tier Configuration
+              </h4>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Configure base <span className="font-mono text-cyan-300">₱/sqm</span> rates per Project Category and multipliers per Specification & Finish Tier. Changes immediately synchronize with the public Landing Page estimator.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={handleResetEstimatorRates}
+                className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Reset Defaults
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveEstimatorRates}
+                className="px-3.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              >
+                <Save className="w-3.5 h-3.5" />
+                Save Estimator Rates
+              </button>
+            </div>
+          </div>
+
+          {estimatorSavedMsg && (
+            <div className="p-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-medium flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>{estimatorSavedMsg}</span>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            {/* Base ₱/sqm Rates per Project Category */}
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+              <h5 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">
+                1. Base Rate per Project Category (₱ / sqm)
+              </h5>
+              <div className="space-y-2.5">
+                {(Object.keys(estimatorConfig.categories) as SpaceCategoryKey[]).map((key) => {
+                  const cat = estimatorConfig.categories[key];
+                  return (
+                    <div
+                      key={key}
+                      className="flex items-center justify-between gap-3 bg-slate-900/80 border border-slate-800/80 rounded-lg p-3"
+                    >
+                      <div>
+                        <div className="text-xs font-bold text-white">{cat.label}</div>
+                        <div className="text-[11px] text-slate-400">
+                          Std: ₱{cat.standard.toLocaleString()} • Prem: ₱{cat.premium.toLocaleString()} • Bespoke: ₱{cat.bespoke.toLocaleString()}/sqm
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-xs font-mono text-slate-400">₱</span>
+                        <input
+                          type="number"
+                          min={1000}
+                          max={250000}
+                          step={500}
+                          value={cat.baseRatePerSqm}
+                          onChange={(e) => handleSpaceRateChange(key, Number(e.target.value))}
+                          className="w-28 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-right text-xs font-mono font-bold text-cyan-300 focus:outline-none focus:border-cyan-500"
+                        />
+                        <span className="text-[11px] font-mono text-slate-500">/sqm</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Multipliers per Specification & Finish Tier */}
+            <div className="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+              <h5 className="text-xs font-mono font-bold uppercase tracking-wider text-slate-300">
+                2. Specification & Finish Tier Multipliers
+              </h5>
+              <div className="space-y-2.5">
+                {(Object.keys(estimatorConfig.tierMultipliers) as FinishTierKey[]).map((key) => {
+                  const mult = estimatorConfig.tierMultipliers[key];
+                  const label = estimatorConfig.tierLabels[key];
+                  return (
+                    <div
+                      key={key}
+                      className="flex items-center justify-between gap-3 bg-slate-900/80 border border-slate-800/80 rounded-lg p-3"
+                    >
+                      <div>
+                        <div className="text-xs font-bold text-white">{label}</div>
+                        <div className="text-[11px] text-slate-400 font-mono">Tier Key: {key.toUpperCase()}</div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <input
+                          type="number"
+                          min={0.5}
+                          max={5.0}
+                          step={0.05}
+                          value={mult}
+                          onChange={(e) => handleTierMultiplierChange(key, Number(e.target.value))}
+                          className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-right text-xs font-mono font-bold text-amber-300 focus:outline-none focus:border-amber-500"
+                        />
+                        <span className="text-xs font-mono text-slate-400">x</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Details View Modal */}
       {selectedQuote && (

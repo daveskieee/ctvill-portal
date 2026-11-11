@@ -326,6 +326,15 @@ projectsRouter.post('/projects', requireRole(['ADMIN', 'ENGINEER']), async (req:
       if (!req.user.projectIds.includes(id)) req.user.projectIds.push(id);
     }
 
+    // Also grant active Timekeeper & Engineer accounts access to newly created commercial sites for daily roll-call
+    await pool.query(
+      `UPDATE users
+       SET "projectIds" = array_append(COALESCE("projectIds", '{}'), $1)
+       WHERE role IN ('TIMEKEEPER', 'ENGINEER')
+         AND NOT ($1 = ANY(COALESCE("projectIds", '{}')))`,
+      [id]
+    ).catch(() => {});
+
     const pRes = await pool.query('SELECT * FROM commercial_projects WHERE id = $1', [id]);
     const p = pRes.rows[0] || {};
     const createdProject = {

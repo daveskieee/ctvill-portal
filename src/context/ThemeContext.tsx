@@ -38,10 +38,12 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const root = document.documentElement;
     if (theme === 'light') {
       root.classList.remove('dark');
-      root.classList.add('light');
+      root.classList.add('light', 'light-mode');
+      root.setAttribute('data-theme', 'light');
     } else {
-      root.classList.remove('light');
+      root.classList.remove('light', 'light-mode');
       root.classList.add('dark');
+      root.setAttribute('data-theme', 'dark');
     }
   }, [theme]);
 

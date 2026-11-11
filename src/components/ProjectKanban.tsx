@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   FileSpreadsheet, FileText, ShieldCheck, Building2, Calendar,
   CheckCircle2, AlertTriangle, CloudSun, CloudRain, HardHat,
@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { ProjectTask, TaskStatus, ProjectProfile } from '../types';
 import { STANDARD_CONSTRUCTION_PHASES } from './GanttTimeline';
+import { openEnterprisePrintWindow, escapePrintHtml } from '../utils/printEngine';
 
 interface ProjectKanbanProps {
   tasks: ProjectTask[];
@@ -171,6 +172,24 @@ export default function ProjectKanban({
     laborer: 12,
     skilled: 6
   });
+
+  useEffect(() => {
+    const syncFromDtr = () => {
+      try {
+        const pid = selectedProject?.id || 'ALL';
+        const raw = localStorage.getItem(`ctvill_dtr_manpower_${pid}`) || localStorage.getItem('ctvill_dtr_manpower_latest');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed.leadman === 'number') {
+            setManpowerCounts(parsed);
+          }
+        }
+      } catch { }
+    };
+    syncFromDtr();
+    window.addEventListener('ctvill-dtr-manpower-sync', syncFromDtr);
+    return () => window.removeEventListener('ctvill-dtr-manpower-sync', syncFromDtr);
+  }, [selectedProject?.id]);
   const [equipmentList, setEquipmentList] = useState<EquipmentEntry[]>([
     { id: 'eq-1', name: '1-Bagger Concrete Mixer', qty: 2, status: 'Operational' },
     { id: 'eq-2', name: 'Rebar Cutter & Bar Bender Set', qty: 2, status: 'Operational' },
@@ -301,6 +320,245 @@ export default function ProjectKanban({
     manpowerCounts.laborer +
     manpowerCounts.skilled;
 
+  const handlePrintSummaryProgressReport = () => {
+    const projName = selectedProject?.name || 'Commercial Fit-Out Project';
+    const projLoc = selectedProject?.location || 'Metro Manila Commercial Zone';
+    const projClient = (selectedProject as any)?.clientName || (selectedProject as any)?.client || 'Corporate Account Client';
+
+    const rowsHtml = phaseProgressRows
+      .map((row) => {
+        const varLabel = row.variancePct > 0 ? `+${row.variancePct}%` : `${row.variancePct}%`;
+        const varBadge =
+          row.variancePct >= 0
+            ? 'badge-emerald'
+            : row.variancePct < -10
+            ? 'badge-rose'
+            : 'badge-amber';
+        return `
+          <tr>
+            <td class="mono font-bold">${escapePrintHtml(row.wbs)}</td>
+            <td><strong>${escapePrintHtml(row.phaseName)}</strong></td>
+            <td class="text-right mono">${row.weight.toFixed(1)}%</td>
+            <td class="text-right mono">${row.plannedPct}%</td>
+            <td class="text-right mono font-bold">${row.actualPct}%</td>
+            <td style="width: 170px;">
+              <div class="progress-bar-wrap">
+                <div class="progress-bar-fill" style="width: ${Math.min(100, Math.max(0, row.actualPct))}%;"></div>
+              </div>
+            </td>
+            <td class="text-right mono">
+              <span class="badge ${varBadge}">${varLabel}</span>
+            </td>
+            <td class="text-right mono font-bold">${row.weightedActual.toFixed(2)}%</td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    const totalVarLabel =
+      summaryTotals.variance > 0 ? `+${summaryTotals.variance}%` : `${summaryTotals.variance}%`;
+
+    const bodyHtml = `
+      <div class="section-title">14-Phase WBS Bill of Quantities & Weighted Accomplishment Schedule</div>
+      <table>
+        <thead>
+          <tr>
+            <th>WBS Item</th>
+            <th>Scope of Works / Construction Phase</th>
+            <th class="text-right">Weight (%)</th>
+            <th class="text-right">Planned (%)</th>
+            <th class="text-right">Actual (%)</th>
+            <th>Visual Progress Bar</th>
+            <th class="text-right">Variance</th>
+            <th class="text-right">Weighted Accomplishment (%)</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td class="mono font-bold">TOTAL</td>
+            <td><strong>Cumulative Project Accomplishment (Earthworks – Plumbing Works)</strong></td>
+            <td class="text-right mono">${summaryTotals.totalWeight.toFixed(1)}%</td>
+            <td class="text-right mono">${summaryTotals.totalPlanned}%</td>
+            <td class="text-right mono">${summaryTotals.totalActual}%</td>
+            <td>
+              <div class="progress-bar-wrap">
+                <div class="progress-bar-fill" style="width: ${Math.min(100, Math.max(0, summaryTotals.totalActual))}%;"></div>
+              </div>
+            </td>
+            <td class="text-right mono">${totalVarLabel}</td>
+            <td class="text-right mono font-bold" style="color: #047857; font-size: 10.5pt;">${summaryTotals.totalActual}%</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+
+    openEnterprisePrintWindow({
+      title: '14-Phase WBS Summary Progress Report',
+      subtitle: 'Official Civil Engineering Weighted Bill of Quantities & Milestone Accomplishment Ledger',
+      docRef: `WBS-PROG-${(selectedProject?.id || 'PRJ01').toUpperCase()}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`,
+      orientation: 'landscape',
+      projectMeta: {
+        name: projName,
+        location: projLoc,
+        period: periodCovered,
+        client: projClient
+      },
+      kpiSummary: [
+        { label: 'Total WBS Weight', value: `${summaryTotals.totalWeight.toFixed(1)}%` },
+        { label: 'Planned Completion', value: `${summaryTotals.totalPlanned}%` },
+        { label: 'Overall Weighted Completion', value: `${summaryTotals.totalActual}%` },
+        { label: 'Schedule Variance', value: totalVarLabel }
+      ],
+      bodyHtml,
+      signatures: [
+        { role: 'Prepared By (Site Engineer)', name: preparedBy, title: 'Licensed Civil / Site Engineer' },
+        { role: 'Checked & Verified By (Project Manager)', name: checkedBy, title: 'Head Project Manager' },
+        { role: 'Conformed & Accepted By', name: projClient, title: 'Authorized Client Representative' }
+      ]
+    });
+  };
+
+  const handlePrintWeeklyActivityReport = () => {
+    const projName = selectedProject?.name || 'Commercial Fit-Out Project';
+    const projLoc = selectedProject?.location || 'Metro Manila Commercial Zone';
+    const projClient = (selectedProject as any)?.clientName || (selectedProject as any)?.client || 'Corporate Account Client';
+    const activePhaseRow =
+      phaseProgressRows.find((r) => r.actualPct > 0 && r.actualPct < 100) ||
+      phaseProgressRows[0];
+
+    const equipRowsHtml = equipmentList
+      .map(
+        (eq, i) => `
+        <tr>
+          <td class="mono">${i + 1}</td>
+          <td><strong>${escapePrintHtml(eq.name)}</strong></td>
+          <td class="text-center mono font-bold">${eq.qty} unit(s)</td>
+          <td class="text-center">
+            <span class="badge ${eq.status === 'Operational' ? 'badge-emerald' : 'badge-rose'}">
+              ${escapePrintHtml(eq.status)}
+            </span>
+          </td>
+        </tr>`
+      )
+      .join('');
+
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+    const weatherCellsHtml = days
+      .map((d) => {
+        const w = weatherLog[d];
+        const badge = w === 'Sunny' ? 'badge-amber' : 'badge-sky';
+        return `
+          <td class="text-center">
+            <div><span class="badge ${badge}">AM: ${w}</span></div>
+            <div style="margin-top: 3px;"><span class="badge ${badge}">PM: ${w}</span></div>
+          </td>
+        `;
+      })
+      .join('');
+
+    const bodyHtml = `
+      <div class="section-title">1. Manpower Designation Table (Deployed Field Personnel)</div>
+      <table>
+        <thead>
+          <tr>
+            <th class="text-center">Leadman</th>
+            <th class="text-center">Foreman</th>
+            <th class="text-center">Mason</th>
+            <th class="text-center">Laborer</th>
+            <th class="text-center">Skilled Trades</th>
+            <th class="text-center">Total On-Site Workforce</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="text-center mono font-bold">${manpowerCounts.leadman}</td>
+            <td class="text-center mono font-bold">${manpowerCounts.foreman}</td>
+            <td class="text-center mono font-bold">${manpowerCounts.mason}</td>
+            <td class="text-center mono font-bold">${manpowerCounts.laborer}</td>
+            <td class="text-center mono font-bold">${manpowerCounts.skilled}</td>
+            <td class="text-center mono font-bold" style="background: #f1f5f9;">${totalManpower} Pax</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="section-title">2. Weekly Weather Log Table (Mon–Sat AM & PM Telemetry)</div>
+      <table>
+        <thead>
+          <tr>
+            <th class="text-center">Monday</th>
+            <th class="text-center">Tuesday</th>
+            <th class="text-center">Wednesday</th>
+            <th class="text-center">Thursday</th>
+            <th class="text-center">Friday</th>
+            <th class="text-center">Saturday</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>${weatherCellsHtml}</tr>
+        </tbody>
+      </table>
+
+      <div class="section-title">3. Site Equipment & Tools Used</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 45px;">#</th>
+            <th>Equipment / Machinery Description</th>
+            <th class="text-center" style="width: 120px;">Quantity</th>
+            <th class="text-center" style="width: 150px;">Field Condition Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${equipRowsHtml}
+        </tbody>
+      </table>
+
+      <div class="section-title">4. Accomplished Works & Site Issues Encountered</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 50%;">Accomplished Works (Current Period)</th>
+            <th style="width: 50%;">Site Issues / Delays Encountered & Mitigation</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="white-space: pre-wrap; line-height: 1.5;">${escapePrintHtml(activitiesAccomplished)}</td>
+            <td style="white-space: pre-wrap; line-height: 1.5;">${escapePrintHtml(issuesEncountered)}</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+
+    openEnterprisePrintWindow({
+      title: 'Weekly & Daily Engineering Site Activity Report',
+      subtitle: `Active Construction Phase: ${activePhaseRow?.phaseName || 'Structural & Architectural Works'}`,
+      docRef: `WAR-${(selectedProject?.id || 'PRJ01').toUpperCase()}-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`,
+      orientation: 'portrait',
+      projectMeta: {
+        name: projName,
+        location: projLoc,
+        period: periodCovered,
+        client: `${projClient} • Active Phase: ${activePhaseRow?.phaseName || 'General Fit-Out'}`
+      },
+      kpiSummary: [
+        { label: 'Total Manpower', value: `${totalManpower} Pax` },
+        { label: 'Equipment Deployed', value: `${equipmentList.length} Units` },
+        { label: 'Active WBS Phase', value: activePhaseRow?.phaseName || 'Fit-Out' },
+        { label: 'Overall Progress', value: `${summaryTotals.totalActual}%` }
+      ],
+      bodyHtml,
+      signatures: [
+        { role: 'Prepared By (Site Engineer)', name: preparedBy, title: 'Site Engineer' },
+        { role: 'Checked By (Head Engineer / PM)', name: checkedBy, title: 'Head Engineer / Project Manager' },
+        { role: 'Noted & Approved By', name: 'Engr. Roberto Villanueva', title: 'Operations Manager' }
+      ]
+    });
+  };
+
   return (
     <div className="space-y-5">
       {/* Top Header & Project Filter + 3 Sub-Tabs */}
@@ -342,11 +600,10 @@ export default function ProjectKanban({
             <button
               type="button"
               onClick={() => setActiveSubTab('summary-excel')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                activeSubTab === 'summary-excel'
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${activeSubTab === 'summary-excel'
                   ? 'bg-emerald-500 text-slate-950 font-bold shadow-xs'
                   : 'text-slate-400 hover:text-white'
-              }`}
+                }`}
             >
               <FileSpreadsheet className="w-3.5 h-3.5" />
               <span>1. Summary Progress (Excel)</span>
@@ -354,11 +611,10 @@ export default function ProjectKanban({
             <button
               type="button"
               onClick={() => setActiveSubTab('weekly-pdf')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                activeSubTab === 'weekly-pdf'
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${activeSubTab === 'weekly-pdf'
                   ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
                   : 'text-slate-400 hover:text-white'
-              }`}
+                }`}
             >
               <FileText className="w-3.5 h-3.5" />
               <span>2. Weekly & Daily Activity (PDF)</span>
@@ -366,11 +622,10 @@ export default function ProjectKanban({
             <button
               type="button"
               onClick={() => setActiveSubTab('safety-qa')}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${
-                activeSubTab === 'safety-qa'
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 ${activeSubTab === 'safety-qa'
                   ? 'bg-sky-500 text-slate-950 font-bold shadow-xs'
                   : 'text-slate-400 hover:text-white'
-              }`}
+                }`}
             >
               <ShieldCheck className="w-3.5 h-3.5" />
               <span>3. Safety, PPE, QA & Punch List</span>
@@ -401,11 +656,11 @@ export default function ProjectKanban({
               </div>
               <button
                 type="button"
-                onClick={() => window.print()}
+                onClick={handlePrintSummaryProgressReport}
                 className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium flex items-center gap-1.5 cursor-pointer"
               >
                 <Printer className="w-3.5 h-3.5 text-amber-400" />
-                <span>Print Excel Sheet</span>
+                <span>Print Official Progress Report</span>
               </button>
             </div>
           </div>
@@ -438,9 +693,8 @@ export default function ProjectKanban({
                       <td className="py-2.5 px-4">
                         <div className="w-full bg-slate-950 rounded-md h-4 overflow-hidden border border-slate-800 relative flex items-center">
                           <div
-                            className={`h-full transition-all duration-300 ${
-                              isCompleted ? 'bg-emerald-500' : 'bg-emerald-600'
-                            }`}
+                            className={`h-full transition-all duration-300 ${isCompleted ? 'bg-emerald-500' : 'bg-emerald-600'
+                              }`}
                             style={{ width: `${Math.min(100, Math.max(0, row.actualPct))}%` }}
                           />
                           <span className="absolute inset-0 flex items-center justify-center text-[10px] font-mono font-bold text-white drop-shadow">
@@ -453,8 +707,8 @@ export default function ProjectKanban({
                           row.variancePct >= 0
                             ? 'text-emerald-400'
                             : isDelayed
-                            ? 'text-rose-400 font-semibold'
-                            : 'text-amber-400'
+                              ? 'text-rose-400 font-semibold'
+                              : 'text-amber-400'
                         }>
                           {row.variancePct > 0 ? `+${row.variancePct}%` : `${row.variancePct}%`}
                         </span>
@@ -601,11 +855,10 @@ export default function ProjectKanban({
                             [day]: prev[day] === 'Sunny' ? 'Rainy' : 'Sunny'
                           }))
                         }
-                        className={`p-2 rounded-lg border text-center transition cursor-pointer flex flex-col items-center gap-1 ${
-                          isSunny
+                        className={`p-2 rounded-lg border text-center transition cursor-pointer flex flex-col items-center gap-1 ${isSunny
                             ? 'bg-amber-500/10 border-amber-500/30 text-amber-300'
                             : 'bg-sky-500/15 border-sky-500/40 text-sky-300'
-                        }`}
+                          }`}
                       >
                         <span className="text-[10px] font-mono font-bold">{day}</span>
                         {isSunny ? <CloudSun className="w-4 h-4 text-amber-400" /> : <CloudRain className="w-4 h-4 text-sky-400" />}
@@ -668,11 +921,10 @@ export default function ProjectKanban({
                           )
                         )
                       }
-                      className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 cursor-pointer border ${
-                        eq.status === 'Operational'
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold shrink-0 cursor-pointer border ${eq.status === 'Operational'
                           ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                           : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                      }`}
+                        }`}
                     >
                       {eq.status}
                     </button>
@@ -793,11 +1045,11 @@ export default function ProjectKanban({
             <div className="flex items-center justify-end gap-2.5 pt-2">
               <button
                 type="button"
-                onClick={() => window.print()}
+                onClick={handlePrintWeeklyActivityReport}
                 className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
               >
                 <Printer className="w-3.5 h-3.5 text-amber-400" />
-                <span>Export / Print PDF Report</span>
+                <span>Print Weekly Activity Report (PDF Form)</span>
               </button>
               <button
                 type="button"
@@ -829,15 +1081,14 @@ export default function ProjectKanban({
                     <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-bold">
                       {item.id}
                     </span>
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold uppercase ${
-                      item.category === 'PPE_ISSUANCE'
+                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold uppercase ${item.category === 'PPE_ISSUANCE'
                         ? 'bg-teal-500/15 text-teal-300 border border-teal-500/30'
                         : item.category === 'TOOLBOX_MEETING'
-                        ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30'
-                        : item.category === 'QUALITY_INSPECTION'
-                        ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
-                        : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
-                    }`}>
+                          ? 'bg-sky-500/15 text-sky-300 border border-sky-500/30'
+                          : item.category === 'QUALITY_INSPECTION'
+                            ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-rose-500/15 text-rose-300 border border-rose-500/30'
+                      }`}>
                       {item.category.replace('_', ' ')}
                     </span>
                     <span className="text-[11px] font-mono text-slate-400">{item.date}</span>
@@ -857,23 +1108,22 @@ export default function ProjectKanban({
                         prev.map(c =>
                           c.id === item.id
                             ? {
-                                ...c,
-                                status:
-                                  c.status === 'OPEN_DEFECT'
-                                    ? 'RECTIFIED'
-                                    : c.status === 'RECTIFIED'
+                              ...c,
+                              status:
+                                c.status === 'OPEN_DEFECT'
+                                  ? 'RECTIFIED'
+                                  : c.status === 'RECTIFIED'
                                     ? 'COMPLIANT'
                                     : c.status
-                              }
+                            }
                             : c
                         )
                       )
                     }
-                    className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold border cursor-pointer ${
-                      item.status === 'OPEN_DEFECT'
+                    className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold border cursor-pointer ${item.status === 'OPEN_DEFECT'
                         ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
                         : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                    }`}
+                      }`}
                   >
                     {item.status === 'OPEN_DEFECT' ? '⚠️ Open Punch-List (Click to Rectify)' : `✓ ${item.status}`}
                   </button>

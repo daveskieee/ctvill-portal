@@ -204,6 +204,8 @@ export default function DocumentManager({
   const [uploadFileSize, setUploadFileSize] = useState<string>('3.2 MB');
   const [uploadNotes, setUploadNotes] = useState<string>('');
   const [selectedFileName, setSelectedFileName] = useState<string>('');
+  const [selectedFileMimeType, setSelectedFileMimeType] = useState<string>('');
+  const [selectedFileObjectUrl, setSelectedFileObjectUrl] = useState<string>('');
   const [selectedFileSizeBytes, setSelectedFileSizeBytes] = useState<number>(0);
   const [fileSizeError, setFileSizeError] = useState<string | null>(null);
 
@@ -345,11 +347,13 @@ export default function DocumentManager({
     showToast(`Downloaded: ${doc.title}`);
   };
 
-  // Handle File Input Selection
+  // Handle File Input Selection (Lightweight Metadata + Object URL Reference, Zero Base64 Bloat)
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setSelectedFileName(file.name);
+      setSelectedFileMimeType(file.type || 'application/octet-stream');
+      setSelectedFileObjectUrl(URL.createObjectURL(file));
       setSelectedFileSizeBytes(file.size);
 
       // Validate against the database max upload threshold (50 MB)
@@ -363,8 +367,11 @@ export default function DocumentManager({
       if (!uploadTitle.trim()) {
         setUploadTitle(file.name.replace(/\.[^/.]+$/, ''));
       }
-      const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
-      setUploadFileSize(`${sizeMb} MB`);
+      const sizeMb =
+        file.size >= 1024 * 1024
+          ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
+          : `${Math.max(1, Math.round(file.size / 1024))} KB`;
+      setUploadFileSize(sizeMb);
 
       const ext = file.name.split('.').pop()?.toLowerCase();
       if (ext === 'dxf' || ext === 'dwg') {
@@ -377,7 +384,7 @@ export default function DocumentManager({
     }
   };
 
-  // Upload Submission
+  // Upload Submission (Stores Lightweight Metadata Only)
   const handleUploadSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadTitle.trim()) return;
@@ -387,23 +394,33 @@ export default function DocumentManager({
       return;
     }
 
+    const uploadedAtIso = new Date().toISOString();
+    const safeFileName = selectedFileName || `${uploadTitle.trim().replace(/\s+/g, '_')}.pdf`;
+    const storageRefUrl = selectedFileObjectUrl || `/vault/documents/${encodeURIComponent(safeFileName)}`;
+
     onUploadDocument({
       title: uploadTitle.trim(),
       category: uploadCategory,
       version: uploadVersion.trim() || '1.0',
       status: uploadStatus,
       uploadedBy: 'Operations Director',
+      fileName: safeFileName,
+      mimeType: selectedFileMimeType || 'application/pdf',
       fileSize: uploadFileSize,
-      notes: uploadNotes.trim() || 'Uploaded to project centralized document vault.',
+      uploadedAt: uploadedAtIso,
+      fileUrl: storageRefUrl,
+      notes: uploadNotes.trim() || `Uploaded ${safeFileName} (${selectedFileMimeType || 'document'}, ${uploadFileSize}) at ${new Date(uploadedAtIso).toLocaleString()}.`,
     });
 
     setUploadTitle('');
     setUploadNotes('');
     setSelectedFileName('');
+    setSelectedFileMimeType('');
+    setSelectedFileObjectUrl('');
     setSelectedFileSizeBytes(0);
     setFileSizeError(null);
     setIsUploadModalOpen(false);
-    showToast(`Uploaded "${uploadTitle.trim()}" to project archive`);
+    showToast(`Uploaded "${uploadTitle.trim()}" (lightweight metadata indexed)`);
   };
 
   // Open Edit Modal

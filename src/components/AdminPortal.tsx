@@ -66,6 +66,22 @@ import AuditTrailQaLogs from './AuditTrailQaLogs';
 import { useTheme } from '../context/ThemeContext';
 import { ThemeToggle } from './ThemeToggle';
 import Sidebar from './Sidebar';
+import {
+  EstimatorConfig,
+  SpaceCategoryKey,
+  FinishTierKey,
+  getEstimatorConfig,
+  saveEstimatorConfig,
+  resetEstimatorConfig,
+  ESTIMATOR_CONFIG_EVENT,
+} from '../utils/estimatorConfig';
+import {
+  ClientReviewItem,
+  getClientReviews,
+  moderateClientReview,
+  deleteClientReview,
+  CLIENT_REVIEWS_EVENT,
+} from '../utils/clientReviews';
 
 export const TAB_METADATA: Record<string, { title: string; subtitle: string; department: string }> = {
   'dashboard': {
@@ -1534,13 +1550,29 @@ export default function AdminPortal({
       notify('Photo is too large. Please select an image under 2MB.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64 = event.target?.result as string;
-      setContAvatar(base64);
-    };
-    reader.readAsDataURL(file);
+    // Lightweight object URL storage reference instead of multi-megabyte Base64 bloat
+    const objectUrl = URL.createObjectURL(file);
+    setContAvatar(objectUrl);
   };
+
+  // Shared Estimator Config & Client Reviews Moderation state in System Settings
+  const [sysEstimatorConfig, setSysEstimatorConfig] = useState<EstimatorConfig>(() => getEstimatorConfig());
+  const [sysClientReviews, setSysClientReviews] = useState<ClientReviewItem[]>(() => getClientReviews());
+
+  useEffect(() => {
+    const syncEst = () => setSysEstimatorConfig(getEstimatorConfig());
+    const syncRev = () => setSysClientReviews(getClientReviews());
+    window.addEventListener(ESTIMATOR_CONFIG_EVENT, syncEst);
+    window.addEventListener(CLIENT_REVIEWS_EVENT, syncRev);
+    window.addEventListener('storage', syncEst);
+    window.addEventListener('storage', syncRev);
+    return () => {
+      window.removeEventListener(ESTIMATOR_CONFIG_EVENT, syncEst);
+      window.removeEventListener(CLIENT_REVIEWS_EVENT, syncRev);
+      window.removeEventListener('storage', syncEst);
+      window.removeEventListener('storage', syncRev);
+    };
+  }, []);
 
   const handleDepartmentChange = (dept: CTVillDepartment) => {
     setContDepartment(dept);
@@ -2661,7 +2693,10 @@ export default function AdminPortal({
                 <div className={`space-y-6 ${activeTab === 'timekeeper-attendance' ? 'block' : 'hidden'}`}>
                   <TimekeeperAttendanceDashboard
                     projects={projects}
+                    contractors={contractors}
                     session={session}
+                    onUpdateProject={onUpdateProject}
+                    onRefreshData={onRefreshAllData}
                     onNotify={(msg) => notify(msg)}
                   />
                 </div>
@@ -2674,6 +2709,7 @@ export default function AdminPortal({
                 <div className={`space-y-6 ${activeTab === 'finance-payroll' ? 'block' : 'hidden'}`}>
                   <FinancePayrollDashboard
                     projects={projects}
+                    contractors={contractors}
                     session={session}
                     onNotify={(msg) => notify(msg)}
                   />
@@ -3277,9 +3313,9 @@ export default function AdminPortal({
                                         <stop offset="100%" stopColor="#f59e0b" stopOpacity={0.9} />
                                       </linearGradient>
                                     </defs>
-                                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#f1f5f9'} strokeOpacity={isDark ? 0.35 : 0.4} vertical={false} />
-                                    <XAxis dataKey="name" stroke={isDark ? '#64748b' : '#94a3b8'} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} fontSize={11} tickLine={false} />
-                                    <YAxis stroke={isDark ? '#64748b' : '#94a3b8'} tick={{ fill: isDark ? '#94a3b8' : '#64748b' }} fontSize={11} tickLine={false} domain={[0, 100]} ticks={[0, 50, 100]} tickFormatter={(v) => `${v}%`} />
+                                    <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#334155' : '#e2e8f0'} strokeOpacity={isDark ? 0.35 : 0.9} vertical={false} />
+                                    <XAxis dataKey="name" stroke={isDark ? '#64748b' : '#334155'} tick={{ fill: isDark ? '#94a3b8' : '#334155', fontWeight: 600 }} fontSize={11} tickLine={false} />
+                                    <YAxis stroke={isDark ? '#64748b' : '#334155'} tick={{ fill: isDark ? '#94a3b8' : '#334155', fontWeight: 600 }} fontSize={11} tickLine={false} domain={[0, 100]} ticks={[0, 50, 100]} tickFormatter={(v) => `${v}%`} />
                                     <Tooltip
                                       formatter={(value) => [`${value}%`, 'Progress']}
                                       contentStyle={{
@@ -4188,6 +4224,228 @@ export default function AdminPortal({
                         </div>
                       </div>
 
+                    </div>
+                  </div>
+
+                  {/* ── Landing Page Estimator Pricing & Tier Configuration ─────────────────── */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-5">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-white font-bold text-sm">
+                          <Sliders className="w-4 h-4 text-cyan-400" />
+                          <span>Landing Page Cost Estimator Rate & Finish Tier Configuration</span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Control base <span className="font-mono text-cyan-300">₱/sqm</span> rates per Project Category and multipliers per Specification & Finish Tier on the public Landing Page.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const defaults = resetEstimatorConfig();
+                            setSysEstimatorConfig(defaults);
+                            notify('Estimator rates reset to default baseline.');
+                          }}
+                          className="text-[11px] font-semibold text-slate-300 hover:text-white px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 transition-colors cursor-pointer"
+                        >
+                          Reset Defaults
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = saveEstimatorConfig(sysEstimatorConfig, session?.name || 'Admin');
+                            setSysEstimatorConfig(updated);
+                            notify('Landing Page Estimator rates & multipliers saved live!');
+                          }}
+                          className="text-[11px] font-bold px-3.5 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 transition-colors cursor-pointer flex items-center gap-1.5"
+                        >
+                          <Save className="w-3.5 h-3.5" />
+                          Save Estimator Config
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="space-y-2.5">
+                        <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold">
+                          Base Rate per Project Category (₱ / sqm)
+                        </div>
+                        {(Object.keys(sysEstimatorConfig.categories) as SpaceCategoryKey[]).map((key) => {
+                          const cat = sysEstimatorConfig.categories[key];
+                          return (
+                            <div key={key} className="flex items-center justify-between gap-3 bg-slate-900/70 border border-slate-800 rounded-xl p-3">
+                              <div>
+                                <div className="text-xs font-bold text-white">{cat.label}</div>
+                                <div className="text-[10px] text-slate-400">
+                                  Std: ₱{cat.standard.toLocaleString()} • Prem: ₱{cat.premium.toLocaleString()} • Bespoke: ₱{cat.bespoke.toLocaleString()}/sqm
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-mono text-slate-400">₱</span>
+                                <input
+                                  type="number"
+                                  min={1000}
+                                  max={250000}
+                                  step={500}
+                                  value={cat.baseRatePerSqm}
+                                  onChange={(e) => {
+                                    const val = Math.max(1000, Math.min(250000, Math.round(Number(e.target.value) || 0)));
+                                    setSysEstimatorConfig((prev) => ({
+                                      ...prev,
+                                      categories: {
+                                        ...prev.categories,
+                                        [key]: {
+                                          ...prev.categories[key],
+                                          baseRatePerSqm: val,
+                                          standard: Math.round(val * prev.tierMultipliers.standard),
+                                          premium: Math.round(val * prev.tierMultipliers.premium),
+                                          bespoke: Math.round(val * prev.tierMultipliers.bespoke),
+                                        },
+                                      },
+                                    }));
+                                  }}
+                                  className="w-28 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-right text-xs font-mono font-bold text-cyan-300"
+                                />
+                                <span className="text-[10px] font-mono text-slate-500">/sqm</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      <div className="space-y-2.5">
+                        <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 font-bold">
+                          Specification & Finish Tier Multipliers
+                        </div>
+                        {(Object.keys(sysEstimatorConfig.tierMultipliers) as FinishTierKey[]).map((key) => {
+                          const mult = sysEstimatorConfig.tierMultipliers[key];
+                          const label = sysEstimatorConfig.tierLabels[key];
+                          return (
+                            <div key={key} className="flex items-center justify-between gap-3 bg-slate-900/70 border border-slate-800 rounded-xl p-3">
+                              <div>
+                                <div className="text-xs font-bold text-white">{label}</div>
+                                <div className="text-[10px] text-slate-400 font-mono">Tier Key: {key.toUpperCase()}</div>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <input
+                                  type="number"
+                                  min={0.5}
+                                  max={5.0}
+                                  step={0.05}
+                                  value={mult}
+                                  onChange={(e) => {
+                                    const val = Math.max(0.5, Math.min(5.0, Number(e.target.value) || 1));
+                                    setSysEstimatorConfig((prev) => {
+                                      const nextMults = { ...prev.tierMultipliers, [key]: val };
+                                      const nextCats = { ...prev.categories };
+                                      (Object.keys(nextCats) as SpaceCategoryKey[]).forEach((cKey) => {
+                                        const base = nextCats[cKey].baseRatePerSqm;
+                                        nextCats[cKey] = {
+                                          ...nextCats[cKey],
+                                          standard: Math.round(base * nextMults.standard),
+                                          premium: Math.round(base * nextMults.premium),
+                                          bespoke: Math.round(base * nextMults.bespoke),
+                                        };
+                                      });
+                                      return {
+                                        ...prev,
+                                        categories: nextCats,
+                                        tierMultipliers: nextMults,
+                                      };
+                                    });
+                                  }}
+                                  className="w-24 bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1 text-right text-xs font-mono font-bold text-amber-300"
+                                />
+                                <span className="text-xs font-mono text-slate-400">x</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ── Client Reviews & Inquiries Moderation Queue ─────────────────── */}
+                  <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800 pb-3">
+                      <div>
+                        <div className="flex items-center gap-2 text-white font-bold text-sm">
+                          <Award className="w-4 h-4 text-amber-400" />
+                          <span>Client Reviews & Inquiries Moderation Queue</span>
+                          <span className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[10px] font-mono">
+                            {sysClientReviews.filter((r) => r.status === 'Pending').length} Pending
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          Approve verified client feedback to publish on the Landing Page or Reject/Delete spam submissions.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2.5 max-h-80 overflow-y-auto pr-1 custom-scrollbar">
+                      {sysClientReviews.map((rev) => (
+                        <div key={rev.id} className="bg-slate-900/70 border border-slate-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="space-y-1 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="text-xs font-bold text-white">{rev.clientName}</span>
+                              <span className="text-[11px] text-cyan-400 font-semibold">• {rev.companyOrProject}</span>
+                              <span className="text-[11px] text-amber-400 font-mono">{'★'.repeat(rev.rating)}{'☆'.repeat(5 - rev.rating)}</span>
+                              <span
+                                className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border ${
+                                  rev.status === 'Approved'
+                                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                    : rev.status === 'Rejected'
+                                    ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                                    : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                }`}
+                              >
+                                {rev.status.toUpperCase()}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-300 italic">"{rev.message}"</p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {rev.status !== 'Approved' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = moderateClientReview(rev.id, 'Approved', session?.name || 'Admin');
+                                  setSysClientReviews(updated);
+                                  notify(`Approved review by ${rev.clientName}. Published live on Landing Page.`);
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold cursor-pointer"
+                              >
+                                Approve
+                              </button>
+                            )}
+                            {rev.status !== 'Rejected' && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const updated = moderateClientReview(rev.id, 'Rejected', session?.name || 'Admin');
+                                  setSysClientReviews(updated);
+                                  notify(`Rejected review by ${rev.clientName}.`);
+                                }}
+                                className="px-2.5 py-1 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-[11px] font-bold cursor-pointer"
+                              >
+                                Reject
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const updated = deleteClientReview(rev.id);
+                                setSysClientReviews(updated);
+                                notify(`Deleted review ${rev.id}.`);
+                              }}
+                              className="px-2.5 py-1 rounded-lg bg-rose-600/15 hover:bg-rose-600/25 text-rose-300 border border-rose-500/30 text-[11px] font-semibold cursor-pointer"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
 

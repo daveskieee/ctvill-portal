@@ -59,24 +59,24 @@ body {
 }
 
 
-/* Light Theme Variables and Overrides */
-html.light {
+/* Light Theme Variables and Overrides (WCAG AA+ Enterprise Standard) */
+html.light,
+html.light-mode,
+html[data-theme="light"] {
   color-scheme: light;
 }
 
-html.light body {
-  background-color: #f8fafc;
+html.light body,
+html.light-mode body,
+html[data-theme="light"] body {
+  background-color: #f1f5f9;
   color: #0f172a;
 }
 
-/* Main Page Wrappers & Root Workspace Canvas */
+/* 1. 3-Tier Surface Hierarchy */
+/* Tier 1: App Canvas Background (#f1f5f9 slate-100 so white cards pop with clear separation) */
 html.light .min-h-screen,
-html.light #landing-page-root {
-  background-color: #f8fafc !important;
-  color: #0f172a !important;
-}
-
-/* Root Workspace Canvas in Light Mode - Soft Slate Tone for clear contrast against crisp white cards */
+html.light #landing-page-root,
 html.light main,
 html.light .workspace-canvas {
   background-color: #f1f5f9 !important;
@@ -86,37 +86,44 @@ html.light .workspace-canvas {
 html.light #corporate-footer,
 html.light footer {
   background-color: #f1f5f9 !important;
-  border-color: #e2e8f0 !important;
+  border-color: #cbd5e1 !important;
   color: #475569 !important;
 }
 
-/* Crisp White Elevated Card Surfaces in Light Mode */
+/* Tier 2: Primary Card / Panel Surface (#ffffff white with crisp 1px solid #cbd5e1 border & subtle elevation shadow) */
 html.light .bg-white,
 html.light [class*="bg-white"] {
   background-color: #ffffff !important;
 }
 
-/* Soft Elevation Shadow for Light Mode Cards (Stripe / Linear Ergonomics) */
-html.light .shadow-sm {
-  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05) !important;
+html.light .shadow-sm,
+html.light .shadow-xs,
+html.light .rounded-3xl,
+html.light .rounded-2xl,
+html.light .rounded-xl {
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
 }
 
-html.light .shadow-xs {
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04) !important;
-}
-
-/* Universal Slate-950 Containers (Cards, Modals, Sections) */
-html.light [class~="bg-slate-950"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
-html.light [class*=" bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
-html.light [class^="bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas) {
-  background-color: #ffffff !important;
-}
-
-/* Universal Slate-900 Containers (Cards, Secondary Sections) */
+/* Primary Slate-950 & Slate-900 Cards, Modals, and Panels -> Crisp White (#ffffff) */
+html.light [class~="bg-slate-950"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas):not(.flex-1.flex-col.min-h-0),
 html.light [class~="bg-slate-900"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
 html.light [class*=" bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
 html.light [class^="bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas) {
   background-color: #ffffff !important;
+}
+
+/* Full-bleed module canvas containers (e.g., Timekeeper / Finance wrappers) -> #f1f5f9 App Canvas */
+html.light .flex-1.flex-col.min-h-0[class*="bg-slate-950"] {
+  background-color: #f1f5f9 !important;
+}
+
+/* Tier 3: Secondary / Inset Surface (Table headers, filter bars, form inputs, empty states, sub-cards) -> #f8fafc (slate-50) with 1px solid #cbd5e1 borders */
+html.light [class*=" bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.light [class^="bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.light [class~="bg-slate-800"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
+html.light [class*=" bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
+html.light [class^="bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]) {
+  background-color: #f8fafc !important;
 }
 
 /* Section backgrounds in Landing Page with slate-900 or slate-950 */
@@ -129,14 +136,7 @@ html.light section:nth-of-type(even) {
   background-color: #ffffff !important;
 }
 
-/* Universal Slate-800 Containers (Sub-cards, Pills, Badges, Inner Bars) */
-html.light [class~="bg-slate-800"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
-html.light [class*=" bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
-html.light [class^="bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]) {
-  background-color: #f1f5f9 !important;
-}
-
-/* Slate-700 & Slate-600 */
+/* Slate-700 & Slate-600 utility backgrounds */
 html.light [class~="bg-slate-700"],
 html.light [class*=" bg-slate-700/"],
 html.light [class^="bg-slate-700/"] {
@@ -153,7 +153,7 @@ html.light [class^="bg-black/"]:not([class*="fixed inset-0"]) {
 /* Gradients in Light Mode */
 html.light [class*="from-slate-950"],
 html.light [class*="from-slate-900"] {
-  background-image: linear-gradient(180deg, #f8fafc 0%, #ffffff 50%, #f1f5f9 100%) !important;
+  background-image: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
 }
 
 html.light [class*="from-amber-950"] {
@@ -161,14 +161,17 @@ html.light [class*="from-amber-950"] {
 }
 
 html.light [class*="linear-gradient(to_right,#1e293b"] {
-  background-image: linear-gradient(to right, #e2e8f0 1px, transparent 1px), linear-gradient(to bottom, #e2e8f0 1px, transparent 1px) !important;
+  background-image: linear-gradient(to right, #cbd5e1 1px, transparent 1px), linear-gradient(to bottom, #cbd5e1 1px, transparent 1px) !important;
 }
 
 html.light .opacity-25.pointer-events-none {
   opacity: 0.12 !important;
 }
 
-/* Universal Borders in Light Mode */
+/* Universal Crisp Borders in Light Mode (#cbd5e1 slate-300) */
+html.light [class~="border-slate-900"],
+html.light [class*=" border-slate-900/"],
+html.light [class^="border-slate-900/"],
 html.light [class~="border-slate-800"],
 html.light [class*=" border-slate-800/"],
 html.light [class^="border-slate-800/"],
@@ -177,106 +180,224 @@ html.light [class*=" border-slate-700/"],
 html.light [class^="border-slate-700/"],
 html.light [class~="border-slate-600"],
 html.light [class*=" border-slate-600/"],
-html.light [class^="border-slate-600/"] {
-  border-color: #e2e8f0 !important;
+html.light [class^="border-slate-600/"],
+html.light [class~="border-slate-200"],
+html.light [class*=" border-slate-200/"] {
+  border-color: #cbd5e1 !important;
 }
 
-/* Typography & Text Contrast */
-html.light [class~="text-white"],
-html.light [class*=" text-white"] {
-  color: #0f172a !important;
+html.light [class*="divide-slate-800"] > :not([hidden]) ~ :not([hidden]),
+html.light [class*="divide-slate-900"] > :not([hidden]) ~ :not([hidden]) {
+  border-color: #cbd5e1 !important;
 }
 
+/* 2. Global High-Contrast Text Remapping in Light Mode (WCAG AA+) */
+/* Primary headings, KPI numbers, worker names, and table values -> #0f172a (slate-900) */
+html.light [class~="text-white"]:not([class*="bg-rose-600"]):not([class*="bg-red-600"]):not([class*="bg-emerald-600"]):not([class*="bg-teal-600"]):not([class*="bg-blue-600"]):not([class*="bg-indigo-600"]):not([class*="bg-orange-600"]):not([class*="bg-[#ea580c]"]),
+html.light [class*=" text-white"]:not([class*="bg-rose-600"]):not([class*="bg-red-600"]):not([class*="bg-emerald-600"]):not([class*="bg-teal-600"]):not([class*="bg-blue-600"]):not([class*="bg-indigo-600"]):not([class*="bg-orange-600"]):not([class*="bg-[#ea580c]"]),
 html.light [class~="text-slate-100"],
 html.light [class*=" text-slate-100"],
 html.light [class~="text-slate-200"],
 html.light [class*=" text-slate-200"] {
-  color: #1e293b !important;
+  color: #0f172a !important;
 }
 
+/* Preserve white text inside solid high-saturation action buttons & Gantt progress bars */
+html.light button[class*="bg-rose-600"],
+html.light button[class*="bg-red-600"],
+html.light button[class*="bg-emerald-600"],
+html.light button[class*="bg-teal-600"],
+html.light button[class*="bg-blue-600"],
+html.light button[class*="bg-indigo-600"],
+html.light button[class*="bg-orange-600"],
+html.light button[class*="bg-[#ea580c]"],
+html.light .bg-red-600 .text-white,
+html.light .bg-emerald-600 .text-white,
+html.light .bg-red-600.text-white,
+html.light .bg-emerald-600.text-white {
+  color: #ffffff !important;
+}
+
+/* Secondary body text, descriptions, and table cells -> #334155 (slate-700, font-medium) */
 html.light [class~="text-slate-300"],
-html.light [class*=" text-slate-300"] {
+html.light [class*=" text-slate-300"],
+html.light [class~="text-slate-400"],
+html.light [class*=" text-slate-400"] {
   color: #334155 !important;
 }
 
-html.light [class~="text-slate-400"],
-html.light [class*=" text-slate-400"],
+/* Muted labels, uppercase column headers, and timestamps -> #475569 (slate-600, font-semibold). Never lighter than #475569 */
 html.light [class~="text-slate-500"],
-html.light [class*=" text-slate-500"] {
-  color: #64748b !important;
+html.light [class*=" text-slate-500"],
+html.light [class~="text-slate-600"],
+html.light [class*=" text-slate-600"] {
+  color: #475569 !important;
 }
 
-/* Ensure amber/gold buttons and badges always have readable dark text */
+/* Ensure amber/gold CTA buttons always have readable dark text */
 html.light [class~="bg-amber-500"],
 html.light [class~="bg-amber-400"],
 html.light [class*="from-amber-500"] {
   color: #0f172a !important;
 }
 
-/* Colored Status Badges & Accents in Light Mode */
+/* 3. High-Contrast Status Badges, Pills & Buttons in Light Mode (Zero Neon Glare) */
+/* A. Emerald / Teal / Success (Present, Active, Approved, MATCH, Operational, GPS Verified) */
+html.light [class*="text-emerald-400"],
+html.light [class*="text-emerald-300"],
+html.light [class*="text-emerald-200"],
+html.light [class*="text-teal-400"],
+html.light [class*="text-teal-300"],
+html.light [class*="text-teal-200"] {
+  color: #065f46 !important;
+}
+
+html.light [class*="bg-emerald-950"],
+html.light [class*="bg-emerald-900"],
+html.light [class*="bg-emerald-500/10"],
+html.light [class*="bg-emerald-500/15"],
+html.light [class*="bg-emerald-500/20"],
+html.light [class*="bg-emerald-500/25"],
+html.light [class*="bg-teal-950"],
+html.light [class*="bg-teal-900"],
+html.light [class*="bg-teal-500/10"],
+html.light [class*="bg-teal-500/15"],
+html.light [class*="bg-teal-500/20"] {
+  background-color: #d1fae5 !important;
+  border-color: #6ee7b7 !important;
+  color: #065f46 !important;
+}
+
+html.light [class*="border-emerald-500/"],
+html.light [class*="border-emerald-600/"],
+html.light [class*="border-emerald-700"],
+html.light [class*="border-emerald-800"],
+html.light [class*="border-teal-500/"],
+html.light [class*="border-teal-700"],
+html.light [class*="border-teal-800"] {
+  border-color: #6ee7b7 !important;
+}
+
+/* B. Amber / Warning (Pending, Late / Undertime, For Repair, Advisory) */
 html.light [class*="text-amber-400"],
-html.light [class*="text-amber-300"] {
-  color: #d97706 !important;
+html.light [class*="text-amber-300"],
+html.light [class*="text-amber-200"] {
+  color: #92400e !important;
 }
 
-html.light [class*="text-emerald-400"] {
-  color: #059669 !important;
+html.light [class*="bg-amber-950"],
+html.light [class*="bg-amber-900"],
+html.light [class*="bg-amber-500/10"],
+html.light [class*="bg-amber-500/15"],
+html.light [class*="bg-amber-500/20"],
+html.light [class*="bg-amber-500/25"] {
+  background-color: #fef3c7 !important;
+  border-color: #fcd34d !important;
+  color: #92400e !important;
 }
 
-html.light [class*="text-teal-400"] {
-  color: #0d9488 !important;
+html.light [class*="border-amber-500/"],
+html.light [class*="border-amber-600/"],
+html.light [class*="border-amber-700"],
+html.light [class*="border-amber-800"] {
+  border-color: #fcd34d !important;
 }
 
-html.light [class*="text-blue-400"] {
-  color: #2563eb !important;
+/* C. Blue / Cyan / Sky / Indigo / Info (In Progress, Scheduled, In-House, 0.0h OT) */
+html.light [class*="text-blue-400"],
+html.light [class*="text-blue-300"],
+html.light [class*="text-blue-200"],
+html.light [class*="text-cyan-400"],
+html.light [class*="text-cyan-300"],
+html.light [class*="text-sky-400"],
+html.light [class*="text-sky-300"],
+html.light [class*="text-indigo-400"],
+html.light [class*="text-indigo-300"] {
+  color: #1e40af !important;
 }
 
-html.light [class*="text-rose-400"] {
-  color: #e11d48 !important;
+html.light [class*="bg-blue-950"],
+html.light [class*="bg-blue-900"],
+html.light [class*="bg-blue-500/10"],
+html.light [class*="bg-blue-500/15"],
+html.light [class*="bg-blue-500/20"],
+html.light [class*="bg-cyan-950"],
+html.light [class*="bg-cyan-500/10"],
+html.light [class*="bg-cyan-500/15"],
+html.light [class*="bg-cyan-500/20"],
+html.light [class*="bg-sky-950"],
+html.light [class*="bg-sky-900"],
+html.light [class*="bg-sky-500/10"],
+html.light [class*="bg-sky-500/15"],
+html.light [class*="bg-sky-500/20"],
+html.light [class*="bg-indigo-950"],
+html.light [class*="bg-indigo-500/10"],
+html.light [class*="bg-indigo-500/15"],
+html.light [class*="bg-indigo-500/20"] {
+  background-color: #dbeafe !important;
+  border-color: #93c5fd !important;
+  color: #1e40af !important;
 }
 
-html.light [class*="text-purple-400"] {
-  color: #7c3aed !important;
+html.light [class*="border-blue-500/"],
+html.light [class*="border-blue-700"],
+html.light [class*="border-cyan-500/"],
+html.light [class*="border-sky-500/"],
+html.light [class*="border-sky-600/"],
+html.light [class*="border-sky-700"],
+html.light [class*="border-indigo-500/"],
+html.light [class*="border-indigo-600/"],
+html.light [class*="border-indigo-700"],
+html.light [class*="border-indigo-800"] {
+  border-color: #93c5fd !important;
 }
 
-html.light [class*="text-cyan-400"] {
-  color: #0891b2 !important;
+/* D. Rose / Red / Danger (Absent, Deny, Delayed, Critical) */
+html.light [class*="text-rose-400"],
+html.light [class*="text-rose-300"],
+html.light [class*="text-rose-200"],
+html.light [class*="text-red-400"],
+html.light [class*="text-red-300"],
+html.light [class*="text-red-200"] {
+  color: #991b1b !important;
 }
 
-html.light [class*="text-indigo-400"] {
-  color: #4f46e5 !important;
+html.light [class*="bg-rose-950"]:not(.h-\[22px\]),
+html.light [class*="bg-rose-900"]:not(.h-\[22px\]),
+html.light [class*="bg-red-950"]:not(.h-\[22px\]),
+html.light [class*="bg-red-900"]:not(.h-\[22px\]),
+html.light [class*="bg-rose-500/10"],
+html.light [class*="bg-rose-500/15"],
+html.light [class*="bg-rose-500/20"],
+html.light [class*="bg-red-500/10"],
+html.light [class*="bg-red-500/15"],
+html.light [class*="bg-red-500/20"] {
+  background-color: #ffe4e6 !important;
+  border-color: #fda4af !important;
+  color: #991b1b !important;
 }
 
-/* Status Pill Containers */
-html.light [class*="bg-emerald-950"] {
-  background-color: #ecfdf5 !important;
-  border-color: #a7f3d0 !important;
-  color: #047857 !important;
+html.light [class*="border-rose-500/"],
+html.light [class*="border-rose-600/"],
+html.light [class*="border-rose-700"],
+html.light [class*="border-rose-800"],
+html.light [class*="border-red-500/"],
+html.light [class*="border-red-700"] {
+  border-color: #fda4af !important;
 }
 
-html.light [class*="bg-amber-950"] {
-  background-color: #fffbeb !important;
-  border-color: #fde68a !important;
-  color: #b45309 !important;
+html.light [class*="text-purple-400"],
+html.light [class*="text-purple-300"] {
+  color: #6b21a8 !important;
 }
 
-html.light [class*="bg-purple-950"] {
-  background-color: #faf5ff !important;
-  border-color: #e9d5ff !important;
-  color: #7e22ce !important;
-}
-
-html.light [class*="bg-rose-950"],
-html.light [class*="bg-red-950"] {
-  background-color: #fff1f2 !important;
-  border-color: #fecdd3 !important;
-  color: #be123c !important;
-}
-
-html.light [class*="bg-blue-950"] {
-  background-color: #eff6ff !important;
-  border-color: #bfdbfe !important;
-  color: #1d4ed8 !important;
+html.light [class*="bg-purple-950"],
+html.light [class*="bg-purple-500/10"],
+html.light [class*="bg-purple-500/15"],
+html.light [class*="bg-purple-500/20"] {
+  background-color: #f3e8ff !important;
+  border-color: #d8b4fe !important;
+  color: #6b21a8 !important;
 }
 
 /* Subtle inner sub-bars and tracks */
@@ -284,32 +405,13 @@ html.light [class*="bg-slate-950/40"],
 html.light [class*="bg-slate-950/30"],
 html.light [class*="bg-slate-950/20"],
 html.light [class*="bg-slate-950/10"] {
-  background-color: #f1f5f9 !important;
+  background-color: #f8fafc !important;
 }
 
 html.light .h-2.bg-slate-800,
 html.light .h-1\.5.bg-slate-800,
 html.light .h-1.bg-slate-800 {
   background-color: #e2e8f0 !important;
-}
-
-/* Active Amber Badges in Light Mode */
-html.light [class*="bg-amber-500/20"] {
-  background-color: #fef3c7 !important;
-  color: #92400e !important;
-}
-
-html.light [class*="bg-amber-500/10"] {
-  background-color: #fffbeb !important;
-}
-
-html.light [class*="border-amber-500/50"] {
-  border-color: #f59e0b !important;
-}
-
-html.light [class*="border-amber-500/30"],
-html.light [class*="border-amber-500/20"] {
-  border-color: #fcd34d !important;
 }
 
 /* Interactive Hovers */
@@ -328,16 +430,17 @@ html.light [class*="hover:text-white"]:hover {
 
 html.light [class*="hover:border-slate-700"]:hover,
 html.light [class*="hover:border-slate-600"]:hover {
-  border-color: #cbd5e1 !important;
+  border-color: #94a3b8 !important;
 }
 
-/* Inputs, Selects, Textareas */
-html.light input:not([type="checkbox"]):not([type="radio"]),
+/* 4. Data Tables & Form Controls (All Modules) */
+/* All <input>, <select>, and <textarea> in Light Mode: #ffffff bg, #0f172a text, 1px solid #94a3b8 (slate-400) border */
+html.light input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
 html.light select,
 html.light textarea {
   background-color: #ffffff !important;
   color: #0f172a !important;
-  border-color: #cbd5e1 !important;
+  border: 1px solid #94a3b8 !important;
 }
 
 html.light select option {
@@ -347,7 +450,18 @@ html.light select option {
 
 html.light input::placeholder,
 html.light textarea::placeholder {
-  color: #94a3b8 !important;
+  color: #64748b !important;
+}
+
+/* All table header rows (<thead>) in Light Mode: #f1f5f9 (slate-100) bg, #334155 (slate-700) bold uppercase text, 1px solid #cbd5e1 bottom border */
+html.light thead,
+html.light thead tr,
+html.light thead th {
+  background-color: #f1f5f9 !important;
+  color: #334155 !important;
+  font-weight: 700 !important;
+  text-transform: uppercase !important;
+  border-bottom: 1px solid #cbd5e1 !important;
 }
 
 /* Fullscreen Loading Transition Screen */
@@ -443,9 +557,9 @@ html.light ::-webkit-scrollbar-thumb:hover {
 /* Minimalist ERP Component Utilities */
 .erp-card {
   background-color: #ffffff;
-  border: 1px solid #e2e8f0;
+  border: 1px solid #cbd5e1;
   border-radius: 0.75rem;
-  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.03);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -457,7 +571,7 @@ html:not(.light) .erp-card {
 }
 
 .erp-card:hover {
-  border-color: #cbd5e1;
+  border-color: #94a3b8;
 }
 
 html.dark .erp-card:hover,
@@ -474,13 +588,13 @@ html:not(.light) .erp-card:hover {
 
 .erp-table th {
   padding: 0.625rem 0.75rem;
-  font-weight: 600;
+  font-weight: 700;
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: #64748b;
-  border-bottom: 1px solid #e2e8f0;
-  background-color: #f8fafc;
+  color: #334155;
+  border-bottom: 1px solid #cbd5e1;
+  background-color: #f1f5f9;
 }
 
 html.dark .erp-table th,
@@ -492,7 +606,7 @@ html:not(.light) .erp-table th {
 
 .erp-table td {
   padding: 0.625rem 0.75rem;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid #cbd5e1;
   color: #334155;
 }
 
@@ -569,4 +683,52 @@ html.light .skeleton-shimmer {
     rgba(226, 232, 240, 0.6) 100%
   );
   background-size: 200% 100%;
+}
+
+/* ============================================================================
+   ENTERPRISE GLOBAL @media print FALLBACK RULES (Direct Ctrl+P Support)
+   ============================================================================ */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  .no-print,
+  aside,
+  nav,
+  header button,
+  .modal-backdrop {
+    display: none !important;
+  }
+
+  html,
+  body,
+  #root,
+  main {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    overflow: visible !important;
+    height: auto !important;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  table {
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
+
+  th,
+  td {
+    border: 1px solid #cbd5e1 !important;
+    color: #0f172a !important;
+  }
+
+  th {
+    background-color: #f1f5f9 !important;
+  }
 }

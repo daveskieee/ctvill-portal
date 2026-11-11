@@ -8,6 +8,7 @@ import {
   XAxis, YAxis, Tooltip, CartesianGrid
 } from 'recharts';
 import { DailyManpowerAudit, ProjectProfile, Contractor } from '../types';
+import { useTheme } from '../context/ThemeContext';
 
 export interface SubcontractorRollCallAuditsProps {
   manpowerAudits: DailyManpowerAudit[];
@@ -28,6 +29,8 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
   onLogAuditClick,
   notify,
 }) => {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const [selectedSite, setSelectedSite] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const audits = manpowerAudits;
@@ -263,9 +266,18 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
           <div className="h-52 w-full pt-1">
             <ResponsiveContainer width="100%" height="100%">
               <ReBarChart data={chartData} margin={{ top: 10, right: 10, left: -15, bottom: 20 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                <XAxis dataKey="name" stroke="#64748b" fontSize={11} tickLine={false} />
-                <YAxis stroke="#64748b" fontSize={11} tickLine={false} />
+                <CartesianGrid strokeDasharray="3 3" stroke={isDark ? '#1e293b' : '#e2e8f0'} vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  stroke={isDark ? '#64748b' : '#334155'}
+                  tick={{ fill: isDark ? '#94a3b8' : '#334155', fontSize: 11, fontWeight: 600 }}
+                  tickLine={false}
+                />
+                <YAxis
+                  stroke={isDark ? '#64748b' : '#334155'}
+                  tick={{ fill: isDark ? '#94a3b8' : '#334155', fontSize: 11, fontWeight: 600 }}
+                  tickLine={false}
+                />
                 <Tooltip
                   content={({ active, payload }) => {
                     if (active && payload && payload.length) {
@@ -287,9 +299,9 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
                     return null;
                   }}
                 />
-                <Bar dataKey="claimed" fill="#3b82f6" radius={[4, 4, 0, 0]} name="Declared" />
-                <Bar dataKey="verified" fill="#10b981" radius={[4, 4, 0, 0]} name="Verified" />
-                <Bar dataKey="discrepancy" fill="#f43f5e" radius={[4, 4, 0, 0]} name="Ghost Discrepancy" />
+                <Bar dataKey="claimed" fill={isDark ? '#3b82f6' : '#2563eb'} radius={[4, 4, 0, 0]} name="Declared" />
+                <Bar dataKey="verified" fill={isDark ? '#10b981' : '#059669'} radius={[4, 4, 0, 0]} name="Verified" />
+                <Bar dataKey="discrepancy" fill={isDark ? '#f43f5e' : '#e11d48'} radius={[4, 4, 0, 0]} name="Ghost Discrepancy" />
               </ReBarChart>
             </ResponsiveContainer>
           </div>

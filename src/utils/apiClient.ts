@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { getStoredSession } from './session';
+
 export const CSRF_COOKIE_NAME = 'ctvill_csrf';
 
 /**
@@ -62,17 +64,34 @@ export function setupSecureFetch(onUnauthorized?: () => void) {
         (input instanceof Request ? input.method : 'GET')
       ).toUpperCase();
 
+      const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
+
+      // Attach Role Token & Authorization Bearer headers on role-restricted API requests
+      const activeSession = getStoredSession();
+      if (activeSession) {
+        const roleHeader = String(activeSession.role || 'Admin');
+        const bearerToken =
+          (activeSession as any).token ||
+          `ctvill-sess-${String(activeSession.id || 'usr')}-${roleHeader.toLowerCase()}`;
+        if (!headers.has('Authorization') && !headers.has('authorization')) {
+          headers.set('Authorization', `Bearer ${bearerToken}`);
+        }
+        if (!headers.has('X-User-Role') && !headers.has('x-user-role')) {
+          headers.set('X-User-Role', roleHeader);
+        }
+      }
+
       // Attach CSRF token on state-changing requests
       if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
         const csrfToken = getCsrfToken();
         if (csrfToken) {
-          const headers = new Headers(init.headers || (input instanceof Request ? input.headers : undefined));
           if (!headers.has('x-csrf-token') && !headers.has('X-CSRF-Token')) {
             headers.set('x-csrf-token', csrfToken);
           }
-          init.headers = headers;
         }
       }
+
+      init.headers = headers;
     }
 
     try {

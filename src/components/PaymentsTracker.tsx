@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { Client, ProjectProfile } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { openEnterprisePrintWindow, escapePrintHtml } from '../utils/printEngine';
 
 export interface InstallmentRowItem {
   id: string;
@@ -499,6 +500,134 @@ export default function PaymentsTracker({
     );
   }
 
+  const handlePrintBillingsLedger = () => {
+    const rowsHtml = filteredInstallments
+      .map(
+        (inst) => `
+        <tr>
+          <td class="mono font-bold">${escapePrintHtml(inst.id)}</td>
+          <td><strong>${escapePrintHtml(inst.clientName)}</strong></td>
+          <td>${escapePrintHtml(inst.projectName)}</td>
+          <td class="mono">${escapePrintHtml(inst.dueDate)}</td>
+          <td class="text-right mono font-bold">₱${inst.amount.toLocaleString()}</td>
+          <td class="text-center">
+            <span class="badge ${inst.status === 'Paid'
+            ? 'badge-emerald'
+            : inst.isOverdue
+              ? 'badge-rose'
+              : 'badge-amber'
+          }">${escapePrintHtml(inst.isOverdue && inst.status !== 'Paid' ? 'OVERDUE' : inst.status)}</span>
+          </td>
+        </tr>`
+      )
+      .join('');
+
+    const bodyHtml = `
+      <div class="section-title">Progress Milestone & Installment Billing Schedule</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Invoice / Ref ID</th>
+            <th>Client / Account</th>
+            <th>Project Fit-Out Site</th>
+            <th>Due Date</th>
+            <th class="text-right">Installment Amount (₱)</th>
+            <th class="text-center">Billing Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="4" class="text-right">TOTAL SCHEDULED BILLINGS:</td>
+            <td class="text-right mono">₱${filteredInstallments.reduce((s, i) => s + i.amount, 0).toLocaleString()}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+
+    openEnterprisePrintWindow({
+      title: 'Progress Milestone & Receivables Billing Ledger',
+      subtitle: 'Official Client Installment Schedule, Collections & Receivables Register',
+      docRef: `AR-LEDGER-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}`,
+      orientation: 'landscape',
+      projectMeta: {
+        name: selectedProjectFilter === 'ALL' ? 'All Active Commercial Projects' : selectedProjectFilter,
+        period: new Date().toLocaleDateString('en-PH', { month: 'long', day: 'numeric', year: 'numeric' }),
+        client: 'Commercial Fit-Out Portfolio'
+      },
+      kpiSummary: [
+        { label: 'Total Contract Price (TCP)', value: `₱${totalTCP.toLocaleString()}` },
+        { label: 'Total Funds Collected', value: `₱${totalCollected.toLocaleString()}` },
+        { label: 'Pending Receivables', value: `₱${totalPending.toLocaleString()}` },
+        { label: 'Overdue Accounts', value: `${overdueCount} Overdue` }
+      ],
+      bodyHtml
+    });
+  };
+
+  const handlePrintSingleReceipt = (receipt: InstallmentRowItem) => {
+    const bodyHtml = `
+      <div class="section-title">Official Installment Billing Statement & Acknowledgement Receipt</div>
+      <table>
+        <tbody>
+          <tr>
+            <th style="width: 35%;">Invoice / Billing Reference</th>
+            <td class="mono font-bold">${escapePrintHtml(receipt.id)}</td>
+          </tr>
+          <tr>
+            <th>Client / Corporate Account</th>
+            <td><strong>${escapePrintHtml(receipt.clientName)}</strong></td>
+          </tr>
+          <tr>
+            <th>Commercial Fit-Out Project</th>
+            <td>${escapePrintHtml(receipt.projectName)}</td>
+          </tr>
+          <tr>
+            <th>Scheduled Due Date</th>
+            <td class="mono">${escapePrintHtml(receipt.dueDate)}</td>
+          </tr>
+          <tr>
+            <th>Settlement / Billing Status</th>
+            <td>
+              <span class="badge ${receipt.status === 'Paid' ? 'badge-emerald' : 'badge-amber'}">
+                ${escapePrintHtml(receipt.status.toUpperCase())}
+              </span>
+            </td>
+          </tr>
+          ${receipt.paidDate
+        ? `<tr><th>Date Settled</th><td class="mono">${escapePrintHtml(receipt.paidDate)}</td></tr>`
+        : ''
+      }
+          <tr>
+            <th>Installment Amount Due / Paid</th>
+            <td class="mono font-bold" style="font-size: 13pt; color: #047857;">₱${receipt.amount.toLocaleString()}</td>
+          </tr>
+        </tbody>
+      </table>
+    `;
+
+    openEnterprisePrintWindow({
+      title: 'Official Progress Billing Statement & Receipt',
+      subtitle: `Invoice Reference: ${receipt.id} — ${receipt.clientName}`,
+      docRef: receipt.id,
+      orientation: 'portrait',
+      projectMeta: {
+        name: receipt.projectName,
+        client: receipt.clientName,
+        period: `Due Date: ${receipt.dueDate}`
+      },
+      kpiSummary: [
+        { label: 'Invoice Ref', value: receipt.id },
+        { label: 'Billing Status', value: receipt.status.toUpperCase() },
+        { label: 'Installment Amount', value: `₱${receipt.amount.toLocaleString()}` }
+      ],
+      bodyHtml
+    });
+  };
+
   return (
     <div className="space-y-5">
       {/* Header Banner */}
@@ -525,7 +654,16 @@ export default function PaymentsTracker({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={handlePrintBillingsLedger}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+          >
+            <Printer className="w-3.5 h-3.5 text-amber-400" />
+            <span>Print Billings Ledger</span>
+          </button>
+
           <button
             onClick={() => setShowCreateInvoiceModal(true)}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold transition-colors cursor-pointer"
@@ -820,7 +958,7 @@ export default function PaymentsTracker({
             {/* Receipt Footer */}
             <div className="pt-4 border-t border-slate-800 flex justify-between items-center">
               <button
-                onClick={() => window.print()}
+                onClick={() => handlePrintSingleReceipt(selectedReceipt)}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold transition cursor-pointer"
               >
                 <Printer className="w-3.5 h-3.5" /> Print Statement
@@ -979,8 +1117,8 @@ export default function PaymentsTracker({
 
             {feedbackMsg && (
               <div className={`p-3 rounded-xl mb-4 text-xs font-mono flex items-center gap-2 ${feedbackMsg.startsWith('Error')
-                  ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
-                  : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
+                ? 'bg-rose-950/80 text-rose-300 border border-rose-800'
+                : 'bg-emerald-950/80 text-emerald-300 border border-emerald-800'
                 }`}>
                 {feedbackMsg.startsWith('Error') ? <AlertTriangle className="w-4 h-4 shrink-0" /> : <Check className="w-4 h-4 shrink-0" />}
                 {feedbackMsg}

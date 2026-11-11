@@ -2836,7 +2836,7 @@ export default function GanttTimeline({
               <div className={`h-[60px] flex items-center px-3 text-[11px] font-mono font-bold uppercase tracking-wider ${
                 isDark 
                   ? 'bg-slate-900 border-b border-slate-800 text-slate-400' 
-                  : 'bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold text-xs'
+                  : 'bg-[#f1f5f9] border-b border-[#cbd5e1] text-[#334155] font-bold text-xs'
               }`}>
                 <button
                   type="button"
@@ -2862,7 +2862,7 @@ export default function GanttTimeline({
             ref={tableBodyRef}
             onScroll={handleTableScroll}
             className={`flex-1 overflow-y-auto overflow-x-hidden ${
-              isDark ? 'divide-y divide-slate-900' : 'divide-y divide-slate-100'
+              isDark ? 'divide-y divide-slate-900' : 'divide-y divide-[#e2e8f0]'
             }`}
           >
             {visibleTasks.map((task, taskIndex) => {
@@ -2938,7 +2938,7 @@ export default function GanttTimeline({
                       className={`truncate ${
                         isDark
                           ? (isMilestone ? 'font-bold text-amber-300' : isCritical ? 'font-semibold text-slate-100' : 'text-slate-300 font-medium')
-                          : (isMilestone ? 'font-bold text-amber-800' : isCritical ? 'font-bold text-slate-900' : 'text-slate-700 font-medium')
+                          : (isMilestone ? 'font-bold text-amber-800' : isCritical ? 'font-bold text-[#0f172a]' : 'text-[#0f172a] font-semibold')
                       }`}
                       title={task.text}
                     >
@@ -3081,11 +3081,11 @@ export default function GanttTimeline({
             )}
             {/* Timeline Multi-Tier Header */}
             <div className={`sticky top-0 z-30 border-b ${
-              isDark ? 'bg-slate-900 border-slate-800 shadow-md' : 'bg-slate-50 border-slate-200 shadow-2xs'
+              isDark ? 'bg-slate-900 border-slate-800 shadow-md' : 'bg-[#f1f5f9] border-[#cbd5e1] shadow-2xs'
             }`}>
               {/* Tier 1: Month Groups */}
               <div className={`h-7 border-b relative text-xs font-mono font-bold ${
-                isDark ? 'border-slate-800 text-slate-300' : 'border-slate-200 text-slate-700'
+                isDark ? 'border-slate-800 text-slate-300' : 'border-[#cbd5e1] text-[#0f172a]'
               }`}>
                 {monthHeaders.map((m, idx) => {
                   const isNarrow = m.widthPixel < 65;
@@ -3094,7 +3094,7 @@ export default function GanttTimeline({
                       key={idx}
                       style={{ left: `${m.leftPixel}px`, width: `${m.widthPixel}px` }}
                       className={`absolute top-0 bottom-0 flex items-center px-2 border-r truncate text-[11px] ${
-                        isDark ? 'border-slate-800' : 'border-slate-200'
+                        isDark ? 'border-slate-800' : 'border-[#cbd5e1]'
                       }`}
                       title={m.monthLabel}
                     >
@@ -3111,11 +3111,11 @@ export default function GanttTimeline({
                     key={idx}
                     style={{ width: `${columnWidth}px` }}
                     className={`shrink-0 flex items-center justify-center border-r ${
-                      isDark ? 'border-slate-800/80' : 'border-slate-200/70'
+                      isDark ? 'border-slate-800/80' : 'border-[#cbd5e1]'
                     } ${
-                      d.isSun ? (isDark ? 'bg-slate-950/70 text-slate-600 font-bold' : 'bg-slate-100/70 text-slate-400 font-bold') :
-                      d.isWeatherSuspended ? (isDark ? 'bg-amber-500/10 text-amber-400 font-bold' : 'bg-amber-50 text-amber-700 font-bold') :
-                      (isDark ? 'text-slate-400' : 'text-slate-500')
+                      d.isSun ? (isDark ? 'bg-slate-950/70 text-slate-600 font-bold' : 'bg-slate-200/70 text-[#475569] font-bold') :
+                      d.isWeatherSuspended ? (isDark ? 'bg-amber-500/10 text-amber-400 font-bold' : 'bg-amber-100 text-amber-800 font-bold') :
+                      (isDark ? 'text-slate-400' : 'text-[#334155] font-semibold')
                     }`}
                   >
                     {columnWidth >= 32 ? (
@@ -3142,9 +3142,9 @@ export default function GanttTimeline({
                   key={idx}
                   style={{ width: `${columnWidth}px` }}
                   className={`shrink-0 h-full ${
-                    isDark ? 'border-r border-slate-900/80' : 'border-r border-slate-200/70'
+                    isDark ? 'border-r border-slate-900/80' : 'border-r border-[#e2e8f0]'
                   } ${
-                    d.isSun ? (isDark ? 'bg-slate-950/40 opacity-70' : 'bg-slate-100/50') :
+                    d.isSun ? (isDark ? 'bg-slate-950/40 opacity-70' : 'bg-slate-100/70') :
                     d.isWeatherSuspended ? (isDark ? 'bg-amber-500/5' : 'bg-amber-50/40') : ''
                   }`}
                 />
@@ -3284,7 +3284,7 @@ export default function GanttTimeline({
                     key={task.id}
                     style={{ height: `${ROW_HEIGHT}px` }}
                     className={`relative group pointer-events-none ${
-                      isDark ? 'border-b border-slate-900/90' : 'border-b border-slate-100'
+                      isDark ? 'border-b border-slate-900/90' : 'border-b border-[#e2e8f0]'
                     }`}
                   >
                     {/* Baseline Underline Track (Clearly visible 3px slate-400 track directly beneath each task bar) */}
@@ -3308,7 +3308,7 @@ export default function GanttTimeline({
                         <div 
                           className="w-4 h-4 rotate-45 rounded-2xs transition-transform hover:scale-125 shrink-0 bg-[#eab308] border border-amber-200 shadow-md shadow-amber-500/40" 
                         />
-                        <span className="text-xs font-medium whitespace-nowrap select-none text-slate-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                        <span className={`text-xs whitespace-nowrap select-none ${isDark ? 'font-medium text-slate-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]' : 'font-semibold text-[#0f172a]'}`}>
                           {task.text}
                         </span>
                       </div>
@@ -3331,8 +3331,12 @@ export default function GanttTimeline({
                           onMouseDown={(e) => handlePointerDown(e, task.id, 'move')}
                           className={`absolute top-[17px] h-[22px] rounded-sm shadow-md overflow-hidden flex items-center transition-shadow select-none group/bar pointer-events-auto cursor-grab active:cursor-grabbing z-20 ${
                             isCritical
-                              ? 'bg-red-950/80 border border-red-700/60 shadow-red-950/40'
-                              : 'bg-emerald-950/80 border border-emerald-700/60 shadow-emerald-950/40'
+                              ? isDark
+                                ? 'bg-red-950/80 border border-red-700/60 shadow-red-950/40'
+                                : 'bg-red-200 border border-red-500 shadow-xs'
+                              : isDark
+                                ? 'bg-emerald-950/80 border border-emerald-700/60 shadow-emerald-950/40'
+                                : 'bg-emerald-200 border border-emerald-500 shadow-xs'
                           } hover:ring-1 hover:ring-white/40`}
                           title={`${task.text}: ${pct}% complete • ${isCritical ? 'Critical Path (0 Float)' : `Non-Critical (Float: ${taskFloat}d)`}`}
                         >
@@ -3381,10 +3385,14 @@ export default function GanttTimeline({
                           />
                         </div>
 
-                        {/* White task title label immediately to the right of each bar (left + width + 8px) */}
+                        {/* Task title label immediately to the right of each bar (left + width + 8px) */}
                         <div
                           style={{ left: `${barLeft + barWidth + 8}px` }}
-                          className="absolute top-[17px] h-[22px] flex items-center text-xs font-medium whitespace-nowrap pointer-events-none select-none text-slate-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)] z-20"
+                          className={`absolute top-[17px] h-[22px] flex items-center text-xs whitespace-nowrap pointer-events-none select-none z-20 ${
+                            isDark
+                              ? 'font-medium text-slate-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]'
+                              : 'font-semibold text-[#0f172a]'
+                          }`}
                         >
                           {task.text}
                         </div>

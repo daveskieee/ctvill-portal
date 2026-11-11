@@ -6,6 +6,7 @@
 import React, { useState } from 'react';
 import { ShieldAlert, AlertTriangle, CheckCircle2, Plus, X, User, Target } from 'lucide-react';
 import { ProjectRisk } from '../types';
+import { useTheme } from '../context/ThemeContext';
 
 interface RiskMatrixProps {
   risks: ProjectRisk[];
@@ -14,6 +15,8 @@ interface RiskMatrixProps {
 }
 
 export default function RiskMatrix({ risks, onAddRisk, onUpdateRiskStatus }: RiskMatrixProps) {
+  const { theme } = useTheme();
+  const isDark = theme === 'dark';
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
 
   // Form state
@@ -93,15 +96,27 @@ export default function RiskMatrix({ risks, onAddRisk, onUpdateRiskStatus }: Ris
             <div className="space-y-1">
               {[5, 4, 3, 2, 1].map((impactRow) => (
                 <div key={impactRow} className="flex items-center gap-1">
-                  <span className="w-4 text-[10px] font-mono text-slate-500 text-right pr-1">I{impactRow}</span>
+                  <span className={`w-4 text-[10px] font-mono font-bold text-right pr-1 ${isDark ? 'text-slate-400' : 'text-[#0f172a]'}`}>I{impactRow}</span>
                   {[1, 2, 3, 4, 5].map((probCol) => {
                     const cellScore = impactRow * probCol;
                     const cellRisks = risks.filter((r) => r.impact === impactRow && r.likelihood === probCol);
 
-                    let bgClass = 'bg-emerald-950/40 border-emerald-800/40 text-emerald-500';
-                    if (cellScore >= 15) bgClass = 'bg-rose-950/70 border-rose-700/60 text-rose-300 font-bold';
-                    else if (cellScore >= 10) bgClass = 'bg-amber-950/60 border-amber-700/60 text-amber-300 font-bold';
-                    else if (cellScore >= 5) bgClass = 'bg-blue-950/50 border-blue-700/50 text-blue-300';
+                    let bgClass = isDark
+                      ? 'bg-emerald-950/40 border-emerald-800/40 text-emerald-400 font-semibold'
+                      : 'bg-emerald-100 border-emerald-300 text-[#0f172a] font-bold';
+                    if (cellScore >= 15) {
+                      bgClass = isDark
+                        ? 'bg-rose-950/70 border-rose-700/60 text-rose-300 font-bold'
+                        : 'bg-rose-200 border-rose-400 text-[#0f172a] font-bold';
+                    } else if (cellScore >= 10) {
+                      bgClass = isDark
+                        ? 'bg-amber-950/60 border-amber-700/60 text-amber-300 font-bold'
+                        : 'bg-orange-200 border-orange-400 text-[#0f172a] font-bold';
+                    } else if (cellScore >= 5) {
+                      bgClass = isDark
+                        ? 'bg-blue-950/50 border-blue-700/50 text-blue-300 font-semibold'
+                        : 'bg-amber-100 border-amber-300 text-[#0f172a] font-bold';
+                    }
 
                     return (
                       <div
@@ -109,9 +124,9 @@ export default function RiskMatrix({ risks, onAddRisk, onUpdateRiskStatus }: Ris
                         className={`flex-1 h-9 rounded-lg border flex flex-col items-center justify-center transition-all ${bgClass}`}
                         title={`Impact: ${impactRow}, Likelihood: ${probCol} (Score: ${cellScore})`}
                       >
-                        <span className="text-[10px] font-mono">{cellScore}</span>
+                        <span className={`text-[10px] font-mono ${isDark ? '' : 'text-[#0f172a] font-bold'}`}>{cellScore}</span>
                         {cellRisks.length > 0 && (
-                          <span className="text-[9px] bg-white/20 px-1 rounded-full font-mono">
+                          <span className={`text-[9px] px-1 rounded-full font-mono font-bold ${isDark ? 'bg-white/20 text-white' : 'bg-slate-900/15 text-[#0f172a]'}`}>
                             {cellRisks.length}
                           </span>
                         )}
@@ -120,7 +135,7 @@ export default function RiskMatrix({ risks, onAddRisk, onUpdateRiskStatus }: Ris
                   })}
                 </div>
               ))}
-              <div className="flex items-center gap-1 pt-1 text-[10px] font-mono text-slate-500 pl-5">
+              <div className={`flex items-center gap-1 pt-1 text-[10px] font-mono font-bold pl-5 ${isDark ? 'text-slate-400' : 'text-[#0f172a]'}`}>
                 <div className="flex-1 text-center">L1</div>
                 <div className="flex-1 text-center">L2</div>
                 <div className="flex-1 text-center">L3</div>

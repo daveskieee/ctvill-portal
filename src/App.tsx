@@ -328,15 +328,42 @@ export default function App() {
     } catch { /* silent */ }
   }, [isTombstoned]);
 
+  const mergeWithCachedProjects = useCallback((incoming: ProjectProfile[]): ProjectProfile[] => {
+    const cleanIncoming = Array.isArray(incoming) ? incoming.filter((p: any) => p && p.id && !isTombstoned(p.id)) : [];
+    try {
+      const cachedRaw = localStorage.getItem('ctvill_cached_projects') || localStorage.getItem('ctvill_projects');
+      const cachedList: ProjectProfile[] = cachedRaw ? JSON.parse(cachedRaw) : [];
+      const validCached = Array.isArray(cachedList) ? cachedList.filter((p: any) => p && p.id && !isTombstoned(p.id)) : [];
+
+      const byId = new Map<string, ProjectProfile>();
+      for (const p of cleanIncoming) {
+        byId.set(String(p.id), p);
+      }
+      for (const cp of validCached) {
+        if (!byId.has(String(cp.id))) {
+          byId.set(String(cp.id), cp);
+        }
+      }
+      const merged = Array.from(byId.values());
+      if (merged.length > 0) {
+        localStorage.setItem('ctvill_cached_projects', JSON.stringify(merged));
+        localStorage.setItem('ctvill_projects', JSON.stringify(merged));
+      }
+      return merged;
+    } catch {
+      return cleanIncoming;
+    }
+  }, [isTombstoned]);
+
   const fetchProjects = useCallback(async () => {
     try {
       const res = await fetch('/api/projects');
       if (res.ok) {
         const data = await res.json();
-        setProjects(Array.isArray(data) ? data.filter((p: any) => !isTombstoned(p.id)) : []);
+        setProjects(mergeWithCachedProjects(Array.isArray(data) ? data : []));
       }
     } catch { /* silent */ }
-  }, [isTombstoned]);
+  }, [mergeWithCachedProjects]);
 
   const fetchExtendedPayroll = useCallback(async () => {
     try {
@@ -409,7 +436,7 @@ export default function App() {
       setQuotations((data.quotations || []).filter((q: any) => !isTombstoned(q.id)));
       setPermits((data.permits || []).filter((p: any) => !isTombstoned(p.id)));
       setScheduleEvents((data.scheduleEvents || []).filter((e: any) => !isTombstoned(e.id)));
-      setProjects((data.projects || []).filter((p: any) => !isTombstoned(p.id)));
+      setProjects(mergeWithCachedProjects(data.projects || []));
       setExtendedPayroll((data.extendedPayroll || []).filter((ep: any) => !isTombstoned(ep.id)));
     } catch (err) {
       console.error('Failed to load data from database, executing resilient multi-endpoint fallback:', err);
@@ -435,6 +462,19 @@ export default function App() {
       setIsInitialLoading(false);
     }
   };
+
+  // Persist live projects array to localStorage so Timekeeper DTR and cross-role sessions always have full site access
+  useEffect(() => {
+    if (projects.length > 0) {
+      try {
+        const activeList = projects.filter(p => p && p.id && !isTombstoned(p.id));
+        if (activeList.length > 0) {
+          localStorage.setItem('ctvill_cached_projects', JSON.stringify(activeList));
+          localStorage.setItem('ctvill_projects', JSON.stringify(activeList));
+        }
+      } catch { /* silent */ }
+    }
+  }, [projects, isTombstoned]);
 
   // Load operational ERP data ONLY when session is confirmed authenticated
   useEffect(() => {
