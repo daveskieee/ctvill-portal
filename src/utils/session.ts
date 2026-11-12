@@ -9,6 +9,28 @@ export const SESSION_STORAGE_KEY = 'xyz_pm_user_session';
 export const CTWLL_USER_SESSION_KEY = 'ctwll_user_session';
 export const LEGACY_SESSION_STORAGE_KEY = 'xyz_erp_user_session';
 
+export const AUTH_STORAGE_KEYS = [
+  SESSION_STORAGE_KEY,
+  CTWLL_USER_SESSION_KEY,
+  LEGACY_SESSION_STORAGE_KEY,
+  'ctvill_active_tab',
+  'ctvill_session',
+  'ctvill_token',
+  'ctvill_auth_token',
+  'ctvill_user',
+  'ctvill_auth_user',
+  'token',
+  'auth_token',
+  'user',
+  'auth_user',
+  'remembered_session',
+  'session',
+  'auth_session',
+  'ctwll_session',
+  'xyz_user_session',
+  'active_user_session'
+];
+
 // Security Timers
 export const SESSION_INACTIVITY_LIMIT_MS = 30 * 60 * 1000; // 30 minutes idle timeout
 export const TAB_SESSION_TTL_MS = 4 * 60 * 60 * 1000;       // 4 hours max active tab TTL
@@ -23,6 +45,49 @@ export interface StoredSessionEnvelope {
 }
 
 const CURRENT_ENVELOPE_VERSION = 2;
+
+/**
+ * Check whether a session is an offline demo session that should not be terminated by backend 401s.
+ */
+export function isDemoSession(session: any): boolean {
+  if (!session || typeof session !== 'object') return false;
+  const token = String(session.token || '');
+  const id = String(session.id || '');
+  const email = String(session.email || '').toLowerCase();
+  return Boolean(
+    session.isDemo ||
+    token.startsWith('demo-') ||
+    id.startsWith('demo-') ||
+    id === 'demo' ||
+    email.startsWith('demo')
+  );
+}
+
+/**
+ * Check whether a session object contains required identity credentials.
+ */
+export function isSessionValid(session: any): boolean {
+  if (!session || typeof session !== 'object') return false;
+  const hasId = Boolean(session.id && String(session.id).trim().length > 0);
+  const hasRole = Boolean(session.role && String(session.role).trim().length > 0);
+  const hasEmail = Boolean(session.email && String(session.email).trim().length > 0);
+  return hasId && (hasRole || hasEmail);
+}
+
+/**
+ * Atomically purges all authentication-related keys across localStorage and sessionStorage.
+ */
+export function clearExpiredAuthSession(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    for (const key of AUTH_STORAGE_KEYS) {
+      sessionStorage.removeItem(key);
+      localStorage.removeItem(key);
+    }
+  } catch {
+    /* silent */
+  }
+}
 
 /**
  * Retrieve validated session from sessionStorage or localStorage.
@@ -48,31 +113,21 @@ export function getStoredSession(): UserSession | null {
         if (!isExpired(parsed, now)) {
           touchSessionActivity(parsed, false);
           return parsed.session;
+        } else {
+          // Stored envelope is explicitly expired: purge immediately
+          clearExpiredAuthSession();
+          return null;
         }
       } else if (parsed && typeof parsed === 'object') {
         const sessionObj = parsed.session || parsed;
-        if (sessionObj.id || sessionObj.role) return sessionObj;
+        if (isSessionValid(sessionObj)) return sessionObj;
       }
     }
   } catch {
     /* silent */
   }
 
-  // 2. Check ctwll_user_session in localStorage for instant sync hydration
-  try {
-    const rawCtwll = localStorage.getItem(CTWLL_USER_SESSION_KEY);
-    if (rawCtwll) {
-      const parsed = JSON.parse(rawCtwll);
-      const sessionObj = parsed?.session || parsed;
-      if (sessionObj && (sessionObj.id || sessionObj.role || sessionObj.username)) {
-        return sessionObj;
-      }
-    }
-  } catch {
-    /* silent */
-  }
-
-  // 3. Check persistent storage (localStorage)
+  // 2. Check persistent storage (localStorage)
   try {
     const rawLocal = localStorage.getItem(SESSION_STORAGE_KEY);
     if (rawLocal) {
@@ -81,10 +136,28 @@ export function getStoredSession(): UserSession | null {
         if (!isExpired(parsed, now)) {
           touchSessionActivity(parsed, true);
           return parsed.session;
+        } else {
+          // Stored envelope is explicitly expired: purge immediately
+          clearExpiredAuthSession();
+          return null;
         }
       } else if (parsed && typeof parsed === 'object') {
         const sessionObj = parsed.session || parsed;
-        if (sessionObj.id || sessionObj.role) return sessionObj;
+        if (isSessionValid(sessionObj)) return sessionObj;
+      }
+    }
+  } catch {
+    /* silent */
+  }
+
+  // 3. Check ctwll_user_session in localStorage for instant sync hydration ONLY if not expired
+  try {
+    const rawCtwll = localStorage.getItem(CTWLL_USER_SESSION_KEY);
+    if (rawCtwll) {
+      const parsed = JSON.parse(rawCtwll);
+      const sessionObj = parsed?.session || parsed;
+      if (isSessionValid(sessionObj)) {
+        return sessionObj;
       }
     }
   } catch {
@@ -154,13 +227,7 @@ export function updateStoredSession(partial: Partial<UserSession>): UserSession 
  * Fully clear all session traces across both storages.
  */
 export function clearStoredSession(): void {
-  if (typeof window === 'undefined') return;
-  try {
-    sessionStorage.removeItem(SESSION_STORAGE_KEY);
-    sessionStorage.removeItem('ctvill_active_tab');
-    localStorage.removeItem(SESSION_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_SESSION_STORAGE_KEY);
-  } catch { /* silent */ }
+  clearExpiredAuthSession();
 }
 
 let lastTouchTime = 0;

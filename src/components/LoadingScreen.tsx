@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Building2, ShieldCheck, Database, HardHat, CheckCircle2, Lock } from 'lucide-react';
 import { UserSession } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { PRIMARY_LDM_LOGO } from '../utils/ldmAssets';
 
 interface LoadingScreenProps {
   session: UserSession | null;
@@ -10,8 +11,8 @@ interface LoadingScreenProps {
 }
 
 export default function LoadingScreen({ session, mode, onComplete }: LoadingScreenProps) {
-  const { theme } = useTheme();
-  const isLight = theme === 'light';
+  const { isDark } = useTheme();
+  const isLight = !isDark;
 
   const [stepIndex, setStepIndex] = useState<number>(0);
   const [progress, setProgress] = useState<number>(10);
@@ -19,7 +20,7 @@ export default function LoadingScreen({ session, mode, onComplete }: LoadingScre
   const loginSteps = [
     { label: 'Verifying credentials & role privileges...', icon: Lock },
     { label: 'Connecting to Secure Enterprise Cloud (SSL)...', icon: Database },
-    { label: 'Loading Commercial Fit-Out Portfolio & 3Cs Workflows...', icon: HardHat },
+    { label: 'Loading Turnkey Design & Build Architecture & WBS...', icon: HardHat },
     { label: `Launching ${session?.role || 'User'} Operations Workspace...`, icon: ShieldCheck },
   ];
 
@@ -67,15 +68,15 @@ export default function LoadingScreen({ session, mode, onComplete }: LoadingScre
     <div 
       id="loading-screen-overlay"
       className={`fixed inset-0 z-[99999] flex flex-col items-center justify-center p-6 overflow-hidden select-none transition-colors duration-300 ${
-        isLight ? 'bg-slate-50 text-slate-900' : 'bg-slate-950 text-white'
+        isLight ? 'bg-[#F0F2F5] text-slate-900' : 'bg-slate-950 text-white'
       }`}
     >
       {/* Dynamic Animated Ambient Backdrop */}
       <div className="absolute inset-0 z-0 pointer-events-none">
         {isLight ? (
           <>
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[550px] bg-gradient-to-tr from-amber-400 via-orange-300 to-amber-200 rounded-full blur-[140px] opacity-35 animate-pulse"></div>
-            <div className="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:32px_32px] opacity-70"></div>
+            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[550px] h-[550px] bg-gradient-to-tr from-amber-400 via-orange-300 to-amber-200 rounded-full blur-[140px] opacity-25 animate-pulse"></div>
+            <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(15,23,42,0.035)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.035)_1px,transparent_1px)] bg-[size:32px_32px]"></div>
           </>
         ) : (
           <>
@@ -87,21 +88,13 @@ export default function LoadingScreen({ session, mode, onComplete }: LoadingScre
 
       <div className="relative z-10 max-w-md w-full flex flex-col items-center text-center space-y-6 animate-slideUp">
         
-        {/* Glowing Animated Icon */}
+        {/* Glowing Animated LDM Logo Badge */}
         <div className="relative">
-          <div className={`w-24 h-24 rounded-2xl flex items-center justify-center shadow-2xl relative z-10 transition-all duration-300 ${
-            isLight
-              ? 'bg-gradient-to-tr from-amber-500 to-amber-600 text-slate-950 shadow-amber-500/30 border border-amber-400/60'
-              : 'bg-gradient-to-tr from-blue-600 to-indigo-600 text-white shadow-blue-500/40 border border-blue-400/30'
-          }`}>
-            <CurrentIcon className="w-10 h-10 animate-bounce" />
+          <div className="w-24 h-24 rounded-2xl bg-white shadow-2xl relative z-10 p-3 border border-slate-200/90 flex items-center justify-center transform-gpu">
+            <img src={PRIMARY_LDM_LOGO} alt="LDM Construction" className="w-16 h-16 object-contain" />
           </div>
-          <div className={`absolute -inset-2 rounded-2xl blur-md animate-ping ${
-            isLight ? 'bg-amber-400/30' : 'bg-blue-500/30'
-          }`}></div>
-          <div className={`absolute -inset-4 rounded-3xl border animate-spin ${
-            isLight ? 'border-amber-500/30' : 'border-blue-500/20'
-          }`} style={{ animationDuration: '8s' }}></div>
+          <div className="absolute -inset-2 rounded-2xl blur-md animate-ping bg-amber-400/20"></div>
+          <div className="absolute -inset-4 rounded-3xl border border-amber-500/30 animate-spin" style={{ animationDuration: '8s' }}></div>
         </div>
 
         {/* Text Details */}
@@ -149,7 +142,7 @@ export default function LoadingScreen({ session, mode, onComplete }: LoadingScre
           <div className={`flex justify-between text-[10px] font-mono ${
             isLight ? 'text-slate-500' : 'text-slate-500'
           }`}>
-            <span>CTVill ERP · Enterprise Cloud</span>
+            <span>LDM Construction ERP · Enterprise Cloud</span>
             <span className="font-bold">{progress}%</span>
           </div>
         </div>

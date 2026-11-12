@@ -3,6 +3,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { PRIMARY_LDM_LOGO, LDM_COMPANY_LOCATION } from './ldmAssets';
+
+export { LDM_COMPANY_LOCATION };
+
 export interface EnterprisePrintOptions {
   title: string;
   subtitle?: string;
@@ -31,8 +35,8 @@ export function escapePrintHtml(val: unknown): string {
 export function openEnterprisePrintWindow(options: EnterprisePrintOptions): void {
   const {
     title,
-    subtitle = 'Official Construction & Commercial Fit-Out Record',
-    docRef = `CTV-${Date.now().toString().slice(-6)}`,
+    subtitle = 'Official Residential & Commercial Turnkey Construction Record',
+    docRef = `LDM-${Date.now().toString().slice(-6)}`,
     orientation = 'portrait',
     projectMeta,
     kpiSummary,
@@ -62,7 +66,7 @@ export function openEnterprisePrintWindow(options: EnterprisePrintOptions): void
         </div>
         <div class="meta-item">
           <span class="meta-lbl">SITE LOCATION</span>
-          <span class="meta-val">${escapePrintHtml(projectMeta.location || 'Metro Manila / CALABARZON Commercial Hub')}</span>
+          <span class="meta-val">${escapePrintHtml(projectMeta.location || LDM_COMPANY_LOCATION)}</span>
         </div>
         <div class="meta-item">
           <span class="meta-lbl">PERIOD / CYCLE</span>
@@ -70,7 +74,7 @@ export function openEnterprisePrintWindow(options: EnterprisePrintOptions): void
         </div>
         <div class="meta-item">
           <span class="meta-lbl">CLIENT / OWNER</span>
-          <span class="meta-val">${escapePrintHtml(projectMeta.client || 'CTVill Commercial Fit-Out Client')}</span>
+          <span class="meta-val">${escapePrintHtml(projectMeta.client || 'LDM Construction Client')}</span>
         </div>
       </div>`
     : '';
@@ -406,11 +410,20 @@ export function openEnterprisePrintWindow(options: EnterprisePrintOptions): void
     </div>
 
     <div class="letterhead">
-      <div>
-        <div class="company-brand">CTVILL DESIGN &amp; CONSTRUCTION — COMMERCIAL FIT-OUT &amp; TURNKEY OPERATIONS</div>
-        <div class="company-sub">General Engineering • Interior Fit-Out • MEPFS • Commercial Project Management</div>
-        <div class="doc-title">${escapePrintHtml(title)}</div>
-        <div class="doc-subtitle">${escapePrintHtml(subtitle)}</div>
+      <div style="display: flex; align-items: center; gap: 14px;">
+        <img
+          src="${PRIMARY_LDM_LOGO}"
+          alt="LDM Construction"
+          style="height: 48px; width: auto; max-width: 150px; object-fit: contain;"
+          onerror="this.style.display='none'"
+        />
+        <div>
+          <div class="company-brand">LDM CONSTRUCTION</div>
+          <div class="company-sub">ENGINEERS &bull; ARCHITECTS &bull; BUILDERS | Design &amp; Build ERP</div>
+          <div class="company-sub">${LDM_COMPANY_LOCATION} &bull; ldmengineeringdesign@gmail.com &bull; (+63) 945 681 0515</div>
+          <div class="doc-title">${escapePrintHtml(title)}</div>
+          <div class="doc-subtitle">${escapePrintHtml(subtitle)}</div>
+        </div>
       </div>
       <div class="doc-ref-box">
         <div class="doc-ref-id">REF NO: ${escapePrintHtml(docRef)}</div>

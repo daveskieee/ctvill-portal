@@ -86,6 +86,7 @@ export function createGanttRouter(prisma: PrismaClient) {
           parent: t.parentTaskId || 0,
           type: isMilestone ? 'milestone' : t.type || 'task',
           wbsCode: t.wbsCode || '',
+          milestonePhase: t.milestonePhase || '',
           assignedContractorId: t.assignedContractorId || '',
           contractor: t.assignedContractor?.name || (t.assignedContractorId ? 'Assigned Contractor' : 'CTVill In-House Crew'),
           baselineStart: t.baselineStart ? formatGanttDate(t.baselineStart) : null,
@@ -192,6 +193,7 @@ export function createGanttRouter(prisma: PrismaClient) {
                   type,
                   parentTaskId: parentId,
                   wbsCode: effectiveData?.wbsCode || null,
+                  milestonePhase: effectiveData?.milestonePhase || effectiveData?.constructionPhase || null,
                   assignedContractorId: effectiveData?.assignedContractorId || null,
                   sortOrder: Number(effectiveData?.sortOrder ?? 0)
                 }
@@ -249,6 +251,9 @@ export function createGanttRouter(prisma: PrismaClient) {
                     ...(effectiveData?.type !== undefined ? { type } : {}),
                     ...(parentId !== undefined ? { parentTaskId: parentId } : {}),
                     ...(effectiveData?.wbsCode !== undefined ? { wbsCode: effectiveData.wbsCode } : {}),
+                    ...(effectiveData?.milestonePhase !== undefined || effectiveData?.constructionPhase !== undefined
+                      ? { milestonePhase: effectiveData.milestonePhase || effectiveData.constructionPhase || null }
+                      : {}),
                     ...(effectiveData?.assignedContractorId !== undefined ? { assignedContractorId: effectiveData.assignedContractorId || null } : {}),
                     ...(effectiveData?.sortOrder !== undefined ? { sortOrder: Number(effectiveData.sortOrder) } : {}),
                     updatedAt: new Date()
@@ -266,6 +271,7 @@ export function createGanttRouter(prisma: PrismaClient) {
                     type,
                     parentTaskId: parentId || null,
                     wbsCode: effectiveData?.wbsCode || null,
+                    milestonePhase: effectiveData?.milestonePhase || effectiveData?.constructionPhase || null,
                     assignedContractorId: effectiveData?.assignedContractorId || null,
                     sortOrder: Number(effectiveData?.sortOrder ?? 0)
                   }
@@ -337,12 +343,15 @@ export function createGanttRouter(prisma: PrismaClient) {
             }
           }
 
-          // Recalculate summary metrics for commercial_projects using CPM duration-weighted progress
+          // Recalculate summary metrics for commercial_projects using leaf tasks
           const allTasks = await tx.projectTask.findMany({ where: { projectId } });
+          const parentIds = new Set(allTasks.map(t => t.parentTaskId).filter(Boolean));
+          const leafTasks = allTasks.filter(t => !parentIds.has(t.id));
+          const targetTasks = leafTasks.length > 0 ? leafTasks : allTasks;
           let avgProgress = 0;
-          if (allTasks.length > 0) {
-            const totalDuration = allTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
-            const weightedProgress = allTasks.reduce((acc, curr) => {
+          if (targetTasks.length > 0) {
+            const totalDuration = targetTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
+            const weightedProgress = targetTasks.reduce((acc, curr) => {
               let p = 0;
               if (curr.status === 'COMPLETED' || (typeof curr.progress === 'number' && curr.progress >= 1.0)) {
                 p = 1.0;
@@ -353,17 +362,17 @@ export function createGanttRouter(prisma: PrismaClient) {
               return acc + (p * Math.max(1, curr.duration || 1));
             }, 0);
             avgProgress = totalDuration > 0 ? Math.round((weightedProgress / totalDuration) * 100) : 0;
-            const existingProj = await tx.commercialProject.findUnique({ where: { id: projectId } });
-            const shouldAdvanceStatus = avgProgress > 0 && (!existingProj?.status || existingProj.status === 'PLANNING');
-            await tx.commercialProject.update({
-              where: { id: projectId },
-              data: {
-                progressPercentage: avgProgress,
-                tasksCount: allTasks.length,
-                ...(shouldAdvanceStatus ? { status: 'IN_PROGRESS' } : {})
-              }
-            }).catch(() => {});
           }
+          const existingProj = await tx.commercialProject.findUnique({ where: { id: projectId } });
+          const shouldAdvanceStatus = avgProgress > 0 && (!existingProj?.status || existingProj.status === 'PLANNING');
+          await tx.commercialProject.update({
+            where: { id: projectId },
+            data: {
+              progressPercentage: avgProgress,
+              tasksCount: allTasks.length,
+              ...(shouldAdvanceStatus ? { status: 'IN_PROGRESS' } : {})
+            }
+          }).catch(() => {});
 
           return { 
             action, 
@@ -436,6 +445,7 @@ export function createGanttRouter(prisma: PrismaClient) {
               type,
               parentTaskId: parentId,
               wbsCode: t.wbsCode || null,
+              milestonePhase: t.milestonePhase || t.constructionPhase || null,
               assignedContractorId: t.assignedContractorId || null,
               sortOrder: typeof t.sortOrder === 'number' ? t.sortOrder : 0,
               updatedAt: new Date()
@@ -453,6 +463,7 @@ export function createGanttRouter(prisma: PrismaClient) {
               type,
               parentTaskId: parentId,
               wbsCode: t.wbsCode || null,
+              milestonePhase: t.milestonePhase || t.constructionPhase || null,
               assignedContractorId: t.assignedContractorId || null,
               sortOrder: typeof t.sortOrder === 'number' ? t.sortOrder : 0
             }

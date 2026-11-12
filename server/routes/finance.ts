@@ -885,12 +885,12 @@ const ensureSubcontractorPayablesTable = async () => {
         verified_headcount, claimed_headcount, billed_days, rate_per_day, billed_amount,
         approved_amount, disbursed_amount, payment_method, reference_no, status, remarks, created_by, created_at)
        VALUES 
-       ('SPY-001', '2026-09-26', 'CONT-1789598922028', 'Brent', 'Concrete Pouring & Structural Works', 'NexBridge Software Hub', 'AUD-1790357393677',
-        15, 15, 3, 1000, 45000, NULL, NULL, 'Bank Wire', NULL, 'PENDING_AUDIT', '15 Men Verified on-site for NexBridge Concrete Pouring shift. Gate muster 100% matched, pending fund release.', 'Finance Department', NOW()),
-       ('SPY-002', '2026-09-20', 'CONT-1789599140157', 'Paul', 'Skilled Trade Crews (Electricians, Carpenters, Painters, Masons)', 'NexBridge Software Hub', 'AUD-67542',
+       ('SPY-001', '2026-09-26', 'CONT-1789598922028', 'Brent', 'Concrete Pouring & Structural Works', '2-Storey Residential House', 'AUD-1790357393677',
+        15, 15, 3, 1000, 45000, NULL, NULL, 'Bank Wire', NULL, 'PENDING_AUDIT', '15 Men Verified on-site for 2-Storey Residential House Concrete Pouring shift. Gate muster 100% matched, pending fund release.', 'Finance Department', NOW()),
+       ('SPY-002', '2026-09-20', 'CONT-1789599140157', 'Paul', 'Skilled Trade Crews (Electricians, Carpenters, Painters, Masons)', 'Proyecto Bahia 2-Storey Residence', 'AUD-67542',
         10, 10, 2, 1400, 28000, 28000, NULL, 'Check', 'CHK-2026-0981', 'APPROVED', 'Quadrant B electrical rough-ins and conduit works verified with GPS photo proof. Approved for payout.', 'Finance Department', NOW() - INTERVAL '6 days'),
-       ('SPY-003', '2026-09-18', 'CONT-1789599064683', 'Lizter', 'Site Foremen & General Labor Muster', 'NexBridge Software Hub', 'AUD-08944',
-        50, 50, 2.5, 1000, 125000, 125000, 125000, 'Bank Wire', 'BW-889123-BDO', 'PAID', 'Full 50-man field supervision gang verified across all NexBridge levels. Disbursed via BDO wire.', 'Finance Department', NOW() - INTERVAL '8 days')
+       ('SPY-003', '2026-09-18', 'CONT-1789599064683', 'Lizter', 'Site Foremen & General Labor Muster', 'Modern Farmhouse Build', 'AUD-08944',
+        50, 50, 2.5, 1000, 125000, 125000, 125000, 'Bank Wire', 'BW-889123-BDO', 'PAID', 'Full 50-man field supervision gang verified across all Modern Farmhouse Build levels. Disbursed via BDO wire.', 'Finance Department', NOW() - INTERVAL '8 days')
        ON CONFLICT (id) DO NOTHING`
     );
   }
@@ -923,7 +923,7 @@ financeRouter.get('/subcontractor-payables', requireRole(['FINANCE', 'ADMIN', 'E
       payeeContractorId: r.payee_contractor_id || undefined,
       payeeContractorName: r.payee_contractor_name,
       tradeSpecialty: r.trade_specialty,
-      projectSite: r.project_site,
+      projectSite: String(r.project_site || '').toLowerCase().includes('nexbridge') ? '2-Storey Residential House' : r.project_site,
       auditId: r.audit_id || undefined,
       verifiedHeadcount: Number(r.verified_headcount || 0),
       claimedHeadcount: Number(r.claimed_headcount || 0),
@@ -935,7 +935,7 @@ financeRouter.get('/subcontractor-payables', requireRole(['FINANCE', 'ADMIN', 'E
       paymentMethod: r.payment_method || 'Bank Wire',
       referenceNo: r.reference_no || undefined,
       status: r.status || 'PENDING_AUDIT',
-      remarks: r.remarks || undefined,
+      remarks: String(r.remarks || '').replace(/NexBridge(\s*Software\s*Hub)?/gi, '2-Storey Residential House'),
       createdBy: r.created_by || undefined,
       createdAt: r.created_at ? (r.created_at instanceof Date ? r.created_at.toISOString() : String(r.created_at)) : undefined,
     }));

@@ -4,18 +4,20 @@
  */
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { 
-  Banknote, Calendar, Printer, CheckCircle2, Lock, AlertTriangle, 
-  FileSpreadsheet, Plus, RefreshCw, HardHat, FileText, ChevronRight, 
+import {
+  Banknote, Calendar, Printer, CheckCircle2, Lock, AlertTriangle,
+  FileSpreadsheet, Plus, RefreshCw, HardHat, FileText, ChevronRight,
   ShieldCheck, Info, X, DollarSign, ArrowUpRight, Search, ExternalLink,
   Mail, Phone, Send, Edit3
 } from 'lucide-react';
-import { 
-  ProjectProfile, PayrollRun, PayrollBreakdownItem, CashAdvance, UserSession, Contractor 
+import {
+  ProjectProfile, PayrollRun, PayrollBreakdownItem, CashAdvance, UserSession, Contractor
 } from '../types';
 import { normalizeRole, UserRole } from '../utils/rbac';
 import { computeWorkerShiftMetrics, DtrEntryState } from './TimekeeperAttendanceDashboard';
 import { openEnterprisePrintWindow, escapePrintHtml } from '../utils/printEngine';
+import { logAuditEvent } from '../utils/auditLogger';
+import { useTheme } from '../context/ThemeContext';
 
 const FALLBACK_PAYROLL_ARTISANS = [
   { id: 'ART-101', name: 'Ramon Dela Cruz', position: 'Site Leadman / Master Carpenter', dailyRate: 950, hourlyOtRate: 148.44 },
@@ -42,6 +44,7 @@ export default function FinancePayrollDashboard({
   session,
   onRefreshData
 }: FinancePayrollDashboardProps) {
+  const { isDark } = useTheme();
   // Build unified live + localStorage projects list so newly created projects (e.g. "2-storey residential unit") are always selectable
   const effectiveProjects = useMemo<ProjectProfile[]>(() => {
     const byId = new Map<string, ProjectProfile>();
@@ -65,7 +68,7 @@ export default function FinancePayrollDashboard({
       if (cachedPrimary) addList(JSON.parse(cachedPrimary));
       const cachedSecondary = localStorage.getItem('ctvill_projects');
       if (cachedSecondary) addList(JSON.parse(cachedSecondary));
-    } catch {}
+    } catch { }
     return Array.from(byId.values());
   }, [projects]);
 
@@ -83,12 +86,12 @@ export default function FinancePayrollDashboard({
       }
     }
   }, [effectiveProjects, selectedProjectId]);
-  
+
   // RBAC Hierarchy Context: OM has Read-Only audit oversight, Finance has operational execution
   const currentRole = normalizeRole(session?.role);
   const isOM = currentRole === UserRole.OM;
   const isFinance = currentRole === UserRole.FINANCE;
-  
+
   // Weekly cycle default: Mon to Sun (active week: 2026-09-21 to 2026-09-27)
   const [periodStart, setPeriodStart] = useState<string>(() => {
     const now = new Date();
@@ -143,14 +146,16 @@ export default function FinancePayrollDashboard({
 
   const [pastRuns, setPastRuns] = useState<PayrollRun[]>(defaultHistoricalRuns);
   const [selectedRunDetail, setSelectedRunDetail] = useState<PayrollRun | null>(null);
+  const [viewingFinalizedRun, setViewingFinalizedRun] = useState<PayrollRun | null>(null);
+  const [isLoadingFinalizedRun, setIsLoadingFinalizedRun] = useState<boolean>(false);
   const [activeTab, setActiveTab] = useState<'calculator' | 'history'>('calculator');
-  
+
   // Loading & Processing States
   const [isGenerating, setIsGenerating] = useState<boolean>(false);
   const [isFinalizing, setIsFinalizing] = useState<boolean>(false);
   const [toastMessage, setToastMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
   const [cycleBoundsNotice, setCycleBoundsNotice] = useState<boolean>(false);
-  
+
   // Cash Advance (Vale) Modal State
   const [isValeModalOpen, setIsValeModalOpen] = useState<boolean>(false);
   const [selectedWorkerForVale, setSelectedWorkerForVale] = useState<{ id: string; name: string } | null>(null);
@@ -205,10 +210,10 @@ export default function FinancePayrollDashboard({
             );
           }
         }
-      } catch {}
+      } catch { }
     }
 
-    // Deterministic fallback email: <firstname>.<lastname>@ctvill-workforce.ph
+    // Deterministic fallback email: <firstname>.<lastname>@ldmconstruction.ph
     const nameTokens = wname
       .toLowerCase()
       .replace(/[^a-z0-9\s]/g, '')
@@ -216,7 +221,7 @@ export default function FinancePayrollDashboard({
       .filter(Boolean);
     const firstToken = nameTokens[0] || 'artisan';
     const lastToken = nameTokens.length > 1 ? nameTokens[nameTokens.length - 1] : wid.toLowerCase().replace(/[^a-z0-9]/g, '');
-    const fallbackEmail = `${firstToken}.${lastToken}@ctvill-workforce.ph`;
+    const fallbackEmail = `${firstToken}.${lastToken}@ldmconstruction.ph`;
 
     // Deterministic fallback phone: 0917-XXX-XXXX based on workerId/name hash
     let hash = 0;
@@ -255,7 +260,7 @@ export default function FinancePayrollDashboard({
       const next = { ...prev, [workerId]: cleaned };
       try {
         localStorage.setItem('ctvill_worker_email_overrides', JSON.stringify(next));
-      } catch {}
+      } catch { }
       return next;
     });
     setIsEditingModalEmail(false);
@@ -269,7 +274,7 @@ export default function FinancePayrollDashboard({
     const { email, phone, payoutChannel } = resolveWorkerContact(item);
     const pStart = selectedRunDetail?.periodStart || periodStart;
     const pEnd = selectedRunDetail?.periodEnd || periodEnd;
-    const siteName = activeProject?.name || selectedRunDetail?.projectName || 'CTVill Commercial Fit-Out Site';
+    const siteName = activeProject?.name || selectedRunDetail?.projectName || 'LDM Construction Project Site';
     const refId = `PS-${String(selectedProjectId || 'SITE').slice(-4).toUpperCase()}-${item.workerId}-${pEnd.replace(/-/g, '')}`;
     const regHours = Number((Number(item.daysWorked || 0) * 8).toFixed(2));
     const basePayVal = Number(item.basePay ?? Number(item.daysWorked || 0) * Number(item.dailyRate || 0));
@@ -279,10 +284,11 @@ export default function FinancePayrollDashboard({
     const netPayVal = Number(item.netPay || grossPayVal - deductVal);
 
     const subject = encodeURIComponent(
-      `[CTVill Official E-Payslip] ${item.workerName} (${pStart} to ${pEnd}) - Ref ${refId}`
+      `[LDM Construction Official E-Payslip] ${item.workerName} (${pStart} to ${pEnd}) - Ref ${refId}`
     );
     const body = encodeURIComponent(
-      `CTVILL CONSTRUCTION & FIT-OUT\n` +
+      `LDM CONSTRUCTION — ENGINEERS • ARCHITECTS • BUILDERS\n` +
+      `ldmengineeringdesign@gmail.com • (+63) 945 681 0515\n` +
       `OFFICIAL INDIVIDUAL EMPLOYEE E-PAYSLIP\n` +
       `==================================================\n` +
       `Payslip Ref ID: ${refId}\n` +
@@ -301,7 +307,7 @@ export default function FinancePayrollDashboard({
       `--------------------------------------------------\n` +
       `VERIFIED NET TAKE-HOME PAY: PHP ${netPayVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}\n` +
       `==================================================\n` +
-      `Released by: CTVill Finance & Payroll Controller`
+      `Released by: LDM Construction Finance & Payroll Controller`
     );
     return `mailto:${email}?subject=${subject}&body=${body}`;
   };
@@ -314,7 +320,7 @@ export default function FinancePayrollDashboard({
       const next = { ...prev, [cycleKey]: timestamp };
       try {
         localStorage.setItem('ctvill_dispatched_payslips', JSON.stringify(next));
-      } catch {}
+      } catch { }
       return next;
     });
     setToastMessage({
@@ -327,7 +333,7 @@ export default function FinancePayrollDashboard({
     const { email, phone, payoutChannel } = resolveWorkerContact(item);
     const pStart = selectedRunDetail?.periodStart || periodStart;
     const pEnd = selectedRunDetail?.periodEnd || periodEnd;
-    const siteName = activeProject?.name || selectedRunDetail?.projectName || 'CTVill Commercial Fit-Out Site';
+    const siteName = activeProject?.name || selectedRunDetail?.projectName || 'LDM Construction Project Site';
     const refId = `PS-${String(selectedProjectId || 'SITE').slice(-4).toUpperCase()}-${item.workerId}-${pEnd.replace(/-/g, '')}`;
     const regHours = Number((Number(item.daysWorked || 0) * 8).toFixed(2));
     const hourlyRate = Number((Number(item.dailyRate || 0) / 8).toFixed(2));
@@ -412,7 +418,7 @@ export default function FinancePayrollDashboard({
   const handlePrintSinglePayslip = (item: PayrollBreakdownItem) => {
     const pStart = selectedRunDetail?.periodStart || periodStart;
     const pEnd = selectedRunDetail?.periodEnd || periodEnd;
-    const siteName = activeProject?.name || selectedRunDetail?.projectName || 'CTVill Commercial Fit-Out Site';
+    const siteName = activeProject?.name || selectedRunDetail?.projectName || 'LDM Construction Project Site';
     const refId = `PS-${String(selectedProjectId || 'SITE').slice(-4).toUpperCase()}-${item.workerId}-${pEnd.replace(/-/g, '')}`;
 
     openEnterprisePrintWindow({
@@ -422,9 +428,9 @@ export default function FinancePayrollDashboard({
       orientation: 'portrait',
       projectMeta: {
         name: siteName,
-        location: activeProject?.location || 'Commercial Fit-Out Site',
+        location: activeProject?.location || 'LDM Project Site',
         period: `${pStart} to ${pEnd}`,
-        client: (activeProject as any)?.clientName || (activeProject as any)?.client || (selectedRunDetail as any)?.clientName || 'CTVill Client',
+        client: (activeProject as any)?.clientName || (activeProject as any)?.client || (selectedRunDetail as any)?.clientName || 'LDM Construction Client',
       },
       bodyHtml: `<div class="payslip-grid">${renderPayslipVoucherHtml(item)}</div>`,
       signatures: [],
@@ -444,7 +450,7 @@ export default function FinancePayrollDashboard({
       }
       try {
         localStorage.setItem('ctvill_dispatched_payslips', JSON.stringify(next));
-      } catch {}
+      } catch { }
       return next;
     });
 
@@ -520,7 +526,7 @@ export default function FinancePayrollDashboard({
         const rawByName = localStorage.getItem(`ctvill_dtr_project_ledger_name_${projNameLower}`);
         if (rawByName) ledger = JSON.parse(rawByName);
       }
-    } catch {}
+    } catch { }
 
     // Resolve roster of workers for this project
     let roster: { id: string; name: string; position: string; dailyRate: number; hourlyOtRate: number }[] = [];
@@ -581,7 +587,7 @@ export default function FinancePayrollDashboard({
           }
         }
       }
-    } catch {}
+    } catch { }
 
     const allDates = Object.keys(dateMaps).sort();
     const inWindowDates = allDates.filter(d => d >= startStr && d <= endStr);
@@ -590,8 +596,8 @@ export default function FinancePayrollDashboard({
       inWindowDates.length > 0
         ? inWindowDates
         : !enforceStrictDates
-        ? allDates
-        : allDates;
+          ? allDates
+          : allDates;
 
     const items: PayrollBreakdownItem[] = [];
     let totalGross = 0;
@@ -708,7 +714,7 @@ export default function FinancePayrollDashboard({
     try {
       const res = await fetch('/api/payroll/calculate', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -726,22 +732,22 @@ export default function FinancePayrollDashboard({
         localDraft.hasLocalDtrLogs && localDraft.workerCount > 0
           ? localDraft
           : apiDraft && apiDraft.workerCount > 0 && apiDraft.totalGross > 0
-          ? apiDraft
-          : localDraft;
+            ? apiDraft
+            : localDraft;
 
       setDraftCalculation(resolvedDraft);
       setCycleBoundsNotice(false);
-      setToastMessage({ 
-        text: `Payroll draft calculated for ${resolvedDraft.workerCount} workers! Total Net: ₱${resolvedDraft.totalNet.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 
-        type: 'success' 
+      setToastMessage({
+        text: `Payroll draft calculated for ${resolvedDraft.workerCount} workers! Total Net: ₱${resolvedDraft.totalNet.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        type: 'success'
       });
     } catch {
       // Fallback cleanly to local DTR / assigned project roster calculation
       setDraftCalculation(localDraft);
       setCycleBoundsNotice(false);
-      setToastMessage({ 
-        text: `Payroll draft calculated for ${localDraft.workerCount} workers! Total Net: ₱${localDraft.totalNet.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 
-        type: 'success' 
+      setToastMessage({
+        text: `Payroll draft calculated for ${localDraft.workerCount} workers! Total Net: ₱${localDraft.totalNet.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+        type: 'success'
       });
     } finally {
       setIsGenerating(false);
@@ -764,7 +770,7 @@ export default function FinancePayrollDashboard({
     try {
       const res = await fetch('/api/payroll/finalize', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -779,20 +785,30 @@ export default function FinancePayrollDashboard({
         throw new Error(data.error || 'Failed to finalize payroll');
       }
 
-      setToastMessage({ 
-        text: `Payroll Run ${data.payrollRunId} Finalized & Attendance Records Locked!`, 
-        type: 'success' 
+      setToastMessage({
+        text: `Payroll Run ${data.payrollRunId} Finalized & Attendance Records Locked!`,
+        type: 'success'
       });
 
       // Reload runs
       await loadPastRuns();
       if (onRefreshData) onRefreshData();
-      
+
       // Load details of the finalized run
       const detailRes = await fetch(`/api/payroll/runs/${data.payrollRunId}`);
       if (detailRes.ok) {
         setSelectedRunDetail(await detailRes.json());
       }
+
+      // Record immutable operational audit event
+      logAuditEvent({
+        entityType: 'CIVIL_WORKS',
+        entityId: data.payrollRunId || `PAY-${Date.now().toString().slice(-4)}`,
+        action: 'PAYROLL_FINALIZED',
+        actorName: session?.name || 'Clarisse Mendoza',
+        actorRole: 'Finance Controller',
+        details: `Finalized and locked weekly payroll register for ${activeProject?.name || 'Project Site'} (${periodStart} to ${periodEnd}). Disbursed: ₱${(draftCalculation.totalNet || 0).toLocaleString()}`
+      });
     } catch (err: any) {
       setToastMessage({ text: err.message || 'Error finalizing payroll', type: 'error' });
     } finally {
@@ -813,7 +829,7 @@ export default function FinancePayrollDashboard({
     try {
       const res = await fetch('/api/cash-advances', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
@@ -831,8 +847,18 @@ export default function FinancePayrollDashboard({
 
       setToastMessage({ text: `Recorded vale of ₱${amountNum.toLocaleString()} for ${selectedWorkerForVale.name}`, type: 'success' });
       setIsValeModalOpen(false);
+
+      logAuditEvent({
+        entityType: 'CIVIL_WORKS',
+        entityId: selectedWorkerForVale.id,
+        action: 'VALE_ISSUED',
+        actorName: session?.name || 'Clarisse Mendoza',
+        actorRole: 'Finance Controller',
+        details: `Issued mid-week subsistence vale voucher of ₱${amountNum.toLocaleString()} for ${selectedWorkerForVale.name} (${activeProject?.name || 'Site'}). Synchronized to weekly payroll.`
+      });
+
       setSelectedWorkerForVale(null);
-      
+
       // Auto-recalculate draft to reflect newly attached deduction
       handleGenerateDraft();
     } catch (err: any) {
@@ -880,7 +906,7 @@ export default function FinancePayrollDashboard({
     setPrintPreviewType(type);
     const pStart = selectedRunDetail?.periodStart || periodStart;
     const pEnd = selectedRunDetail?.periodEnd || periodEnd;
-    const siteName = activeProject?.name || selectedRunDetail?.projectName || 'CTVill Commercial Fit-Out Site';
+    const siteName = activeProject?.name || selectedRunDetail?.projectName || 'LDM Construction Project Site';
     const totalGrossVal = Number(selectedRunDetail?.totalGross ?? draftCalculation?.totalGross ?? 0);
     const totalDeductVal = Number(selectedRunDetail?.totalDeductions ?? draftCalculation?.totalDeductions ?? 0);
     const totalNetVal = Number(selectedRunDetail?.totalNet ?? draftCalculation?.totalNet ?? 0);
@@ -894,9 +920,9 @@ export default function FinancePayrollDashboard({
         orientation: 'portrait',
         projectMeta: {
           name: siteName,
-          location: activeProject?.location || 'Commercial Fit-Out Site',
+          location: activeProject?.location || 'LDM Project Site',
           period: `${pStart} to ${pEnd}`,
-          client: (activeProject as any)?.clientName || (activeProject as any)?.client || (selectedRunDetail as any)?.clientName || 'CTVill Client',
+          client: (activeProject as any)?.clientName || (activeProject as any)?.client || (selectedRunDetail as any)?.clientName || 'LDM Construction Client',
         },
         kpiSummary: [
           { label: 'Total Workers', value: `${displayItems.length} Artisans` },
@@ -975,9 +1001,9 @@ export default function FinancePayrollDashboard({
       orientation: 'landscape',
       projectMeta: {
         name: siteName,
-        location: activeProject?.location || 'Commercial Fit-Out Site',
+        location: activeProject?.location || 'LDM Project Site',
         period: `${pStart} to ${pEnd}`,
-        client: (activeProject as any)?.clientName || (activeProject as any)?.client || (selectedRunDetail as any)?.clientName || 'CTVill Client',
+        client: (activeProject as any)?.clientName || (activeProject as any)?.client || (selectedRunDetail as any)?.clientName || 'LDM Construction Client',
       },
       kpiSummary: [
         { label: 'Active Workforce', value: `${displayItems.length} Artisans` },
@@ -994,16 +1020,128 @@ export default function FinancePayrollDashboard({
     });
   };
 
+  const handleOpenFinalizedRun = async (run: PayrollRun) => {
+    setIsLoadingFinalizedRun(true);
+    try {
+      const res = await fetch(`/api/payroll/runs/${run.id}`);
+      if (res.ok) {
+        const detailed = await res.json();
+        setViewingFinalizedRun(detailed);
+        return;
+      }
+    } catch (e) {
+      console.warn('Could not fetch payroll run detail from server, using local fallback:', e);
+    } finally {
+      setIsLoadingFinalizedRun(false);
+    }
+
+    if (Array.isArray(run.items) && run.items.length > 0) {
+      setViewingFinalizedRun(run);
+      return;
+    }
+
+    const draft = buildLocalPayrollDraft(
+      run.projectId || selectedProjectId || 'PRJ-4693',
+      run.periodStart || '2026-09-14',
+      run.periodEnd || '2026-09-21',
+      false
+    );
+    setViewingFinalizedRun({
+      ...run,
+      items: draft.items && draft.items.length > 0 ? draft.items : (run.items || [])
+    });
+  };
+
+  const handlePrintFinalizedRegister = (run: PayrollRun) => {
+    const items = run.items && run.items.length > 0
+      ? run.items
+      : buildLocalPayrollDraft(run.projectId || selectedProjectId || 'PRJ-4693', run.periodStart, run.periodEnd, false).items;
+
+    const totalGrossVal = Number(run.totalGross || items.reduce((s, i) => s + Number(i.grossPay || 0), 0));
+    const totalDeductVal = Number(run.totalDeductions || items.reduce((s, i) => s + Number(i.totalDeductions || 0), 0));
+    const totalNetVal = Number(run.totalNet || totalGrossVal - totalDeductVal);
+
+    const rowsHtml = items.map((item, idx) => {
+      const contact = resolveWorkerContact(item);
+      const basePayVal = Number(item.basePay ?? Number(item.daysWorked || 0) * Number(item.dailyRate || 0));
+      const otPayVal = Number(item.otPay || 0);
+      const grossPayVal = Number(item.grossPay || basePayVal + otPayVal);
+      const deductVal = Number(item.totalDeductions || 0);
+      const netPayVal = Number(item.netPay || grossPayVal - deductVal);
+      return `<tr>
+        <td class="center">${idx + 1}</td>
+        <td>
+          <strong>${escapePrintHtml(item.workerName)}</strong><br/>
+          <span style="font-size:9px;color:#475569;font-family:monospace;">${escapePrintHtml(item.workerId)} • ${escapePrintHtml(contact.email)}</span>
+        </td>
+        <td>${escapePrintHtml(item.position)}</td>
+        <td class="num">₱${Number(item.dailyRate || 0).toLocaleString()}</td>
+        <td class="center">${item.daysWorked ?? 0}</td>
+        <td class="center">${item.otHours ?? 0}</td>
+        <td class="num">₱${basePayVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+        <td class="num">₱${otPayVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+        <td class="num"><strong>₱${grossPayVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
+        <td class="num">-₱${deductVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+        <td class="num"><strong>₱${netPayVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</strong></td>
+        <td style="width:120px;"></td>
+      </tr>`;
+    }).join('');
+
+    const bodyHtml = `<table class="ent-table">
+      <thead>
+        <tr>
+          <th class="center">#</th>
+          <th>Worker Name &amp; Email</th>
+          <th>Trade / Position</th>
+          <th class="num">Daily Rate</th>
+          <th class="center">Days Worked</th>
+          <th class="center">OT Hours</th>
+          <th class="num">Base Pay</th>
+          <th class="num">OT Pay</th>
+          <th class="num">Gross Earnings</th>
+          <th class="num">Deductions / Vale</th>
+          <th class="num">Net Payout</th>
+          <th class="center">Artisan Signature</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>`;
+
+    openEnterprisePrintWindow({
+      title: 'OFFICIAL FINALIZED PAYROLL REGISTER',
+      subtitle: `Disbursed Weekly Wage Register • Reference: ${run.id}`,
+      docRef: run.id,
+      orientation: 'landscape',
+      projectMeta: {
+        name: run.projectName,
+        location: activeProject?.location || 'LDM Project Site',
+        period: `${run.periodStart} to ${run.periodEnd}`,
+        client: run.clientName || 'LDM Construction Client',
+      },
+      kpiSummary: [
+        { label: 'Total Workers', value: `${items.length} Artisans` },
+        { label: 'Total Gross Payroll', value: `₱${totalGrossVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}` },
+        { label: 'Total Deductions / Vale', value: `-₱${totalDeductVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}` },
+        { label: 'Total Net Disbursed', value: `₱${totalNetVal.toLocaleString(undefined, { minimumFractionDigits: 2 })}` },
+      ],
+      bodyHtml,
+      signatures: [
+        { role: 'Prepared By: Timekeeper', name: 'Rodelio Cruz', title: 'Site Timekeeper' },
+        { role: 'Audited By: Site Engineer', name: 'Engr. Ricardo Gomez', title: 'Project Manager / Site Engineer' },
+        { role: 'Approved By: Finance Controller', name: run.approvedByName || 'Clarisse Mendoza', title: 'Finance Controller' },
+      ],
+    });
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0 bg-slate-950 text-slate-100 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">
-      
+
       {/* Toast Alert */}
       {toastMessage && (
-        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold backdrop-blur-md border animate-slideDown ${
-          toastMessage.type === 'success' 
-            ? 'bg-emerald-950/90 text-emerald-200 border-emerald-500/50' 
+        <div className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold backdrop-blur-md border animate-slideDown ${toastMessage.type === 'success'
+            ? 'bg-emerald-950/90 text-emerald-200 border-emerald-500/50'
             : 'bg-red-950/90 text-red-200 border-red-500/50'
-        }`}>
+          }`}>
           <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
           <span>{toastMessage.text}</span>
         </div>
@@ -1018,11 +1156,10 @@ export default function FinancePayrollDashboard({
           <div>
             <div className="flex items-center gap-2">
               <h1 className="text-base font-bold text-white tracking-tight">Weekly Site Payroll Engine</h1>
-              <span className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-medium border ${
-                !isFinance
+              <span className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-medium border ${!isFinance
                   ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
                   : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'
-              }`}>
+                }`}>
                 {!isFinance ? 'AUDIT & READ-ONLY' : 'FINANCE & DISBURSAL'}
               </span>
             </div>
@@ -1036,21 +1173,19 @@ export default function FinancePayrollDashboard({
         <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-800 p-1 rounded-lg text-xs font-medium self-start md:self-auto">
           <button
             onClick={() => { setActiveTab('calculator'); setSelectedRunDetail(null); }}
-            className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
-              activeTab === 'calculator' && !selectedRunDetail
+            className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${activeTab === 'calculator' && !selectedRunDetail
                 ? 'bg-amber-500 text-slate-950 font-semibold'
                 : 'text-slate-400 hover:text-white'
-            }`}
+              }`}
           >
             Weekly Wage Engine
           </button>
           <button
             onClick={() => setActiveTab('history')}
-            className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${
-              activeTab === 'history'
+            className={`px-3 py-1.5 rounded-md transition-colors cursor-pointer ${activeTab === 'history'
                 ? 'bg-amber-500 text-slate-950 font-semibold'
                 : 'text-slate-400 hover:text-white'
-            }`}
+              }`}
           >
             Payroll Archive ({pastRuns.length})
           </button>
@@ -1060,7 +1195,7 @@ export default function FinancePayrollDashboard({
       {/* Control Panel: Project & Cycle Selection */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-xs space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3.5 items-end">
-          
+
           {/* Project Selector */}
           <div className="md:col-span-4">
             <label className="block text-[11px] font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
@@ -1121,7 +1256,7 @@ export default function FinancePayrollDashboard({
           {/* Generate Draft Button */}
           <div className="md:col-span-2">
             {!isFinance ? (
-              <div 
+              <div
                 className="w-full py-2 bg-slate-800/80 border border-slate-700/60 text-slate-400 text-xs font-semibold rounded-xl flex items-center justify-center gap-1.5 text-center cursor-not-allowed"
                 title="Operations Managers possess Read-Only audit access. Only Finance can trigger payroll calculations."
               >
@@ -1175,8 +1310,8 @@ export default function FinancePayrollDashboard({
               <span className="text-amber-200/90">Records outside the selected cycle bounds were excluded.</span>
             </div>
           </div>
-          <button 
-            type="button" 
+          <button
+            type="button"
             onClick={() => setCycleBoundsNotice(false)}
             className="text-amber-400 hover:text-white p-1 rounded-lg hover:bg-amber-900/40 transition-colors"
           >
@@ -1276,26 +1411,20 @@ export default function FinancePayrollDashboard({
                       <td className="py-3 px-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
                           <button
-                            onClick={async () => {
-                              const res = await fetch(`/api/payroll/runs/${run.id}`);
-                              if (res.ok) {
-                                setSelectedRunDetail(await res.json());
-                                setActiveTab('calculator');
-                              }
-                            }}
+                            type="button"
+                            onClick={() => handleOpenFinalizedRun(run)}
                             className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-[11px] font-semibold transition-colors cursor-pointer"
                           >
                             View Sheet
                           </button>
-                          <a
-                            href={`/api/payroll/${run.id}/export?format=html`}
-                            target="_blank"
-                            rel="noopener noreferrer"
+                          <button
+                            type="button"
+                            onClick={() => handlePrintFinalizedRegister(run)}
                             className="p-1 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 rounded-lg transition-colors cursor-pointer"
                             title="Open Print-Ready Master Sheet & Payslips"
                           >
                             <Printer className="w-3.5 h-3.5" />
-                          </a>
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1308,14 +1437,14 @@ export default function FinancePayrollDashboard({
       ) : (
         /* CALCULATOR & LIVE SHEET VIEW */
         <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1">
-          
+
           {/* Table Header Bar */}
           <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-sm font-bold text-white">
-                  {selectedRunDetail 
-                    ? `Finalized Payroll Ledger • Ref: ${selectedRunDetail.id}` 
+                  {selectedRunDetail
+                    ? `Finalized Payroll Ledger • Ref: ${selectedRunDetail.id}`
                     : `Draft Weekly Wage Calculation • ${activeProject?.name || 'Project'}`}
                 </h2>
                 {selectedRunDetail && (
@@ -1409,7 +1538,7 @@ export default function FinancePayrollDashboard({
                     const workerContact = resolveWorkerContact(item);
                     return (
                       <tr key={item.workerId} className="hover:bg-slate-800/40 transition-colors">
-                        
+
                         {/* Worker Name, ID, Email & Payout Channel Badge */}
                         <td className="py-3 px-4 font-semibold text-white">
                           <div>{item.workerName}</div>
@@ -1424,11 +1553,10 @@ export default function FinancePayrollDashboard({
                               {workerContact.email}
                             </span>
                             <span
-                              className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${
-                                workerContact.payoutChannel === '📧 Email / GCash'
+                              className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${workerContact.payoutChannel === '📧 Email / GCash'
                                   ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
                                   : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                              }`}
+                                }`}
                             >
                               {workerContact.payoutChannel}
                             </span>
@@ -1514,11 +1642,10 @@ export default function FinancePayrollDashboard({
                                 <button
                                   type="button"
                                   onClick={() => markPayslipDispatched(item)}
-                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1 border ${
-                                    sentAt
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors cursor-pointer flex items-center gap-1 border ${sentAt
                                       ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
                                       : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                                  }`}
+                                    }`}
                                   title={
                                     sentAt
                                       ? `Recipient: ${workerContact.email} • Channel: ${workerContact.payoutChannel} • Delivered at ${sentAt}`
@@ -1578,7 +1705,7 @@ export default function FinancePayrollDashboard({
       {selectedPayslipItem && (() => {
         const pStart = selectedRunDetail?.periodStart || periodStart;
         const pEnd = selectedRunDetail?.periodEnd || periodEnd;
-        const siteName = activeProject?.name || selectedRunDetail?.projectName || 'CTVill Commercial Fit-Out Site';
+        const siteName = activeProject?.name || selectedRunDetail?.projectName || 'LDM Construction Project Site';
         const refId = `PS-${String(selectedProjectId || 'SITE').slice(-4).toUpperCase()}-${selectedPayslipItem.workerId}-${pEnd.replace(/-/g, '')}`;
         const regHours = Number((Number(selectedPayslipItem.daysWorked || 0) * 8).toFixed(2));
         const hourlyRate = Number((Number(selectedPayslipItem.dailyRate || 0) / 8).toFixed(2));
@@ -1615,7 +1742,7 @@ export default function FinancePayrollDashboard({
                     )}
                   </div>
                   <h3 className="text-lg font-black text-white tracking-tight mt-1">
-                    CTVill Construction &amp; Fit-Out
+                    LDM Construction &mdash; Engineers &bull; Architects &bull; Builders
                   </h3>
                   <p className="text-xs text-slate-400">
                     Pay Period: <span className="font-mono text-slate-200 font-semibold">{pStart} to {pEnd}</span>
@@ -1839,7 +1966,7 @@ export default function FinancePayrollDashboard({
                   Batch Payslip Generator ({displayItems.length} Active Workers)
                 </h3>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  Cycle: {selectedRunDetail?.periodStart || periodStart} to {selectedRunDetail?.periodEnd || periodEnd} • {activeProject?.name || 'CTVill Commercial Site'}
+                  Cycle: {selectedRunDetail?.periodStart || periodStart} to {selectedRunDetail?.periodEnd || periodEnd} • {activeProject?.name || 'LDM Project Site'}
                 </p>
               </div>
               <button
@@ -1878,11 +2005,10 @@ export default function FinancePayrollDashboard({
                     key={opt.id}
                     type="button"
                     onClick={() => setBatchDeliveryMode(opt.id)}
-                    className={`text-left p-2.5 rounded-lg border transition-colors cursor-pointer ${
-                      batchDeliveryMode === opt.id
+                    className={`text-left p-2.5 rounded-lg border transition-colors cursor-pointer ${batchDeliveryMode === opt.id
                         ? 'bg-cyan-500/15 border-cyan-500 text-white'
                         : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
-                    }`}
+                      }`}
                   >
                     <div className="text-xs font-bold">{opt.label}</div>
                     <div className="text-[10px] text-slate-400 mt-0.5">{opt.sub}</div>
@@ -1906,11 +2032,10 @@ export default function FinancePayrollDashboard({
                         <span className="font-bold text-white">{item.workerName}</span>
                         <span className="text-slate-400 font-mono text-[11px]">({item.position})</span>
                         <span
-                          className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${
-                            contact.payoutChannel === '📧 Email / GCash'
+                          className={`px-1.5 py-0.5 rounded text-[9px] font-mono font-bold border ${contact.payoutChannel === '📧 Email / GCash'
                               ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
                               : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                          }`}
+                            }`}
                         >
                           {contact.payoutChannel}
                         </span>
@@ -1938,11 +2063,10 @@ export default function FinancePayrollDashboard({
                         📄 View / Print Slip
                       </button>
                       <span
-                        className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border ${
-                          sentAt
+                        className={`px-2 py-1 rounded-lg text-[10px] font-mono font-bold border ${sentAt
                             ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
                             : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                        }`}
+                          }`}
                         title={`Recipient: ${contact.email} • Channel: ${contact.payoutChannel}`}
                       >
                         {sentAt ? `✅ Emailed to ${contact.email} & Queued Site Claim Stub (${sentAt})` : 'Ready to Email'}
@@ -1978,8 +2102,8 @@ export default function FinancePayrollDashboard({
                   {batchDeliveryMode === 'PRINT_ONLY'
                     ? `🖨️ Generate & Print ${displayItems.length} Site Claim Stubs`
                     : batchDeliveryMode === 'EMAIL_ONLY'
-                    ? `📧 Email All ${displayItems.length} Worker E-Payslips`
-                    : `✅ Email ${displayItems.length} E-Payslips & Generate Site Claim Stubs`}
+                      ? `📧 Email All ${displayItems.length} Worker E-Payslips`
+                      : `✅ Email ${displayItems.length} E-Payslips & Generate Site Claim Stubs`}
                 </span>
               </button>
             </div>
@@ -1996,7 +2120,7 @@ export default function FinancePayrollDashboard({
                 <DollarSign className="w-5 h-5 text-rose-400" />
                 <h3 className="font-bold text-white text-sm">Issue Cash Advance (Vale)</h3>
               </div>
-              <button 
+              <button
                 onClick={() => setIsValeModalOpen(false)}
                 className="text-slate-400 hover:text-white p-1 cursor-pointer"
               >
@@ -2066,7 +2190,8 @@ export default function FinancePayrollDashboard({
 
       {/* PRINT MEDIA SECTION (Rendered only on window.print()) */}
       <div className="hidden print:block print:w-full print:bg-white print:text-black">
-        <style dangerouslySetInnerHTML={{ __html: `
+        <style dangerouslySetInnerHTML={{
+          __html: `
           @media print {
             body * { visibility: hidden !important; }
             #printable-payroll-area, #printable-payroll-area * { visibility: visible !important; }
@@ -2076,13 +2201,14 @@ export default function FinancePayrollDashboard({
         `}} />
 
         <div id="printable-payroll-area" className="text-black font-sans text-xs">
-          
+
           {/* MASTER PAYROLL SHEET (Visible if summary selected) */}
           {(printPreviewType === 'summary' || !printPreviewType) && (
             <div>
               <div className="border-b-2 border-black pb-3 mb-4 flex justify-between items-start">
                 <div>
-                  <h1 className="text-xl font-black uppercase tracking-wider">CTVill Builders Corporation</h1>
+                  <h1 className="text-xl font-black uppercase tracking-wider">LDM CONSTRUCTION</h1>
+                  <div className="text-[10px] font-bold text-slate-700 uppercase">ENGINEERS &bull; ARCHITECTS &bull; BUILDERS | ldmengineeringdesign@gmail.com &bull; (+63) 945 681 0515</div>
                   <h2 className="text-sm font-bold text-amber-800 uppercase mt-0.5">Master Site Labor Payroll Sheet</h2>
                 </div>
                 <div className="text-right text-[11px]">
@@ -2175,7 +2301,7 @@ export default function FinancePayrollDashboard({
           {(printPreviewType === 'payslips') && (
             <div className="print-page-break mt-4">
               <div className="border-b-2 border-black pb-2 mb-4 flex justify-between items-center">
-                <div className="font-bold uppercase text-sm">Individual Worker Payout Slips &mdash; CTVill Builders</div>
+                <div className="font-bold uppercase text-sm">Individual Worker Payout Slips &mdash; LDM Construction</div>
                 <div className="text-[10px] font-mono">Period: {selectedRunDetail?.periodStart || periodStart} &ndash; {selectedRunDetail?.periodEnd || periodEnd}</div>
               </div>
 
@@ -2221,6 +2347,139 @@ export default function FinancePayrollDashboard({
 
         </div>
       </div>
+
+      {/* FINALIZED PAYROLL REGISTER IN-PAGE MODAL */}
+      {viewingFinalizedRun && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 overflow-y-auto">
+          <div className={`${isDark ? 'bg-slate-900 border-slate-700/80 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-2xl'} border rounded-2xl max-w-5xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150`}>
+            {/* Modal Header */}
+            <div className={`p-4 sm:p-5 border-b ${isDark ? 'border-slate-800 bg-slate-950/80' : 'border-slate-200 bg-slate-50'} flex items-center justify-between gap-3 shrink-0`}>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  <span className="text-[10px] font-mono text-emerald-500 font-bold uppercase tracking-wider">
+                    LOCKED &amp; ARCHIVED PAYROLL RUN
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/10 text-amber-500 border border-amber-500/30">
+                    {viewingFinalizedRun.id}
+                  </span>
+                </div>
+                <h3 className={`text-base font-bold ${isDark ? 'text-white' : 'text-slate-900'} mt-1`}>
+                  {viewingFinalizedRun.projectName} &bull; Official Payroll Register
+                </h3>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} mt-0.5`}>
+                  Disbursal Cycle: <span className={`${isDark ? 'text-slate-200' : 'text-slate-700'} font-mono`}>{viewingFinalizedRun.periodStart}</span> to{' '}
+                  <span className={`${isDark ? 'text-slate-200' : 'text-slate-700'} font-mono`}>{viewingFinalizedRun.periodEnd}</span> &bull; Approved by:{' '}
+                  <span className="text-emerald-500 font-semibold">{viewingFinalizedRun.approvedByName || 'Clarisse Mendoza (Finance Controller)'}</span>
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => handlePrintFinalizedRegister(viewingFinalizedRun)}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>🖨️ Print Official Payroll Register</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewingFinalizedRun(null)}
+                  className={`p-1.5 ${isDark ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-100'} rounded-lg transition cursor-pointer`}
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+
+            {/* Quick Summary Strip */}
+            <div className={`grid grid-cols-2 sm:grid-cols-4 gap-2.5 p-4 border-b ${isDark ? 'border-slate-800 bg-slate-950/40' : 'border-slate-200 bg-slate-50/60'} shrink-0 text-xs font-mono`}>
+              <div className={`${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'} border p-2.5 rounded-xl`}>
+                <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase block font-semibold`}>Total Workers</span>
+                <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-900'} mt-0.5 block`}>{viewingFinalizedRun.workerCount || viewingFinalizedRun.items?.length || 0} Artisans</span>
+              </div>
+              <div className={`${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'} border p-2.5 rounded-xl`}>
+                <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'} uppercase block font-semibold`}>Total Gross Wages</span>
+                <span className={`text-sm font-bold ${isDark ? 'text-white' : 'text-slate-900'} mt-0.5 block`}>₱{Number(viewingFinalizedRun.totalGross || 0).toLocaleString()}</span>
+              </div>
+              <div className={`${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200 shadow-xs'} border p-2.5 rounded-xl`}>
+                <span className="text-[10px] text-rose-500 uppercase block font-semibold">Vale / Deductions</span>
+                <span className="text-sm font-bold text-rose-500 mt-0.5 block">-₱{Number(viewingFinalizedRun.totalDeductions || 0).toLocaleString()}</span>
+              </div>
+              <div className={`${isDark ? 'bg-slate-900 border-emerald-500/30' : 'bg-emerald-50/50 border-emerald-300'} border p-2.5 rounded-xl`}>
+                <span className="text-[10px] text-emerald-500 uppercase block font-semibold">Net Payout Disbursed</span>
+                <span className="text-sm font-black text-emerald-500 mt-0.5 block">₱{Number(viewingFinalizedRun.totalNet || 0).toLocaleString()}</span>
+              </div>
+            </div>
+
+            {/* Itemized Worker Table */}
+            <div className="overflow-y-auto p-4 flex-1">
+              <div className={`border ${isDark ? 'border-slate-800' : 'border-slate-200'} rounded-xl overflow-hidden`}>
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className={`${isDark ? 'bg-slate-950 text-slate-400 border-slate-800' : 'bg-slate-100 text-slate-600 border-slate-200'} font-mono text-[10px] uppercase border-b`}>
+                      <th className="py-2.5 px-3">#</th>
+                      <th className="py-2.5 px-3">Worker Name &amp; Role</th>
+                      <th className="py-2.5 px-3 text-right">Daily Rate</th>
+                      <th className="py-2.5 px-3 text-center">Days</th>
+                      <th className="py-2.5 px-3 text-center">OT Hrs</th>
+                      <th className="py-2.5 px-3 text-right">Gross Pay</th>
+                      <th className="py-2.5 px-3 text-right">Deductions</th>
+                      <th className="py-2.5 px-3 text-right font-bold text-emerald-500">Net Pay</th>
+                      <th className="py-2.5 px-3 text-center">Payout Channel</th>
+                    </tr>
+                  </thead>
+                  <tbody className={`divide-y ${isDark ? 'divide-slate-800/60' : 'divide-slate-200'} font-sans`}>
+                    {(viewingFinalizedRun.items || []).map((item, idx) => {
+                      const contact = resolveWorkerContact(item);
+                      const base = Number(item.basePay ?? Number(item.daysWorked || 0) * Number(item.dailyRate || 0));
+                      const ot = Number(item.otPay || 0);
+                      const gross = Number(item.grossPay || base + ot);
+                      const deduct = Number(item.totalDeductions || 0);
+                      const net = Number(item.netPay || gross - deduct);
+                      return (
+                        <tr key={item.workerId || idx} className={`${isDark ? 'hover:bg-slate-800/40 text-slate-300' : 'hover:bg-slate-50 text-slate-700'} transition-colors`}>
+                          <td className={`py-2.5 px-3 font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>{idx + 1}</td>
+                          <td className="py-2.5 px-3">
+                            <span className={`font-semibold ${isDark ? 'text-white' : 'text-slate-900'} block`}>{item.workerName}</span>
+                            <span className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'} block font-mono`}>{item.position}</span>
+                          </td>
+                          <td className={`py-2.5 px-3 text-right font-mono ${isDark ? 'text-slate-300' : 'text-slate-700'}`}>₱{Number(item.dailyRate || 0).toLocaleString()}</td>
+                          <td className={`py-2.5 px-3 text-center font-mono ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{item.daysWorked ?? 0}</td>
+                          <td className="py-2.5 px-3 text-center font-mono text-amber-500 font-semibold">{item.otHours ?? 0}</td>
+                          <td className={`py-2.5 px-3 text-right font-mono ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>₱{gross.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="py-2.5 px-3 text-right font-mono text-rose-500">-₱{deduct.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-500">₱{net.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="py-2.5 px-3 text-center">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-mono ${isDark ? 'bg-slate-800 text-slate-300 border-slate-700' : 'bg-slate-100 text-slate-700 border-slate-200'} border`}>
+                              {contact.payoutChannel}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className={`p-4 border-t ${isDark ? 'border-slate-800 bg-slate-950/80 text-slate-400' : 'border-slate-200 bg-slate-50 text-slate-500'} flex items-center justify-between gap-3 shrink-0`}>
+              <span className="text-xs font-mono">
+                Immutable audit record archived in LDM Construction Finance Ledger.
+              </span>
+              <button
+                type="button"
+                onClick={() => setViewingFinalizedRun(null)}
+                className={`px-4 py-2 ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-white' : 'bg-slate-200 hover:bg-slate-300 text-slate-800'} text-xs font-semibold rounded-xl transition cursor-pointer`}
+              >
+                Close Register
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

@@ -778,6 +778,7 @@ export interface SiteWorker {
   hourlyOtRate: number;
   position: string;
   assignedProjectId?: string;
+  assignedProject?: string;
   status: 'Active' | 'Inactive' | string;
   workforceClass?: 'Artisan' | 'Trade Crew' | string;
   assignments?: {

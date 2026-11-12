@@ -9,9 +9,24 @@ import {
   MapPin, Activity, FileText, CheckCircle2, Calendar, Calculator, 
   Compass, Layers, Eye, X, Check, Send, ChevronLeft, ChevronRight, HardHat, 
   Scale, Briefcase, Ruler, Clock, ExternalLink, Hammer, Wrench,
-  CheckSquare, FileCheck, Users, HelpCircle, AlertTriangle, RefreshCw, Star, MessageSquarePlus
+  CheckSquare, FileCheck, Users, HelpCircle, AlertTriangle, RefreshCw, Star, MessageSquarePlus, Globe
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
+import { useTheme } from '../context/ThemeContext';
+import { OptimizedLdmImage, LdmBrandLogo } from './OptimizedLdmImage';
+import {
+  allLdmPortfolioAssets,
+  ldmArchitecturalAssets,
+  ldmInteriorAssets,
+  ldmSiteConstructionAssets,
+  ldmHeroShowcaseAssets,
+  getPaginatedLdmAssets,
+  LdmPortfolioAsset,
+  PRIMARY_LDM_LOGO,
+  LDM_COMPANY_LOCATION,
+} from '../utils/ldmAssets';
+
+export { LDM_COMPANY_LOCATION };
 import {
   getEstimatorConfig,
   ESTIMATOR_CONFIG_EVENT,
@@ -31,457 +46,13 @@ import {
   validateEmailPreFlight,
 } from '../utils/securityValidation';
 
-// Authentic CTVill Local Assets
-import logoJpg from '../assets/images/ctvill/logo.jpg';
-import introOuter from '../assets/images/ctvill/intro_outer.webp';
 
-// BG Comm Assets (Dumaguete, Negros - 2020)
-import bgcommOuter from '../assets/images/ctvill/bgcomm_outer.webp';
-import bgcommBanner1 from '../assets/images/ctvill/bgcomm_banner1.webp';
-import bgcommBanner2 from '../assets/images/ctvill/bgcomm_banner2.webp';
-import bgcommBanner3 from '../assets/images/ctvill/bgcomm_banner3.webp';
-import bgcommBanner4 from '../assets/images/ctvill/bgcomm_banner4.webp';
-import bgcommBanner5 from '../assets/images/ctvill/bgcomm_banner5.webp';
-import bgcommBanner6 from '../assets/images/ctvill/bgcomm_banner6.webp';
-import bgcommBanner7 from '../assets/images/ctvill/bgcomm_banner7.webp';
-import bgcommBanner8 from '../assets/images/ctvill/bgcomm_banner8.webp';
-import bgcommBanner9 from '../assets/images/ctvill/bgcomm_banner9.webp';
-import bgcommBanner10 from '../assets/images/ctvill/bgcomm_banner10.webp';
-import bgcommBanner11 from '../assets/images/ctvill/bgcomm_banner11.webp';
-import bgcommThumb1 from '../assets/images/ctvill/bgcomm_banner1_thumb.webp';
-import bgcommThumb2 from '../assets/images/ctvill/bgcomm_banner2_thumb.webp';
-import bgcommThumb3 from '../assets/images/ctvill/bgcomm_banner3_thumb.webp';
-import bgcommThumb4 from '../assets/images/ctvill/bgcomm_banner4_thumb.webp';
-import bgcommThumb5 from '../assets/images/ctvill/bgcomm_banner5_thumb.webp';
-import bgcommThumb6 from '../assets/images/ctvill/bgcomm_banner6_thumb.webp';
-import bgcommThumb7 from '../assets/images/ctvill/bgcomm_banner7_thumb.webp';
-import bgcommThumb8 from '../assets/images/ctvill/bgcomm_banner8_thumb.webp';
-import bgcommThumb9 from '../assets/images/ctvill/bgcomm_banner9_thumb.webp';
-import bgcommThumb10 from '../assets/images/ctvill/bgcomm_banner10_thumb.webp';
-import bgcommThumb11 from '../assets/images/ctvill/bgcomm_banner11_thumb.webp';
-import bgcommBlueprint1 from '../assets/images/ctvill/bgcomm_blueprint1.webp';
-import bgcommBlueprint2 from '../assets/images/ctvill/bgcomm_blueprint2.webp';
-import bgcommBlueprint3 from '../assets/images/ctvill/bgcomm_blueprint3.webp';
-import bgcommBlueprint4 from '../assets/images/ctvill/bgcomm_blueprint4.webp';
-import bgcommBlueprint5 from '../assets/images/ctvill/bgcomm_blueprint5.webp';
-import bgcommBlueprint6 from '../assets/images/ctvill/bgcomm_blueprint6.webp';
-
-// NexBridge Assets (Malolos, Bulacan - 2020)
-import nexbridgeOuter from '../assets/images/ctvill/nexbridge_outer.webp';
-import nexbridgeBanner1 from '../assets/images/ctvill/nexbridge_banner1.webp';
-import nexbridgeBanner2 from '../assets/images/ctvill/nexbridge_banner2.webp';
-import nexbridgeBanner3 from '../assets/images/ctvill/nexbridge_banner3.webp';
-import nexbridgeBanner4 from '../assets/images/ctvill/nexbridge_banner4.webp';
-import nexbridgeBanner5 from '../assets/images/ctvill/nexbridge_banner5.webp';
-import nexbridgeBanner6 from '../assets/images/ctvill/nexbridge_banner6.webp';
-import nexbridgeBanner7 from '../assets/images/ctvill/nexbridge_banner7.webp';
-import nexbridgeBanner8 from '../assets/images/ctvill/nexbridge_banner8.webp';
-import nexbridgeBanner9 from '../assets/images/ctvill/nexbridge_banner9.webp';
-import nexbridgeBanner10 from '../assets/images/ctvill/nexbridge_banner10.webp';
-import nexbridgeBanner11 from '../assets/images/ctvill/nexbridge_banner11.webp';
-import nexbridgeBanner12 from '../assets/images/ctvill/nexbridge_banner12.webp';
-import nexbridgeBanner13 from '../assets/images/ctvill/nexbridge_banner13.webp';
-import nexbridgeThumb1 from '../assets/images/ctvill/nexbridge_banner1_thumb.webp';
-import nexbridgeThumb2 from '../assets/images/ctvill/nexbridge_banner2_thumb.webp';
-import nexbridgeThumb3 from '../assets/images/ctvill/nexbridge_banner3_thumb.webp';
-import nexbridgeThumb4 from '../assets/images/ctvill/nexbridge_banner4_thumb.webp';
-import nexbridgeThumb5 from '../assets/images/ctvill/nexbridge_banner5_thumb.webp';
-import nexbridgeThumb6 from '../assets/images/ctvill/nexbridge_banner6_thumb.webp';
-import nexbridgeThumb7 from '../assets/images/ctvill/nexbridge_banner7_thumb.webp';
-import nexbridgeThumb8 from '../assets/images/ctvill/nexbridge_banner8_thumb.webp';
-import nexbridgeThumb9 from '../assets/images/ctvill/nexbridge_banner9_thumb.webp';
-import nexbridgeThumb10 from '../assets/images/ctvill/nexbridge_banner10_thumb.webp';
-import nexbridgeThumb11 from '../assets/images/ctvill/nexbridge_banner11_thumb.webp';
-import nexbridgeThumb12 from '../assets/images/ctvill/nexbridge_banner12_thumb.webp';
-import nexbridgeThumb13 from '../assets/images/ctvill/nexbridge_banner13_thumb.webp';
-import nexbridgeBlueprint1 from '../assets/images/ctvill/nexbridge_blueprint1.webp';
-import nexbridgeBlueprint2 from '../assets/images/ctvill/nexbridge_blueprint2.webp';
-import nexbridgeBlueprint3 from '../assets/images/ctvill/nexbridge_blueprint3.webp';
-import nexbridgeBlueprint4 from '../assets/images/ctvill/nexbridge_blueprint4.webp';
-import nexbridgeBlueprint5 from '../assets/images/ctvill/nexbridge_blueprint5.webp';
-import nexbridgeBlueprint6 from '../assets/images/ctvill/nexbridge_blueprint6.webp';
-import nexbridgeBlueprint7 from '../assets/images/ctvill/nexbridge_blueprint7.webp';
-
-// Owl Milk Tea Assets (BF Homes, Parañaque - 2019)
-import owlOuter from '../assets/images/ctvill/owl_outer.webp';
-import owlBanner1 from '../assets/images/ctvill/owl_banner1.webp';
-import owlBanner2 from '../assets/images/ctvill/owl_banner2.webp';
-import owlBanner3 from '../assets/images/ctvill/owl_banner3.webp';
-import owlBanner4 from '../assets/images/ctvill/owl_banner4.webp';
-import owlBanner5 from '../assets/images/ctvill/owl_banner5.webp';
-import owlBanner6 from '../assets/images/ctvill/owl_banner6.webp';
-import owlBanner7 from '../assets/images/ctvill/owl_banner7.webp';
-import owlBanner8 from '../assets/images/ctvill/owl_banner8.webp';
-import owlBanner9 from '../assets/images/ctvill/owl_banner9.webp';
-import owlBanner10 from '../assets/images/ctvill/owl_banner10.webp';
-import owlBanner11 from '../assets/images/ctvill/owl_banner11.webp';
-import owlBanner12 from '../assets/images/ctvill/owl_banner12.webp';
-import owlBanner13 from '../assets/images/ctvill/owl_banner13.webp';
-import owlThumb1 from '../assets/images/ctvill/owl_banner1_thumb.webp';
-import owlThumb2 from '../assets/images/ctvill/owl_banner2_thumb.webp';
-import owlThumb3 from '../assets/images/ctvill/owl_banner3_thumb.webp';
-import owlThumb4 from '../assets/images/ctvill/owl_banner4_thumb.webp';
-import owlThumb5 from '../assets/images/ctvill/owl_banner5_thumb.webp';
-import owlThumb6 from '../assets/images/ctvill/owl_banner6_thumb.webp';
-import owlThumb7 from '../assets/images/ctvill/owl_banner7_thumb.webp';
-import owlThumb8 from '../assets/images/ctvill/owl_banner8_thumb.webp';
-import owlThumb9 from '../assets/images/ctvill/owl_banner9_thumb.webp';
-import owlThumb10 from '../assets/images/ctvill/owl_banner10_thumb.webp';
-import owlThumb11 from '../assets/images/ctvill/owl_banner11_thumb.webp';
-import owlThumb12 from '../assets/images/ctvill/owl_banner12_thumb.webp';
-import owlThumb13 from '../assets/images/ctvill/owl_banner13_thumb.webp';
-import owlBlueprint1 from '../assets/images/ctvill/owl_blueprint1.webp';
-import owlBlueprint2 from '../assets/images/ctvill/owl_blueprint2.webp';
-import owlBlueprint3 from '../assets/images/ctvill/owl_blueprint3.webp';
-import owlBlueprint4 from '../assets/images/ctvill/owl_blueprint4.webp';
-
-// Redbin Assets (Makati City - 2019)
-import redbinOuter from '../assets/images/ctvill/redbin_outer.webp';
-import redbinBanner1 from '../assets/images/ctvill/redbin_banner1.webp';
-import redbinBanner2 from '../assets/images/ctvill/redbin_banner2.webp';
-import redbinBanner3 from '../assets/images/ctvill/redbin_banner3.webp';
-import redbinBanner4 from '../assets/images/ctvill/redbin_banner4.webp';
-import redbinBanner5 from '../assets/images/ctvill/redbin_banner5.webp';
-import redbinBanner6 from '../assets/images/ctvill/redbin_banner6.webp';
-import redbinBanner7 from '../assets/images/ctvill/redbin_banner7.webp';
-import redbinBanner8 from '../assets/images/ctvill/redbin_banner8.webp';
-import redbinBanner9 from '../assets/images/ctvill/redbin_banner9.webp';
-import redbinBanner10 from '../assets/images/ctvill/redbin_banner10.webp';
-import redbinBanner11 from '../assets/images/ctvill/redbin_banner11.webp';
-import redbinThumb1 from '../assets/images/ctvill/redbin_banner1_thumb.webp';
-import redbinThumb2 from '../assets/images/ctvill/redbin_banner2_thumb.webp';
-import redbinThumb3 from '../assets/images/ctvill/redbin_banner3_thumb.webp';
-import redbinThumb4 from '../assets/images/ctvill/redbin_banner4_thumb.webp';
-import redbinThumb5 from '../assets/images/ctvill/redbin_banner5_thumb.webp';
-import redbinThumb6 from '../assets/images/ctvill/redbin_banner6_thumb.webp';
-import redbinThumb7 from '../assets/images/ctvill/redbin_banner7_thumb.webp';
-import redbinThumb8 from '../assets/images/ctvill/redbin_banner8_thumb.webp';
-import redbinThumb9 from '../assets/images/ctvill/redbin_banner9_thumb.webp';
-import redbinThumb10 from '../assets/images/ctvill/redbin_banner10_thumb.webp';
-import redbinThumb11 from '../assets/images/ctvill/redbin_banner11_thumb.webp';
-import redbinBlueprint1 from '../assets/images/ctvill/redbin_blueprint1.webp';
-import redbinBlueprint2 from '../assets/images/ctvill/redbin_blueprint2.webp';
-import redbinBlueprint3 from '../assets/images/ctvill/redbin_blueprint3.webp';
-import redbinBlueprint4 from '../assets/images/ctvill/redbin_blueprint4.webp';
-import redbinBlueprint5 from '../assets/images/ctvill/redbin_blueprint5.webp';
-import redbinBlueprint6 from '../assets/images/ctvill/redbin_blueprint6.webp';
-import redbinBlueprint7 from '../assets/images/ctvill/redbin_blueprint7.webp';
-import redbinBlueprint8 from '../assets/images/ctvill/redbin_blueprint8.webp';
-
-// Pillar & Designer Assets
-import createThumb1 from '../assets/images/ctvill/create_thumb1.jpg';
-import createThumb2 from '../assets/images/ctvill/create_thumb2.jpg';
-import createThumb3 from '../assets/images/ctvill/create_thumb3.jpg';
-import createThumb4 from '../assets/images/ctvill/create_thumb4.jpg';
-import designerMakeplace from '../assets/images/ctvill/designer_makeplace.jpg';
-import designerKatherine from '../assets/images/ctvill/designer_katherine.jpg';
+import { UserSession } from '../types';
 
 interface LandingPageProps {
   onEnterPortal: () => void;
+  session?: UserSession | null;
 }
-
-interface ProjectData {
-  id: string;
-  title: string;
-  subtitle: string;
-  category: 'bpo' | 'tech' | 'retail' | 'agency';
-  categoryLabel: string;
-  location: string;
-  area: string;
-  timeline: string;
-  year: string;
-  designer: string;
-  designerOrg: string;
-  designerImg: string;
-  designerBio: string;
-  designerContact?: string;
-  outerImg: string;
-  bannerImgs: string[];
-  bannerThumbs: string[]; // Micro-thumbnails for instant 60fps gallery scrolling
-  blueprintImgs: string[]; // Synchronized 1:1 with bannerImgs for dynamic floor plan highlight
-  headline: string;
-  story: string;
-  highlights: string[];
-  keyChallenges: string;
-}
-
-const PROJECTS: ProjectData[] = [
-  {
-    id: 'bgcomm',
-    title: 'BG Comm',
-    subtitle: 'Fit-Out of BPO Office (2nd Branch)',
-    category: 'bpo',
-    categoryLabel: 'BPO & Call Center',
-    location: 'Dumaguete, Negros',
-    area: '1,000 sq. meters',
-    timeline: '3 months',
-    year: '2020',
-    designer: 'Make Place Studio',
-    designerOrg: 'Make Place Studio (Est. 2016)',
-    designerImg: designerMakeplace,
-    designerBio: 'Make Place Studio is an interior design firm that creates experiential, meaningful spaces for businesses and households, advocating for the role of design in corporate productivity.',
-    designerContact: '0917-676-3618 • makeplacestudio@gmail.com',
-    outerImg: bgcommOuter,
-    bannerImgs: [
-      bgcommBanner1,
-      bgcommBanner2,
-      bgcommBanner3,
-      bgcommBanner4,
-      bgcommBanner5,
-      bgcommBanner6,
-      bgcommBanner7,
-      bgcommBanner8,
-      bgcommBanner9,
-      bgcommBanner10,
-      bgcommBanner11
-    ],
-    bannerThumbs: [
-      bgcommThumb1,
-      bgcommThumb2,
-      bgcommThumb3,
-      bgcommThumb4,
-      bgcommThumb5,
-      bgcommThumb6,
-      bgcommThumb7,
-      bgcommThumb8,
-      bgcommThumb9,
-      bgcommThumb10,
-      bgcommThumb11
-    ],
-    // 1:1 synchronized blueprint mappings matching ctvill.com exactly
-    blueprintImgs: [
-      bgcommBlueprint1, // slide 1: Reception lobby seating
-      bgcommBlueprint2, // slide 2: Reception desk counter
-      bgcommBlueprint3, // slide 3: Meeting room & lounge
-      bgcommBlueprint3, // slide 4: Meeting room angle
-      bgcommBlueprint4, // slide 5: Operations call floor
-      bgcommBlueprint4, // slide 6: Call floor desks
-      bgcommBlueprint4, // slide 7: Acoustic partitions
-      bgcommBlueprint5, // slide 8: Executive conference
-      bgcommBlueprint5, // slide 9: Boardroom table
-      bgcommBlueprint6, // slide 10: Pantry & breakout
-      bgcommBlueprint6  // slide 11: Breakout area
-    ],
-    headline: 'Bigger is Better',
-    story: 'Bringing BGComm’s 2nd branch to its chairman’s hometown of Negros. At 1,000 square meters, its footprint was nearly 10x larger than their first branch. Dumaguete provided an energetic, fluent talent pool, and the client sought a vibrant, stress-alleviating atmosphere for high-paced BPO operations.',
-    highlights: [
-      'Bright accent color palettes integrated with sleek concrete wall finishes',
-      'Fully custom modular ergonomic desks enabling dynamic floor reconfiguration',
-      'CTVill’s premier milestone project outside Luzon, delivered strictly on time',
-      'Comprehensive HVAC and acoustic baffle zoning to dampen call center resonance'
-    ],
-    keyChallenges: 'Handling regional sea shipping logistics and long-distance workforce management while adhering rigorously to a tight 3-month handover window.'
-  },
-  {
-    id: 'nexbridge',
-    title: 'NexBridge',
-    subtitle: 'Fit-Out of System Developer Office (2nd Branch)',
-    category: 'tech',
-    categoryLabel: 'Software & Tech Hub',
-    location: 'Malolos, Bulacan',
-    area: '350 sq. meters',
-    timeline: '2 months',
-    year: '2020',
-    designer: 'Archt. Katherine Cervancia',
-    designerOrg: 'Project Architect, CTVill (Malayan Colleges Laguna)',
-    designerImg: designerKatherine,
-    designerBio: 'A prodigy architect from Malayan Colleges Laguna, Archt. Cervancia led the architectural and interior fit-out for NexBridge, delivering strategic space functionality that exceeded all executive expectations.',
-    outerImg: nexbridgeOuter,
-    bannerImgs: [
-      nexbridgeBanner1,
-      nexbridgeBanner2,
-      nexbridgeBanner3,
-      nexbridgeBanner4,
-      nexbridgeBanner5,
-      nexbridgeBanner6,
-      nexbridgeBanner7,
-      nexbridgeBanner8,
-      nexbridgeBanner9,
-      nexbridgeBanner10,
-      nexbridgeBanner11,
-      nexbridgeBanner12,
-      nexbridgeBanner13
-    ],
-    bannerThumbs: [
-      nexbridgeThumb1,
-      nexbridgeThumb2,
-      nexbridgeThumb3,
-      nexbridgeThumb4,
-      nexbridgeThumb5,
-      nexbridgeThumb6,
-      nexbridgeThumb7,
-      nexbridgeThumb8,
-      nexbridgeThumb9,
-      nexbridgeThumb10,
-      nexbridgeThumb11,
-      nexbridgeThumb12,
-      nexbridgeThumb13
-    ],
-    // 1:1 synchronized blueprint mappings matching ctvill.com exactly
-    blueprintImgs: [
-      nexbridgeBlueprint1, // slide 1: Entry & lounge
-      nexbridgeBlueprint1, // slide 2: Reception angle
-      nexbridgeBlueprint2, // slide 3: Open developer workspace
-      nexbridgeBlueprint3, // slide 4: High-ceiling scrum nook
-      nexbridgeBlueprint3, // slide 5: Collaboration whiteboard
-      nexbridgeBlueprint4, // slide 6: Meeting pod A
-      nexbridgeBlueprint4, // slide 7: Meeting pod B
-      nexbridgeBlueprint4, // slide 8: Meeting pod C
-      nexbridgeBlueprint5, // slide 9: Focus booths
-      nexbridgeBlueprint5, // slide 10: Private quiet room
-      nexbridgeBlueprint6, // slide 11: Developer sleeping pods
-      nexbridgeBlueprint7, // slide 12: Executive office
-      nexbridgeBlueprint7  // slide 13: Executive conference
-    ],
-    headline: 'Details Matter',
-    story: 'A year prior, CTVill constructed NexBridge’s 75 sqm starter office in just five days. Tripling in head count within months, NexBridge commissioned CTVill to design and build their permanent 350 sqm headquarters to house their rapidly scaling engineering teams.',
-    highlights: [
-      'Engineered high-ceiling architecture proven to foster abstract and inventive problem solving',
-      'Custom fabricated furniture, collaboration nooks, whiteboard walls, and private sleeping pods',
-      'Witty programmer details: binary code decals for restrooms and diskette markers for storage',
-      'Full PEZA and municipal compliance coordination with zero inspection delays'
-    ],
-    keyChallenges: 'Translating software development sprints into tactile spatial architecture that balances focused coding with open-space agile standups.'
-  },
-  {
-    id: 'owl',
-    title: 'Owl Milk Tea',
-    subtitle: 'Fit-Out of Milk Tea Bar (2nd Branch)',
-    category: 'retail',
-    categoryLabel: 'Commercial Retail & F&B',
-    location: 'BF Homes, Parañaque',
-    area: '60 sq. meters',
-    timeline: '1 month',
-    year: '2019',
-    designer: 'Make Place Studio',
-    designerOrg: 'Make Place Studio',
-    designerImg: designerMakeplace,
-    designerBio: 'Specializing in lifestyle retail environments that maximize customer dwell time and create viral, picture-perfect moments.',
-    designerContact: '0917-676-3618 • makeplacestudio@gmail.com',
-    outerImg: owlOuter,
-    bannerImgs: [
-      owlBanner1,
-      owlBanner2,
-      owlBanner3,
-      owlBanner4,
-      owlBanner5,
-      owlBanner6,
-      owlBanner7,
-      owlBanner8,
-      owlBanner9,
-      owlBanner10,
-      owlBanner11,
-      owlBanner12,
-      owlBanner13
-    ],
-    bannerThumbs: [
-      owlThumb1,
-      owlThumb2,
-      owlThumb3,
-      owlThumb4,
-      owlThumb5,
-      owlThumb6,
-      owlThumb7,
-      owlThumb8,
-      owlThumb9,
-      owlThumb10,
-      owlThumb11,
-      owlThumb12,
-      owlThumb13
-    ],
-    // 1:1 synchronized blueprint mappings matching ctvill.com exactly
-    blueprintImgs: [
-      owlBlueprint1, // slide 1: Main ordering counter
-      owlBlueprint1, // slide 2: Service bar angle
-      owlBlueprint1, // slide 3: Menu display front
-      owlBlueprint1, // slide 4: Bar prep station
-      owlBlueprint1, // slide 5: POS point
-      owlBlueprint1, // slide 6: Counter terrazzo detail
-      owlBlueprint2, // slide 7: Customer dining lounge
-      owlBlueprint2, // slide 8: Banquette seating
-      owlBlueprint2, // slide 9: Pastel wall geometry
-      owlBlueprint2, // slide 10: Window seating rail
-      owlBlueprint2, // slide 11: Dining tables
-      owlBlueprint3, // slide 12: Kitchen & sanitary prep
-      owlBlueprint4  // slide 13: Storage & inventory room
-    ],
-    headline: 'Playful Patterns',
-    story: 'The objective for Owl Milk Tea’s second flagship branch was to introduce colorful geometric patterns while creating a fun, stress-free hospitality environment for urban milk tea lovers.',
-    highlights: [
-      'Innovative custom solution: direct ceramic printing of terrazzo patterns when raw terrazzo was unavailable',
-      'Strict color matching across multiple paint batches to achieve vivid pastel brand consistency',
-      'Optimized sanitary, plumbing, and grease-trap engineering compliant with local city health codes',
-      'Rapid turnkey handover in exactly 30 calendar days'
-    ],
-    keyChallenges: 'Overcoming supply shortages in natural terrazzo stone without compromising the design intent or exceeding budget constraints.'
-  },
-  {
-    id: 'redbin',
-    title: 'Redbin',
-    subtitle: 'Fit-Out of Advertising Company Office',
-    category: 'agency',
-    categoryLabel: 'Creative Advertising Studio',
-    location: 'Makati City',
-    area: '135 sq. meters',
-    timeline: '2 months',
-    year: '2019',
-    designer: 'Make Place Studio',
-    designerOrg: 'Make Place Studio',
-    designerImg: designerMakeplace,
-    designerBio: 'Focused on purposeful, human-centered architectural layouts that unleash workplace creativity and team cohesion.',
-    designerContact: '0917-676-3618 • makeplacestudio@gmail.com',
-    outerImg: redbinOuter,
-    bannerImgs: [
-      redbinBanner1,
-      redbinBanner2,
-      redbinBanner3,
-      redbinBanner4,
-      redbinBanner5,
-      redbinBanner6,
-      redbinBanner7,
-      redbinBanner8,
-      redbinBanner9,
-      redbinBanner10,
-      redbinBanner11
-    ],
-    bannerThumbs: [
-      redbinThumb1,
-      redbinThumb2,
-      redbinThumb3,
-      redbinThumb4,
-      redbinThumb5,
-      redbinThumb6,
-      redbinThumb7,
-      redbinThumb8,
-      redbinThumb9,
-      redbinThumb10,
-      redbinThumb11
-    ],
-    // 1:1 synchronized blueprint mappings matching ctvill.com exactly
-    blueprintImgs: [
-      redbinBlueprint1, // slide 1: Reception entry & chill bar
-      redbinBlueprint2, // slide 2: Creative open bullpen
-      redbinBlueprint2, // slide 3: Ideation workbench
-      redbinBlueprint2, // slide 4: Workstation cluster
-      redbinBlueprint3, // slide 5: Brainstorm lounge
-      redbinBlueprint3, // slide 6: Flexible sliding partitions
-      redbinBlueprint4, // slide 7: Conference room
-      redbinBlueprint5, // slide 8: Executive office
-      redbinBlueprint6, // slide 9: Casual pantry & bar
-      redbinBlueprint7, // slide 10: Concealed storage
-      redbinBlueprint8  // slide 11: Outdoor patio deck
-    ],
-    headline: 'Squeezing Creativity',
-    story: 'Housing some of the sharpest young minds in Philippine creative advertising, this Makati office was engineered to offer a cool, chill, and inspiring ecosystem tailored to high-velocity idea incubation.',
-    highlights: [
-      'Intelligent layout packing a lounge, bar, conference suite, executive office, pantry, and open desks in 135 sqm',
-      'Flexible acoustic sliding door partitions that instantly expand room capacity for company-wide gatherings',
-      'Concealed storage rooms masked behind seamless wall-matched finishes',
-      'Outdoor patio integration transformed into a casual open-air brainstorming deck'
-    ],
-    keyChallenges: 'Operating within rigorous Makati Commercial Estate Association (MACEA) working permits and strict building noise restriction hours.'
-  }
-];
 
 const DYK_FACTS = [
   {
@@ -512,7 +83,7 @@ const DYK_FACTS = [
     icon: Ruler,
     tag: 'ERGONOMIC ENGINEERING',
     title: 'Task-Calibrated Workstations Reduce Repetitive Strain by 54%',
-    body: 'Proper desk clearances, ANSI/BIFMA-rated task chairs, and 105° visual angles prevent musculoskeletal strain in high-density BPO and tech setups. We optimize physical circulation paths to encourage subconscious movement breaks.'
+    body: 'Proper desk clearances, ANSI/BIFMA-rated task chairs, and 105° visual angles prevent musculoskeletal strain in high-density office and tech setups. We optimize physical circulation paths to encourage subconscious movement breaks.'
   },
   {
     icon: Eye,
@@ -522,20 +93,28 @@ const DYK_FACTS = [
   }
 ];
 
-export default function LandingPage({ onEnterPortal }: LandingPageProps) {
+export default function LandingPage({ onEnterPortal, session }: LandingPageProps) {
+  const { theme, isDark } = useTheme();
+
   // Navigation & transition state
   const [isNavigating, setIsNavigating] = useState<boolean>(false);
-  const [selectedProject, setSelectedProject] = useState<ProjectData | null>(null);
-  const [modalActivePhotoIndex, setModalActivePhotoIndex] = useState<number>(0);
-  const [showStoryModal, setShowStoryModal] = useState<boolean>(false);
   const [showPrivacyModal, setShowPrivacyModal] = useState<boolean>(false);
-  const [activeCategory, setActiveCategory] = useState<string>('all');
+  const [activeTourRoom, setActiveTourRoom] = useState<number>(0);
+  const [isTourLoaded, setIsTourLoaded] = useState<boolean>(false);
 
-  const handleOpenProject = (project: ProjectData) => {
-    setSelectedProject(project);
-    setModalActivePhotoIndex(0);
-    setShowStoryModal(false);
-  };
+  // 120-Asset Zero-Lag Portfolio & Lightbox State
+  const [portfolioTab, setPortfolioTab] = useState<'featured' | 'architectural' | 'interior' | 'construction' | 'all'>('featured');
+  const [portfolioVisibleCount, setPortfolioVisibleCount] = useState<number>(12);
+  const [lightboxAsset, setLightboxAsset] = useState<LdmPortfolioAsset | null>(null);
+
+  // Hero Background Showcase Carousel State
+  const [heroSlideIdx, setHeroSlideIdx] = useState<number>(0);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setHeroSlideIdx((prev) => (prev + 1) % ldmHeroShowcaseAssets.length);
+    }, 6000);
+    return () => clearInterval(timer);
+  }, []);
 
   // Did You Know? auto-rotating carousel state
   const [dykIndex, setDykIndex] = useState<number>(0);
@@ -608,7 +187,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
   // Interactive Fit-Out Cost & Timeline Estimator State (Admin-Configurable)
   const [estimatorConfig, setEstimatorConfig] = useState<EstimatorConfig>(() => getEstimatorConfig());
   const [estimatorSpaceType, setEstimatorSpaceType] = useState<SpaceCategoryKey>('corporate');
-  const [estimatorArea, setEstimatorArea] = useState<number>(180);
+  const [estimatorArea, setEstimatorArea] = useState<number>(120);
   const [estimatorTier, setEstimatorTier] = useState<FinishTierKey>('premium');
 
   // Subscribe to live Admin Estimator Config & Client Review updates
@@ -792,133 +371,110 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
       setQuoteCooldownSec(30);
     } catch (err: any) {
       console.error('Quotation submission error:', err);
-      setQuoteError(err.message || 'Error connecting to estimating server. Please try again or reach out to estimate@ctvill.com directly.');
+      setQuoteError(err.message || 'Error connecting to estimating server. Please try again or reach out to ldmengineeringdesign@gmail.com directly.');
     } finally {
       setIsSubmittingQuote(false);
     }
   };
 
-  const filteredProjects = activeCategory === 'all'
-    ? PROJECTS
-    : PROJECTS.filter(p => p.category === activeCategory);
-
   return (
     <div className="bg-slate-950 text-slate-100 min-h-screen font-sans selection:bg-amber-500 selection:text-slate-950" id="landing-page-root">
       
-      {/* 1. TOP UTILITY STATUS BAR */}
-      <div className="bg-slate-900/95 border-b border-slate-800 text-slate-400 text-[11px] font-mono py-2 px-6 flex flex-wrap justify-between items-center tracking-wider gap-2">
-        <div className="flex items-center gap-3">
-          <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-          <span className="text-slate-200 font-semibold tracking-wide uppercase">CTVILL DESIGN & CONSTRUCTION</span>
-          <span className="hidden sm:inline text-slate-500">• CABUYAO, LAGUNA HEADQUARTERS</span>
-        </div>
-        <div className="flex items-center gap-4 text-[10px]">
-          <span className="flex items-center gap-1.5 text-slate-300">
-            <Phone className="w-3 h-3 text-amber-400" />
-            <span>(049) 544 7724 / 0933-827-8885</span>
-          </span>
-          <span className="hidden md:flex items-center gap-1 text-slate-400">
-            <Mail className="w-3 h-3 text-amber-400" />
-            <span>estimate@ctvill.com</span>
-          </span>
-          <span className="bg-amber-400/10 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded font-bold uppercase tracking-wider hidden lg:inline">
-            PCAB-Licensed • PEZA & MACEA Permitting Specialist
-          </span>
-        </div>
-      </div>
-
-      {/* 2. MAIN HEADER NAVIGATION */}
-      <header className="border-b border-slate-800/80 bg-slate-950/92 backdrop-blur-md sticky top-0 z-40 transform-gpu will-change-transform">
-        <div className="max-w-7xl mx-auto px-6 py-3.5 flex items-center justify-between">
+      {/* MAIN HEADER NAVIGATION */}
+      <header className="border-b border-slate-800/80 bg-slate-950/92 backdrop-blur-md sticky top-0 z-40 transform-gpu will-change-transform" id="home">
+        <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
           
-          {/* Logo & Brand Identity */}
-          <a href="#" className="flex items-center gap-3.5 group cursor-pointer">
-            <div className="h-10 w-10 sm:h-11 sm:w-11 rounded-xl bg-black border border-slate-800 flex items-center justify-center shadow-lg group-hover:border-amber-500/40 transition-all shrink-0 overflow-hidden">
-              <img 
-                src={logoJpg} 
-                alt="CTVill Logo" 
-                className="w-full h-full object-cover"
-                decoding="async"
-              />
-            </div>
+          {/* Left — Brand Identity */}
+          <a href="#home" className="flex items-center gap-3.5 group cursor-pointer shrink-0">
+            <img
+              src={PRIMARY_LDM_LOGO}
+              alt="LDM Construction"
+              className="h-11 w-auto max-w-[150px] object-contain shrink-0"
+              decoding="async"
+            />
             <div>
-              <span className="font-sans font-black text-lg sm:text-xl text-white tracking-tight block leading-tight group-hover:text-amber-400 transition-colors">
-                CTVILL
+              <span className="font-sans font-extrabold text-lg text-white tracking-tight block leading-tight group-hover:text-amber-400 transition-colors">
+                LDM CONSTRUCTION
               </span>
-              <span className="text-[10px] text-amber-400 font-mono tracking-widest block uppercase font-bold">
-                Design & Construction
+              <span className="text-[10px] font-semibold tracking-[0.18em] text-amber-400 uppercase font-mono block">
+                ENGINEERS • ARCHITECTS • BUILDERS
               </span>
             </div>
           </a>
 
-          {/* Navigation Links (Matching ctvill.com architecture) */}
-          <nav className="hidden lg:flex items-center gap-8 text-xs font-semibold text-slate-300">
-            <a 
-              href="#create" 
-              onClick={(e) => scrollToSection(e, 'create')}
-              className="hover:text-amber-400 transition-colors cursor-pointer flex items-center gap-1"
-            >
-              <span>CREATE</span>
-            </a>
-            <a 
-              href="#construct" 
-              onClick={(e) => scrollToSection(e, 'construct')}
-              className="hover:text-amber-400 transition-colors cursor-pointer flex items-center gap-1"
-            >
-              <span>CONSTRUCT</span>
-              <span className="text-[9px] bg-slate-800 text-amber-400 px-1.5 py-0.5 rounded-full font-mono">Portfolio</span>
-            </a>
-            <a 
-              href="#aftercare" 
-              onClick={(e) => scrollToSection(e, 'aftercare')}
+          {/* Center — 5 Clean Navigation Links */}
+          <nav className="hidden lg:flex items-center gap-7 text-sm font-medium text-slate-300">
+            <a
+              href="#portfolio-showcase"
+              onClick={(e) => scrollToSection(e, 'portfolio-showcase')}
               className="hover:text-amber-400 transition-colors cursor-pointer"
             >
-              <span>AFTER CARE</span>
+              Portfolio
             </a>
-            <a 
-              href="#estimator" 
-              onClick={(e) => scrollToSection(e, 'estimator')}
-              className="hover:text-amber-400 transition-colors cursor-pointer flex items-center gap-1"
+            <a
+              href="#virtual-tours"
+              onClick={(e) => scrollToSection(e, 'virtual-tours')}
+              className="hover:text-amber-400 transition-colors cursor-pointer"
             >
-              <Calculator className="w-3.5 h-3.5 text-amber-400" />
-              <span>Cost Estimator</span>
+              360° Virtual Tours
             </a>
-            <a 
-              href="#contact" 
+            <a
+              href="#estimator"
+              onClick={(e) => scrollToSection(e, 'estimator')}
+              className="hover:text-amber-400 transition-colors cursor-pointer"
+            >
+              Cost Estimator
+            </a>
+            <a
+              href="#testimonials"
+              onClick={(e) => scrollToSection(e, 'testimonials')}
+              className="hover:text-amber-400 transition-colors cursor-pointer"
+            >
+              Client Reviews
+            </a>
+            <a
+              href="#contact"
               onClick={(e) => scrollToSection(e, 'contact')}
               className="hover:text-amber-400 transition-colors cursor-pointer"
             >
-              <span>CONTACT</span>
+              Contact
             </a>
           </nav>
 
-          {/* Action Hub */}
-          <div className="flex items-center gap-3">
-            <ThemeToggle />
+          {/* Right — Action Controls */}
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="w-10 h-10 flex items-center justify-center">
+              <ThemeToggle />
+            </div>
 
             <button
               onClick={() => setShowQuoteModal(true)}
-              className="hidden sm:flex px-4 py-2 border border-amber-500/40 hover:border-amber-500 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-semibold rounded-xl cursor-pointer transition-all items-center gap-1.5"
+              className="hidden sm:inline-flex px-4 py-2 border border-slate-700 hover:border-amber-500/60 bg-slate-900/80 hover:bg-slate-800 text-slate-200 hover:text-white text-xs font-semibold rounded-xl cursor-pointer transition-all items-center gap-1.5 shadow-sm"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-400" />
               <span>Get a Quote</span>
             </button>
 
-            {/* Enterprise Portal Access */}
+            {/* Primary CTA button: ERP Portal or Go to Dashboard */}
             <button
               onClick={handleSmoothEnterPortal}
               disabled={isNavigating}
               id="nav-log-in-btn"
-              className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-black rounded-xl cursor-pointer shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2 group"
+              className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 text-xs font-black rounded-xl cursor-pointer shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2 group"
             >
               {isNavigating ? (
                 <>
                   <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin"></div>
-                  <span>Loading Hub...</span>
+                  <span>Loading...</span>
+                </>
+              ) : session ? (
+                <>
+                  <span>Go to Dashboard</span>
+                  <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </>
               ) : (
                 <>
-                  <span>Enterprise Portal Sign-In</span>
+                  <span>ERP Portal</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </>
               )}
@@ -928,26 +484,44 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
       </header>
 
       {/* 3. HERO SHOWCASE SECTION */}
-      <section className="relative overflow-hidden pt-14 pb-20 sm:pt-20 sm:pb-28 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 border-b border-slate-800">
+      <section className="relative overflow-hidden pt-14 pb-20 sm:pt-20 sm:pb-28 bg-gradient-to-b from-slate-950 via-[#0a0f1d] to-slate-950 border-b border-slate-800">
         
-        {/* Architectural Grid Background */}
-        <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
-          <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:36px_36px]"></div>
+        {/* Dynamic Cross-Fading Hero Background Showcase (Only 1 active high-res slide eagerly loaded) */}
+        <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none opacity-20">
+          {ldmHeroShowcaseAssets.map((asset, idx) => (
+            <div
+              key={asset.id}
+              className={`absolute inset-0 transition-opacity duration-1000 ${
+                idx === heroSlideIdx ? 'opacity-100' : 'opacity-0'
+              }`}
+            >
+              <img
+                src={asset.url}
+                alt={asset.title}
+                className="w-full h-full object-cover scale-105 transform-gpu"
+                loading={idx === 0 ? 'eager' : 'lazy'}
+                fetchPriority={idx === heroSlideIdx ? 'high' : 'low'}
+                decoding="async"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/70 to-slate-950/90" />
+            </div>
+          ))}
+          <div className="absolute inset-0 bg-[linear-gradient(to_right,#0ea5e915_1px,transparent_1px),linear-gradient(to_bottom,#0ea5e915_1px,transparent_1px)] bg-[size:36px_36px]"></div>
         </div>
 
         <div className="max-w-6xl mx-auto px-6 text-center relative z-10 space-y-8">
           
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900 border border-amber-500/40 text-amber-300 text-xs font-mono font-bold tracking-wider uppercase shadow-inner">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-            Commercial & Corporate Fit-Out Experts
+            LDM Construction • Engineers • Architects • Builders
           </div>
 
           <h1 className="font-sans font-black text-4xl sm:text-6xl lg:text-7xl text-white tracking-tight leading-[1.08] max-w-4xl mx-auto">
-            Consider your <span className="bg-gradient-to-r from-amber-400 via-orange-400 to-amber-200 bg-clip-text text-transparent">dream space</span> done.
+            Giving Life to <span className="bg-gradient-to-r from-amber-400 via-orange-400 to-amber-200 bg-clip-text text-transparent">Your Dreams</span>.
           </h1>
 
           <p className="font-sans text-slate-300 text-sm sm:text-base max-w-2xl mx-auto leading-relaxed">
-            At <strong>CTVill</strong>, our design approach marries <strong>science and architecture</strong>. We promote strategic space functionality through in-depth analysis of client identity, ergonomics, and operational workflows — delivering turnkey fit-out and engineering from concept to handover.
+            At <strong>LDM Construction</strong>, our licensed engineers, architects, and builders deliver full-service <strong>Architectural Design, Custom Interior Fit-Out, &amp; Turnkey Residential/Commercial Construction</strong> from concept to handover.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 pt-2">
@@ -970,49 +544,52 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
           <div className="max-w-5xl mx-auto mt-10 rounded-3xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-900/90 p-3 relative group">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
               
-              <div className="md:col-span-7 overflow-hidden rounded-2xl h-64 sm:h-80 relative">
-                <img 
-                  src={bgcommBanner1} 
-                  alt="BG Comm BPO Office Fit-Out by CTVill" 
+              <div className="md:col-span-7 overflow-hidden rounded-2xl h-64 sm:h-80 relative bg-slate-950">
+                <OptimizedLdmImage 
+                  src={ldmHeroShowcaseAssets[0]?.url || ldmArchitecturalAssets[0]?.url || ''} 
+                  alt="Proyecto Bahia & Modern Residence Collection by LDM Construction" 
                   className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                  decoding="async"
+                  fetchPriority="high"
                 />
-                <div className="absolute top-3 left-3 bg-slate-950/90 border border-slate-800 px-3 py-1 rounded-lg text-[11px] font-mono text-amber-300 font-bold shadow-md">
-                  ★ FEATURED 1,000 SQM FIT-OUT
+                <div className="absolute top-3 left-3 bg-slate-950/90 border border-amber-500/40 px-3 py-1 rounded-lg text-[11px] font-mono text-amber-300 font-bold shadow-md">
+                  ★ FLAGSHIP DESIGN &amp; BUILD • RESIDENTIAL &amp; INTERIOR
                 </div>
               </div>
 
               <div className="md:col-span-5 p-4 sm:p-6 text-left space-y-4">
                 <span className="text-[10px] font-mono uppercase tracking-widest text-amber-400 font-extrabold block">
-                  FLAGSHIP COMMERCIAL SHOWCASE
+                  SIGNATURE ARCHITECTURAL SHOWCASE
                 </span>
                 <h3 className="font-sans font-black text-xl sm:text-2xl text-white">
-                  BG Comm BPO Headquarters
+                  Proyecto Bahia &amp; Modern Residence Collection
                 </h3>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  "Go big AND go home." A sprawling 1,000 sq. meter BPO workplace in Dumaguete, Negros. Completed within 3 months, featuring custom ergonomic workstations, concrete-finish accent walls, and full MEPFS acoustic engineering.
+                  "Giving Life to Your Dreams." Master-crafted Mediterranean villas, contemporary two-storey luxury residences, and bespoke turnkey homes engineered from groundbreaking to final handover with 360° virtual walkthroughs.
                 </p>
 
                 <div className="grid grid-cols-2 gap-2 text-[11px] font-mono pt-1 text-slate-300">
                   <div className="bg-slate-950 p-2 rounded-lg border border-slate-800">
-                    <span className="text-slate-500 block text-[9px]">FLOOR AREA</span>
-                    <strong>1,000 sqm</strong>
+                    <span className="text-slate-500 block text-[9px]">TOTAL PORTFOLIO</span>
+                    <strong>120+ Completed Builds</strong>
                   </div>
                   <div className="bg-slate-950 p-2 rounded-lg border border-slate-800">
-                    <span className="text-slate-500 block text-[9px]">TIMELINE</span>
-                    <strong className="text-emerald-400">3 Months Handover</strong>
+                    <span className="text-slate-500 block text-[9px]">PREVIEW ACCURACY</span>
+                    <strong className="text-emerald-400">360° Virtual Walkthrough</strong>
                   </div>
                 </div>
 
                 <div className="pt-2 flex items-center justify-between">
                   <button 
-                    onClick={() => setSelectedProject(PROJECTS[0])}
+                    onClick={() => {
+                      const firstAsset = ldmArchitecturalAssets[0] || allLdmPortfolioAssets[0];
+                      if (firstAsset) setLightboxAsset(firstAsset);
+                    }}
                     className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black rounded-lg cursor-pointer transition-colors flex items-center gap-1.5"
                   >
-                    <span>Discover Full Story</span>
+                    <span>View Flagship Gallery</span>
                     <ArrowRight className="w-3.5 h-3.5" />
                   </button>
-                  <span className="text-[10px] font-mono text-slate-500">Design by Make Place Studio</span>
+                  <span className="text-[10px] font-mono text-slate-500">LDM Construction Studio</span>
                 </div>
               </div>
 
@@ -1022,20 +599,20 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
           {/* Core High-Level Credentials */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-5xl mx-auto pt-6">
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xs text-left">
-              <span className="font-mono text-2xl sm:text-3xl font-extrabold text-amber-400 block">1,000+ sqm</span>
-              <span className="text-xs text-slate-400 block mt-1 font-medium">Largest Single Fit-Out</span>
+              <span className="font-mono text-2xl sm:text-3xl font-extrabold text-amber-400 block">120+</span>
+              <span className="text-xs text-slate-400 block mt-1 font-medium">Completed Designs &amp; Builds</span>
             </div>
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xs text-left">
-              <span className="font-mono text-2xl sm:text-3xl font-extrabold text-emerald-400 block">100% On-Time</span>
-              <span className="text-xs text-slate-400 block mt-1 font-medium">Schedule Handover Record</span>
+              <span className="font-mono text-2xl sm:text-3xl font-extrabold text-emerald-400 block">100%</span>
+              <span className="text-xs text-slate-400 block mt-1 font-medium">Structural &amp; Architectural Compliance</span>
             </div>
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xs text-left">
-              <span className="font-mono text-2xl sm:text-3xl font-extrabold text-blue-400 block">5-Day Record</span>
-              <span className="text-xs text-slate-400 block mt-1 font-medium">Fast-Track Turnkey Sprint</span>
+              <span className="font-mono text-2xl sm:text-3xl font-extrabold text-cyan-400 block">360°</span>
+              <span className="text-xs text-slate-400 block mt-1 font-medium">Interactive Client Virtual Previews</span>
             </div>
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xs text-left">
-              <span className="font-mono text-2xl sm:text-3xl font-extrabold text-purple-400 block">PEZA / MACEA</span>
-              <span className="text-xs text-slate-400 block mt-1 font-medium">Full Permitting Mastery</span>
+              <span className="font-mono text-2xl sm:text-3xl font-extrabold text-purple-400 block">Turnkey</span>
+              <span className="text-xs text-slate-400 block mt-1 font-medium">Design • Engineering • Construction</span>
             </div>
           </div>
 
@@ -1054,7 +631,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
               From In-Depth Research to Ready-to-Build Engineering
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 leading-relaxed">
-              Every project begins with comprehensive feasibility. CTVill aligns client operational culture with structural, mechanical, electrical, and regulatory precision before breaking ground.
+              Every project begins with comprehensive feasibility. LDM Construction aligns client operational culture with structural, mechanical, electrical, and architectural precision before breaking ground.
             </p>
           </div>
 
@@ -1064,7 +641,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
             <div className="bg-slate-950 border border-slate-800 hover:border-amber-500/50 rounded-2xl overflow-hidden transition-all duration-300 flex flex-col justify-between group shadow-xl">
               <div className="h-44 overflow-hidden relative">
                 <img 
-                  src={createThumb1} 
+                  src={ldmArchitecturalAssets[0]?.url || ''} 
                   alt="Design Conceptualization" 
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
@@ -1079,7 +656,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   <span className="text-[10px] font-mono text-amber-400 font-bold uppercase">ARCHITECTURAL VISION</span>
                   <h3 className="font-sans font-bold text-base text-white mt-1">Design Conceptualization</h3>
                   <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                    An integrated team effort of CTVill, partner designers, and specialized suppliers based on deep analysis of the company’s brand identity, user preferences, and day-to-day operational flows.
+                    An integrated team effort of LDM Construction licensed architects, engineers, and master builders based on deep analysis of site topography, client aspirations, and functional living flows.
                   </p>
                 </div>
                 <div className="pt-3 border-t border-slate-900 text-[11px] font-mono text-slate-500">
@@ -1092,7 +669,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
             <div className="bg-slate-950 border border-slate-800 hover:border-amber-500/50 rounded-2xl overflow-hidden transition-all duration-300 flex flex-col justify-between group shadow-xl">
               <div className="h-44 overflow-hidden relative">
                 <img 
-                  src={createThumb2} 
+                  src={ldmInteriorAssets[0]?.url || ''} 
                   alt="Engineering Design" 
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
@@ -1120,7 +697,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
             <div className="bg-slate-950 border border-slate-800 hover:border-amber-500/50 rounded-2xl overflow-hidden transition-all duration-300 flex flex-col justify-between group shadow-xl">
               <div className="h-44 overflow-hidden relative">
                 <img 
-                  src={createThumb3} 
+                  src={ldmSiteConstructionAssets[0]?.url || ''} 
                   alt="Permitting Application" 
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
@@ -1135,11 +712,11 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   <span className="text-[10px] font-mono text-amber-400 font-bold uppercase">REGULATORY CLEARANCE</span>
                   <h3 className="font-sans font-bold text-base text-white mt-1">Permitting Application</h3>
                   <p className="text-xs text-slate-400 mt-2 leading-relaxed">
-                    Before mobilization, CTVill secures all mandatory permits to avoid stops or penalties: Building Admin work permits, MACEA (Makati), City Hall building permits, Barangay clearances, and PEZA Permits to Operate.
+                    Before mobilization, LDM Construction secures all mandatory permits to avoid stops or penalties: City Hall building permits, Barangay clearances, subdivision approvals, and engineering clearances.
                   </p>
                 </div>
                 <div className="pt-3 border-t border-slate-900 text-[11px] font-mono text-slate-500">
-                  MACEA • PEZA • City Hall • Building Admin
+                  Building Permit • Barangay Clearance • Subdivision Approvals • LGU Clearances
                 </div>
               </div>
             </div>
@@ -1148,7 +725,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
             <div className="bg-slate-950 border border-slate-800 hover:border-amber-500/50 rounded-2xl overflow-hidden transition-all duration-300 flex flex-col justify-between group shadow-xl">
               <div className="h-44 overflow-hidden relative">
                 <img 
-                  src={createThumb4} 
+                  src={ldmSiteConstructionAssets[1]?.url || ldmArchitecturalAssets[1]?.url || ''} 
                   alt="Construction Planning" 
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
@@ -1263,39 +840,49 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
         </div>
       </section>
 
-      {/* 5. "CONSTRUCT" PORTFOLIO SHOWCASE */}
-      <section className="py-20 bg-slate-950 border-b border-slate-800" id="construct">
+      {/* 4A. PAGINATED 120-PHOTO PORTFOLIO SHOWCASE (ZERO-LAG ARCHITECTURE) */}
+      <section className="py-20 bg-slate-950 border-b border-slate-800" id="portfolio-showcase">
         <div className="max-w-7xl mx-auto px-6">
-          
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
             <div>
-              <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full px-4 py-1 text-xs font-mono font-bold uppercase inline-block mb-3">
-                THE "CONSTRUCT" PILLAR
-              </span>
+              <div className="flex items-center gap-2 mb-3">
+                <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full px-4 py-1 text-xs font-mono font-bold uppercase inline-block">
+                  LDM COMPLETE PORTFOLIO • 120+ HIGH-RESOLUTION ASSETS
+                </span>
+                <span className="text-[10px] font-mono text-emerald-400 font-bold px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30">
+                  Zero-Lag Virtualized Grid
+                </span>
+              </div>
               <h2 className="font-sans font-black text-3xl sm:text-4xl text-white tracking-tight">
-                Featured Fit-Out Projects
+                Authentic Design &amp; Construction Catalog
               </h2>
-              <p className="text-xs sm:text-sm text-slate-400 mt-2 max-w-xl">
-                Execution across two uncompromising stages: <strong>Preparatory Phase</strong> (mobilization & site prep) and <strong>Construction Phase</strong> (precision fabrication of approved quotation scope).
+              <p className="text-xs sm:text-sm text-slate-400 mt-2 max-w-2xl">
+                Browse our real-world portfolio across Architectural Typologies, Bespoke Interiors, and Structural Civil Works. Cards load on demand to guarantee instant rendering.
               </p>
             </div>
 
-            {/* Category Tabs */}
+            {/* Filter Tabs */}
             <div className="flex flex-wrap gap-2">
               {[
-                { id: 'all', label: 'All Projects' },
-                { id: 'bpo', label: 'BPO & Corporate' },
-                { id: 'tech', label: 'Software & Tech' },
-                { id: 'retail', label: 'Retail & F&B' },
-                { id: 'agency', label: 'Creative Agency' }
-              ].map(tab => (
+                { id: 'featured', label: 'Featured Highlights' },
+                { id: 'architectural', label: `Architectural (${ldmArchitecturalAssets.length})` },
+                { id: 'interior', label: `Interior Fit-Out (${ldmInteriorAssets.length})` },
+                { id: 'construction', label: `Turnkey Construction (${ldmSiteConstructionAssets.length})` },
+                { id: 'all', label: `All Portfolio (${allLdmPortfolioAssets.length})` },
+              ].map((tab) => (
                 <button
                   key={tab.id}
-                  onClick={() => setActiveCategory(tab.id)}
+                  type="button"
+                  onClick={() => {
+                    setPortfolioTab(tab.id as any);
+                    setPortfolioVisibleCount(12);
+                  }}
                   className={`px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold cursor-pointer transition-all ${
-                    activeCategory === tab.id
+                    portfolioTab === tab.id
                       ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
-                      : 'bg-slate-900 border border-slate-800 text-slate-400 hover:border-slate-700 hover:text-white'
+                      : isDark
+                        ? 'bg-slate-900 border border-slate-800 text-slate-400 hover:border-slate-700 hover:text-white'
+                        : 'bg-white border border-slate-200 text-slate-700 hover:border-slate-400 hover:text-slate-900 shadow-2xs'
                   }`}
                 >
                   {tab.label}
@@ -1304,137 +891,222 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
             </div>
           </div>
 
-          {/* CTVill Construct Portfolio Archive Overview Banner */}
-          <div className="mb-10 relative rounded-3xl overflow-hidden border border-slate-800 bg-slate-900/80 shadow-2xl">
-            <div className="grid grid-cols-1 lg:grid-cols-12 items-center">
-              <div className="lg:col-span-7 p-6 sm:p-10 space-y-4">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-mono font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">
-                    Official CTVill Construct Archive
-                  </span>
-                  <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-[10px] font-mono px-2.5 py-1 rounded-full font-bold">
-                    48 High-Res Photos • 4 CAD Blueprints
-                  </span>
+          {/* Paginated 12-Card Grid */}
+          {(() => {
+            const { items, total, hasMore } = getPaginatedLdmAssets(portfolioTab, portfolioVisibleCount);
+            return (
+              <div className="space-y-10">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                  {items.map((asset) => (
+                    <div
+                      key={asset.id}
+                      onClick={() => setLightboxAsset(asset)}
+                      className={`group ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200'} border hover:border-amber-500/60 rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition-all duration-300 flex flex-col justify-between cursor-pointer`}
+                    >
+                      <div className={`h-48 overflow-hidden relative border-b ${isDark ? 'border-slate-800/80 bg-slate-950' : 'border-slate-200 bg-slate-100'}`}>
+                        <OptimizedLdmImage
+                          src={asset.url}
+                          alt={asset.title}
+                          className="w-full h-full transform group-hover:scale-105 transition-transform duration-500"
+                        />
+                        <div className="absolute top-2.5 left-2.5 preserve-dark-surface bg-slate-900/75 backdrop-blur-md text-white border border-white/20 text-[9px] font-mono font-bold px-2.5 py-0.5 rounded-full shadow-md">
+                          {asset.categoryLabel}
+                        </div>
+                        <div className="absolute bottom-2.5 right-2.5 preserve-dark-surface bg-slate-950/80 text-white font-mono text-[9px] px-2 py-0.5 rounded flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Eye className="w-3 h-3 text-amber-400" />
+                          <span>View High-Res</span>
+                        </div>
+                      </div>
+
+                      <div className={`p-4 space-y-2 flex-1 flex flex-col justify-between ${isDark ? 'bg-slate-900/60 text-slate-200' : 'bg-white text-slate-900'}`}>
+                        <div>
+                          <h4 className={`font-sans font-bold text-xs ${isDark ? 'text-white' : 'text-slate-900'} group-hover:text-amber-500 transition-colors line-clamp-2`}>
+                            {asset.title}
+                          </h4>
+                          <p className={`text-[10px] font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'} mt-1 flex items-center gap-1.5`}>
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400/80"></span>
+                            Verified Project Archive
+                          </p>
+                        </div>
+                        <div className={`pt-2 flex items-center justify-between border-t ${isDark ? 'border-slate-800/60 text-amber-400/90' : 'border-slate-200 text-amber-600'} text-[10px] font-mono`}>
+                          <span>LDM Genuine Photo</span>
+                          <span className={`${isDark ? 'text-slate-400' : 'text-slate-500'} group-hover:translate-x-1 transition-transform`}>➔</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <h3 className="font-sans font-black text-2xl sm:text-3xl text-white tracking-tight">
-                  Turnkey Commercial Fit-Out & Architectural Engineering
-                </h3>
-                <p className="text-xs sm:text-sm text-slate-300 leading-relaxed max-w-xl">
-                  Every workspace is built from ground-up CAD schematics to certified turnover. Explore our complete documentation archive below — featuring authentic high-definition photography, architectural floor plans, and spatial execution notes across BPO centers, software headquarters, and commercial retail.
-                </p>
-                <div className="flex flex-wrap gap-4 pt-2 text-xs font-mono text-slate-400">
-                  <div className="flex items-center gap-1.5 text-slate-200">
-                    <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>2D CAD Architectural Blueprints</span>
+
+                {/* Load More Bar */}
+                <div className={`flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600'}`}>
+                  <div className="text-xs font-mono text-slate-400">
+                    Showing <span className="font-bold text-white">{items.length}</span> of{' '}
+                    <span className="font-bold text-white">{total}</span> assets in{' '}
+                    <span className="text-amber-400 uppercase">{portfolioTab}</span>
                   </div>
-                  <div className="flex items-center gap-1.5 text-slate-200">
-                    <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>Strict 1-to-3 Month Handover Cycles</span>
-                  </div>
-                  <div className="flex items-center gap-1.5 text-slate-200">
-                    <CheckCircle2 className="w-4 h-4 text-amber-400 shrink-0" />
-                    <span>PCAB & MACEA Compliant</span>
-                  </div>
+
+                  {hasMore && (
+                    <button
+                      type="button"
+                      onClick={() => setPortfolioVisibleCount((prev) => prev + 12)}
+                      className="px-6 py-3 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition-all flex items-center gap-2"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Load 12 More Projects (Showing {items.length} of {total})</span>
+                    </button>
+                  )}
                 </div>
               </div>
-              <div className="lg:col-span-5 h-64 lg:h-full min-h-[220px] relative overflow-hidden border-t lg:border-t-0 lg:border-l border-slate-800">
-                <img 
-                  src={introOuter} 
-                  alt="CTVill Construct Portfolio Showcase" 
-                  className="w-full h-full object-cover object-center transform hover:scale-105 transition-transform duration-700"
-                  loading="lazy"
-                  decoding="async"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/40 via-transparent to-transparent pointer-events-none" />
-              </div>
+            );
+          })()}
+        </div>
+      </section>
+
+      {/* SECTION 2 — INTERACTIVE 360° VIRTUAL TOURS (KUULA INTEGRATION) */}
+      <section className="py-20 bg-slate-900/60 border-b border-slate-800" id="virtual-tours">
+        <div className="max-w-7xl mx-auto px-6">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-10">
+            <div>
+              <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full px-4 py-1 text-xs font-mono font-bold uppercase inline-block mb-3">
+                360° VIRTUAL TOURS • INTERACTIVE WALKTHROUGHS
+              </span>
+              <h2 className="font-sans font-black text-3xl sm:text-4xl text-white tracking-tight">
+                Walk Through Your Space Before Groundbreaking
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-400 mt-2 max-w-2xl">
+                Experience full spatial depth, cove lighting schemes, and custom millwork proportions before pouring concrete. Switch between authentic LDM interactive 360° Kuula collections below.
+              </p>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setIsTourLoaded(true);
+                const tourEl = document.getElementById('virtual-tours');
+                if (tourEl) tourEl.scrollIntoView({ behavior: 'smooth' });
+              }}
+              className="px-4 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 rounded-xl text-xs font-black flex items-center gap-2 shrink-0 shadow-lg shadow-amber-500/20 cursor-pointer"
+            >
+              <Eye className="w-3.5 h-3.5 text-slate-950" />
+              <span>Explore Interactive 360° Tour</span>
+            </button>
           </div>
 
-          {/* Project Grid */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {filteredProjects.map((project) => (
-              <div 
-                key={project.id}
-                onClick={() => handleOpenProject(project)}
-                className="bg-slate-900/70 border border-slate-800 hover:border-amber-500/60 rounded-3xl overflow-hidden shadow-2xl transition-all duration-300 flex flex-col justify-between group cursor-pointer"
-              >
-                <div className="h-64 overflow-hidden relative border-b border-slate-800">
-                  <img 
-                    src={project.outerImg} 
-                    alt={project.title} 
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                  <div className="absolute top-4 left-4 flex flex-wrap gap-2">
-                    <span className="bg-slate-950/95 border border-slate-800 text-amber-300 text-[10px] font-mono px-2.5 py-1 rounded-full font-bold shadow-md">
-                      {project.categoryLabel}
-                    </span>
-                    <span className="bg-emerald-950/95 border border-emerald-700 text-emerald-300 text-[10px] font-mono px-2.5 py-1 rounded-full font-bold shadow-md">
-                      {project.timeline}
-                    </span>
-                    <span className="bg-slate-900/95 border border-slate-700 text-slate-300 text-[10px] font-mono px-2.5 py-1 rounded-full font-bold shadow-md">
-                      {project.year}
-                    </span>
+          {(() => {
+            const kuulaTours = [
+              {
+                id: 'tour-1',
+                tabLabel: '68 SQM Seafront Condominium 360°',
+                title: '68 SQM Seafront Condominium — Full Interior 360°',
+                subtitle: 'Interactive 360° spatial walkthrough featuring custom fluted wood panelling, smoked-mirror dining feature wall, and modern open-plan condo layout.',
+                embedUrl: 'https://kuula.co/share/collection/793SS?logo=1&info=1&fs=1&vr=0&sd=1&autorotate=0.14&autop=20&thumbs=3',
+                coverImg: ldmInteriorAssets[0]?.url || ldmHeroShowcaseAssets[1]?.url || '',
+                highlights: 'Custom Fluted Wood Panelling • Smoked-Mirror Dining Feature Wall • Modern Open-Plan Layout',
+              },
+              {
+                id: 'tour-2',
+                tabLabel: '2-Storey Modern Farmhouse 360°',
+                title: 'Modern Farmhouse — 2nd Floor & Master Suite 360°',
+                subtitle: 'Full 360° panoramic walkthrough of the 2nd-floor bedroom suites, minimalist white wardrobe millwork, and warm timber flooring.',
+                embedUrl: 'https://kuula.co/share/collection/79yKn?logo=1&info=1&fs=1&vr=0&sd=1&autorotate=0.45&autop=20&thumbs=3',
+                coverImg: ldmInteriorAssets[1]?.url || ldmHeroShowcaseAssets[3]?.url || '',
+                highlights: '2nd-Floor Master Suite • Minimalist White Wardrobe Millwork • Warm Timber Flooring',
+              },
+            ];
+            const currentTour = kuulaTours[activeTourRoom] || kuulaTours[0];
+
+            return (
+              <div className="preserve-dark-surface bg-[#0B0F19] border border-slate-800 rounded-3xl p-5 sm:p-6 space-y-5 shadow-2xl" style={{ backgroundColor: '#0B0F19' }}>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex flex-wrap gap-2">
+                    {kuulaTours.map((tour, idx) => (
+                      <button
+                        key={tour.id}
+                        type="button"
+                        onClick={() => {
+                          setActiveTourRoom(idx);
+                        }}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-mono font-bold cursor-pointer transition-all ${
+                          activeTourRoom === idx
+                            ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
+                            : 'bg-slate-950 border border-slate-800 text-slate-300 hover:border-amber-500/40'
+                        }`}
+                      >
+                        {tour.tabLabel}
+                      </button>
+                    ))}
                   </div>
-                  <div className="absolute bottom-4 left-4 bg-amber-500/90 text-slate-950 font-mono text-[10px] font-bold px-2.5 py-1 rounded-lg flex items-center gap-1.5 shadow-md">
-                    <Eye className="w-3 h-3" />
-                    <span>{project.bannerImgs.length} Photos + CAD Blueprint</span>
-                  </div>
-                  <div className="absolute bottom-4 right-4 bg-slate-950/90 border border-slate-800 px-3 py-1 rounded-lg text-xs font-mono text-slate-300 shadow-md">
-                    {project.area}
-                  </div>
+                  <span className="text-[11px] font-mono text-emerald-400 font-bold flex items-center gap-1.5">
+                    <Compass className="w-4 h-4" />
+                    <span>AUTHENTIC LDM KUULA 360° COLLECTION #{activeTourRoom + 1}</span>
+                  </span>
                 </div>
 
-                <div className="p-6 sm:p-8 space-y-4 flex-1 flex flex-col justify-between">
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="font-sans font-black text-2xl text-white group-hover:text-amber-400 transition-colors">
-                          {project.title}
-                        </h3>
-                        <p className="text-xs text-amber-400/90 font-mono font-medium">
-                          {project.subtitle} • {project.location}
+                <div className="preserve-dark-surface relative h-[420px] sm:h-[540px] rounded-2xl overflow-hidden border border-slate-800 bg-[#0B0F19]" style={{ backgroundColor: '#0B0F19' }}>
+                  {isTourLoaded ? (
+                    <iframe
+                      key={currentTour.id}
+                      src={currentTour.embedUrl}
+                      title={currentTour.title}
+                      className="w-full h-full border-0 rounded-2xl"
+                      allowFullScreen
+                      loading="lazy"
+                      allow="xr-spatial-tracking; gyroscope; accelerometer; fullscreen"
+                    />
+                  ) : (
+                    <>
+                      <img
+                        src={currentTour.coverImg}
+                        alt={currentTour.title}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/60 to-slate-950/40 flex flex-col items-center justify-center p-6 text-center space-y-4">
+                        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-mono font-bold">
+                          <Eye className="w-4 h-4" />
+                          <span>INTERACTIVE 360° VIRTUAL WALKTHROUGH</span>
+                        </div>
+                        <div
+                          className="virtual-tour-overlay preserve-dark-surface max-w-xl text-white border border-white/15 p-5 sm:p-6 rounded-2xl shadow-2xl"
+                          style={{ backgroundColor: 'rgba(11, 15, 25, 0.84)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' }}
+                        >
+                          <h3 className="text-xl sm:text-2xl font-black text-white">{currentTour.title}</h3>
+                          <p className="tour-subtitle text-xs sm:text-sm text-[#E2E8F0] mt-1">{currentTour.subtitle}</p>
+                          <p className="tour-highlights text-[11px] font-mono text-[#FBBF24] mt-2 font-bold">{currentTour.highlights}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setIsTourLoaded(true)}
+                          className="px-6 py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs sm:text-sm rounded-xl cursor-pointer shadow-xl shadow-amber-500/25 flex items-center gap-2.5 transition-all group hover:scale-[1.02]"
+                        >
+                          <Eye className="w-4 h-4 text-slate-950" />
+                          <span>Launch Interactive 360° Tour</span>
+                          <ArrowRight className="w-4 h-4 text-slate-950 group-hover:translate-x-1 transition-transform" />
+                        </button>
+                        <p className="text-[10px] font-mono text-slate-400">
+                          Click-to-Load facade ensures fast initial page loads • Kuula WebXR Engine
                         </p>
                       </div>
-                    </div>
-                    
-                    <p className="text-xs text-slate-300 leading-relaxed pt-2">
-                      {project.headline} — {project.story.substring(0, 190)}...
-                    </p>
+                    </>
+                  )}
+                </div>
+
+                <div className="preserve-dark-surface flex flex-col sm:flex-row items-center justify-between gap-4 bg-[#0B0F19] border border-slate-800 rounded-2xl p-3.5 text-xs text-slate-400" style={{ backgroundColor: '#0B0F19' }}>
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Real-time panoramic view with gyroscope, full-screen and zoom controls.</span>
                   </div>
-
-                  <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between">
-                    <div className="flex items-center gap-2.5">
-                      <img 
-                        src={project.designerImg} 
-                        alt={project.designer} 
-                        className="w-8 h-8 rounded-full object-cover border border-slate-700"
-                        loading="lazy"
-                        decoding="async"
-                      />
-                      <div className="text-[10px]">
-                        <span className="text-slate-400 block">Lead Designer</span>
-                        <strong className="text-slate-200 font-medium">{project.designer}</strong>
-                      </div>
-                    </div>
-
+                  {isTourLoaded && (
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleOpenProject(project);
-                      }}
-                      className="px-4 py-2 bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-200 text-xs font-bold rounded-xl cursor-pointer transition-all flex items-center gap-1.5 group-hover:shadow-md"
+                      type="button"
+                      onClick={() => setIsTourLoaded(false)}
+                      className="text-amber-400 hover:text-amber-300 font-mono font-bold text-xs underline cursor-pointer bg-transparent border-0 p-0"
                     >
-                      <span>Explore Gallery ({project.bannerImgs.length})</span>
-                      <ArrowRight className="w-3.5 h-3.5" />
+                      Reset / Close Embed
                     </button>
-                  </div>
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
-
+            );
+          })()}
         </div>
       </section>
 
@@ -1450,7 +1122,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
               Turnkey Accountability After Turnover
             </h2>
             <p className="text-xs sm:text-sm text-slate-400">
-              Our commitment never terminates when the physical fit-out finishes. CTVill backs every commercial space with contractual warranties, punch-list rectifications, and occupancy permit closeout.
+              Our commitment never terminates when construction finishes. LDM Construction backs every residential and commercial build with contractual warranties, punch-list rectifications, and occupancy permit closeout.
             </p>
           </div>
 
@@ -1487,7 +1159,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
               <span className="font-mono text-4xl font-black text-amber-400/40 block">03</span>
               <h3 className="font-sans font-bold text-lg text-white">Occupancy Permitting</h3>
               <p className="text-xs text-slate-400 leading-relaxed">
-                We manage the complex bureaucratic processing of final Occupancy Permits, Fire Safety Inspection Certificates (FSIC), and PEZA final operations licenses.
+                We manage the end-to-end processing of final Occupancy Permits, Fire Safety Inspection Certificates (FSIC), and LGU municipal clearances.
               </p>
               <div className="pt-2 text-[11px] font-mono text-blue-400 font-bold flex items-center gap-1.5">
                 <FileCheck className="w-4 h-4 text-blue-400" />
@@ -1509,10 +1181,10 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
               COMMERCIAL TOOLS • ADMIN-CONFIGURED BENCHMARKS
             </span>
             <h2 className="font-sans font-black text-3xl sm:text-4xl text-white tracking-tight">
-              Commercial Fit-Out Cost & Timeline Estimator
+              LDM Project Cost &amp; Timeline Estimator
             </h2>
             <p className="text-xs sm:text-sm text-slate-400 max-w-xl mx-auto">
-              Configure your space category, exact floor area (drag the slider or type an exact square meterage), and architectural finish grade to preview live timelines and budget estimates.
+              Select your Design &amp; Build category, exact floor area (drag the slider or type an exact square meterage), and finish package to preview live timelines and budget estimates.
             </p>
           </div>
 
@@ -1539,14 +1211,28 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                       key={item.id}
                       type="button"
                       onClick={() => setEstimatorSpaceType(item.id)}
-                      className={`p-2.5 rounded-xl text-xs font-semibold cursor-pointer transition-all text-left flex items-center justify-between ${
+                      className={`p-3 rounded-xl text-xs cursor-pointer transition-all text-left flex items-center justify-between ${
                         estimatorSpaceType === item.id
-                          ? 'bg-amber-500 text-slate-950 font-bold shadow-md'
-                          : 'bg-slate-950 border border-slate-800 text-slate-300 hover:border-slate-700'
+                          ? isDark
+                            ? 'bg-amber-500/15 border-2 border-amber-500 text-white shadow-md'
+                            : 'bg-[#FFFBEB] border-2 border-[#D97706] ring-3 ring-amber-600/12 text-[#0F172A] shadow-xs'
+                          : isDark
+                            ? 'bg-slate-950 border border-slate-800 text-slate-400 hover:border-slate-700'
+                            : 'bg-[#F8FAFC] border border-[#CBD5E1] text-[#1E293B] hover:border-slate-400 shadow-2xs'
                       }`}
                     >
-                      <span>{item.label}</span>
-                      <span className={`text-[10px] font-mono ${estimatorSpaceType === item.id ? 'text-slate-950/80 font-extrabold' : 'text-slate-500'}`}>
+                      <span className={estimatorSpaceType === item.id ? (isDark ? 'font-bold text-white' : 'font-bold text-[#0F172A]') : (isDark ? 'text-slate-400' : 'text-[#1E293B] font-semibold')}>
+                        {item.label}
+                      </span>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md ${
+                        estimatorSpaceType === item.id
+                          ? isDark
+                            ? 'bg-emerald-950/60 text-[#34D399] border border-emerald-500/30 font-bold'
+                            : 'bg-[#D1FAE5] text-[#065F46] border border-[#34D399] font-bold'
+                          : isDark
+                            ? 'text-slate-500 font-medium'
+                            : 'text-[#64748B] font-medium'
+                      }`}>
                         ₱{Number(estimatorConfig.categories[item.id].baseRatePerSqm).toLocaleString()}/sqm
                       </span>
                     </button>
@@ -1557,20 +1243,20 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
               {/* Dual Floor Area Control: Synchronized Slider + Exact Numeric Input */}
               <div className="space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
-                  <span className="text-slate-400 font-bold">2. FLOOR AREA (EXACT SQM):</span>
+                  <span className={`${isDark ? 'text-slate-400' : 'text-slate-600'} font-bold`}>2. FLOOR AREA (EXACT SQM):</span>
                   <div className="flex items-center gap-2">
                     <div className="relative flex items-center">
                       <input
                         type="number"
-                        min="1"
+                        min="25"
                         max="5000"
                         step="1"
                         value={estimatorArea}
                         onChange={(e) => handleAreaChange(e.target.value)}
                         aria-label="Exact Floor Area in Square Meters"
-                        className="w-28 bg-slate-950 border border-amber-500/60 focus:border-amber-400 rounded-xl pl-3 pr-11 py-1.5 text-sm font-mono font-black text-amber-400 text-right focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                        className={`w-28 ${isDark ? 'bg-slate-950 text-amber-400' : 'bg-white text-amber-600'} border border-amber-500/60 focus:border-amber-400 rounded-xl pl-3 pr-11 py-1.5 text-sm font-mono font-black text-right focus:outline-none focus:ring-2 focus:ring-amber-500/20`}
                       />
-                      <span className="absolute right-2.5 text-[10px] font-mono font-bold text-slate-400 pointer-events-none">
+                      <span className={`absolute right-2.5 text-[10px] font-mono font-bold ${isDark ? 'text-slate-400' : 'text-slate-500'} pointer-events-none`}>
                         SQM
                       </span>
                     </div>
@@ -1578,32 +1264,32 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                 </div>
                 <input
                   type="range"
-                  min="1"
-                  max="5000"
+                  min="25"
+                  max="1000"
                   step="1"
-                  value={Math.min(5000, Math.max(1, estimatorArea))}
+                  value={Math.min(1000, Math.max(25, estimatorArea))}
                   onChange={(e) => handleAreaChange(e.target.value)}
-                  className="w-full h-2 bg-slate-950 rounded-lg cursor-pointer accent-amber-500"
+                  className={`w-full h-2 ${isDark ? 'bg-slate-950' : 'bg-slate-200'} rounded-lg cursor-pointer accent-amber-500`}
                 />
-                <div className="flex justify-between text-[10px] font-mono text-slate-500">
-                  <button type="button" onClick={() => handleAreaChange(67)} className="hover:text-amber-400 transition-colors cursor-pointer">
-                    67 sqm (Boutique/Retail)
+                <div className={`flex justify-between text-[10px] font-mono ${isDark ? 'text-slate-500' : 'text-slate-600'}`}>
+                  <button type="button" onClick={() => handleAreaChange(67)} className="hover:text-amber-500 transition-colors cursor-pointer">
+                    67 sqm (A-Frame / Studio)
                   </button>
-                  <button type="button" onClick={() => handleAreaChange(350)} className="hover:text-amber-400 transition-colors cursor-pointer">
-                    350 sqm (Tech HQ)
+                  <button type="button" onClick={() => handleAreaChange(180)} className="hover:text-amber-500 transition-colors cursor-pointer">
+                    180 sqm (Standard Home)
                   </button>
-                  <button type="button" onClick={() => handleAreaChange(1000)} className="hover:text-amber-400 transition-colors cursor-pointer">
-                    1,000 sqm (BPO Floor)
+                  <button type="button" onClick={() => handleAreaChange(320)} className="hover:text-amber-500 transition-colors cursor-pointer">
+                    320 sqm (Luxury Villa)
                   </button>
-                  <button type="button" onClick={() => handleAreaChange(2500)} className="hover:text-amber-400 transition-colors cursor-pointer">
-                    2,500+ sqm (Enterprise)
+                  <button type="button" onClick={() => handleAreaChange(500)} className="hover:text-amber-500 transition-colors cursor-pointer">
+                    500+ sqm (Multi-Unit)
                   </button>
                 </div>
               </div>
 
               {/* Quality Finish Tier */}
               <div className="space-y-2">
-                <label className="block text-xs font-mono text-slate-400 font-bold uppercase">
+                <label className={`block text-xs font-mono ${isDark ? 'text-slate-400' : 'text-slate-600'} font-bold uppercase`}>
                   3. SPECIFICATION & FINISH TIER
                 </label>
                 <div className="grid grid-cols-3 gap-2">
@@ -1620,12 +1306,26 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                       onClick={() => setEstimatorTier(tier.id)}
                       className={`p-2.5 rounded-xl text-[11px] font-mono cursor-pointer transition-all text-center flex flex-col items-center justify-center gap-0.5 ${
                         estimatorTier === tier.id
-                          ? 'bg-amber-500 text-slate-950 font-bold shadow-md'
-                          : 'bg-slate-950 border border-slate-800 text-slate-400 hover:border-slate-700'
+                          ? isDark
+                            ? 'bg-amber-500/15 border-2 border-amber-500 text-white shadow-md'
+                            : 'bg-[#FFFBEB] border-2 border-[#D97706] ring-3 ring-amber-600/12 text-[#0F172A] shadow-xs'
+                          : isDark
+                            ? 'bg-slate-950 border border-slate-800 text-slate-400 hover:border-slate-700'
+                            : 'bg-[#F8FAFC] border border-[#CBD5E1] text-[#1E293B] hover:border-slate-400 shadow-2xs'
                       }`}
                     >
-                      <span>{tier.label}</span>
-                      <span className={`text-[9px] ${estimatorTier === tier.id ? 'text-slate-950/80 font-extrabold' : 'text-slate-500'}`}>
+                      <span className={estimatorTier === tier.id ? (isDark ? 'font-bold text-white' : 'font-bold text-[#0F172A]') : (isDark ? 'text-slate-400' : 'text-[#1E293B] font-semibold')}>
+                        {tier.label}
+                      </span>
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${
+                        estimatorTier === tier.id
+                          ? isDark
+                            ? 'text-[#34D399] font-bold'
+                            : 'text-[#065F46] font-bold'
+                          : isDark
+                            ? 'text-slate-500 font-medium'
+                            : 'text-[#64748B] font-medium'
+                      }`}>
                         ₱{Number(currentRates[tier.id]).toLocaleString()}/sqm ({tier.mult}x)
                       </span>
                     </button>
@@ -1636,35 +1336,35 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
             </div>
 
             {/* Results Preview Box */}
-            <div className="md:col-span-5 bg-gradient-to-b from-slate-950 to-slate-900 border border-slate-800 rounded-2xl p-6 space-y-5 text-center shadow-inner">
-              <span className="text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold block">
+            <div className={`md:col-span-5 ${isDark ? 'bg-gradient-to-b from-slate-950 to-slate-900 border-slate-800' : 'bg-[#F8FAFC] border-[#CBD5E1]'} border rounded-2xl p-6 space-y-5 text-center shadow-inner`}>
+              <span className={`text-[10px] font-mono uppercase tracking-wider ${isDark ? 'text-amber-400' : 'text-[#0F172A]'} font-bold block`}>
                 PRELIMINARY BALLPARK ESTIMATE ({safeEstimatorArea.toLocaleString()} SQM)
               </span>
 
               <div className="space-y-1">
-                <div className="text-3xl sm:text-4xl font-extrabold font-mono text-amber-400">
+                <div className={`text-3xl sm:text-4xl font-extrabold font-mono ${isDark ? 'text-amber-400' : 'text-[#B45309]'}`}>
                   ₱{estimatedCost.toLocaleString()}
                 </div>
-                <p className="text-[11px] text-slate-400 font-mono">
+                <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-[#475569]'} font-mono`}>
                   {safeEstimatorArea.toLocaleString()} sqm &times; ₱{ratePerSqm.toLocaleString()}/sqm ({estimatorConfig.tierLabels[estimatorTier]})
                 </p>
               </div>
 
-              <div className="pt-3 border-t border-slate-800 grid grid-cols-2 gap-2 text-xs font-mono text-slate-300">
-                <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                  <span className="text-[9px] text-slate-500 block">EST. TIMELINE</span>
-                  <strong className="text-white text-sm">~{estimatedWeeks} Weeks</strong>
+              <div className={`pt-3 border-t ${isDark ? 'border-slate-800 text-slate-300' : 'border-[#CBD5E1] text-slate-700'} grid grid-cols-2 gap-2 text-xs font-mono`}>
+                <div className={`${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-[#CBD5E1] shadow-2xs'} p-2.5 rounded-lg border`}>
+                  <span className={`text-[9px] ${isDark ? 'text-slate-500' : 'text-[#64748B]'} block`}>EST. TIMELINE</span>
+                  <strong className={`${isDark ? 'text-white' : 'text-[#0F172A]'} text-sm`}>~{estimatedWeeks} Weeks</strong>
                 </div>
-                <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800">
-                  <span className="text-[9px] text-slate-500 block">RATE / SQM</span>
-                  <strong className="text-emerald-400 text-sm">₱{ratePerSqm.toLocaleString()}</strong>
+                <div className={`${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-[#CBD5E1] shadow-2xs'} p-2.5 rounded-lg border`}>
+                  <span className={`text-[9px] ${isDark ? 'text-slate-500' : 'text-[#64748B]'} block`}>RATE / SQM</span>
+                  <strong className={`${isDark ? 'text-emerald-400' : 'text-[#065F46]'} text-sm`}>₱{ratePerSqm.toLocaleString()}</strong>
                 </div>
               </div>
 
-              <div className="text-[10px] text-slate-500 font-mono text-left leading-relaxed bg-slate-950/70 p-3 rounded-lg border border-slate-800/80">
+              <div className={`text-[10px] ${isDark ? 'text-slate-400 bg-slate-950/70 border-slate-800/80' : 'text-[#475569] bg-white border-[#CBD5E1]'} font-mono text-left leading-relaxed p-3 rounded-lg border`}>
                 ✓ Includes Architectural Drawings & 3D Renders<br />
                 ✓ Includes Structural, MEPFS & FDAS Engineering<br />
-                ✓ Includes City Hall, PEZA & Admin Permitting Support
+                ✓ Includes City Hall, Subdivision & LGU Permitting Support
               </div>
 
               <button
@@ -1672,7 +1372,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   setProjectScope(`Turnkey Fit-Out (${safeEstimatorArea} sqm ${currentRates.label} - ${estimatorConfig.tierLabels[estimatorTier]})`);
                   setShowQuoteModal(true);
                 }}
-                className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-1.5"
+                className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black rounded-xl text-xs cursor-pointer shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-1.5"
               >
                 <span>Request Official Line-Item Bid</span>
                 <ArrowRight className="w-3.5 h-3.5" />
@@ -1722,7 +1422,6 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                 .join('')
                 .toUpperCase()
                 .slice(0, 2);
-              const isMakePlace = rev.clientName.toLowerCase().includes('make place');
               return (
                 <div
                   key={rev.id}
@@ -1747,19 +1446,9 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   </div>
 
                   <div className="pt-3 border-t border-slate-800 flex items-center gap-3">
-                    {isMakePlace ? (
-                      <img
-                        src={designerMakeplace}
-                        alt="Make Place Studio"
-                        className="w-10 h-10 rounded-xl object-cover border border-slate-700 shrink-0"
-                        loading="lazy"
-                        decoding="async"
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-xs shrink-0">
-                        {initials}
-                      </div>
-                    )}
+                    <div className="w-10 h-10 rounded-xl bg-amber-500 text-slate-950 font-black flex items-center justify-center text-xs shrink-0 shadow-sm">
+                      {initials}
+                    </div>
                     <div className="min-w-0">
                       <h4 className="font-bold text-xs text-white truncate">{rev.clientName}</h4>
                       <p className="text-[10px] text-slate-400 font-mono truncate">
@@ -1798,16 +1487,14 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                     <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-amber-400 shrink-0">
                       <MapPin className="w-4 h-4" />
                     </div>
-                    <span>Unit 201-202B Centennial Plaza Bldg., Brgy. San Isidro, Cabuyao, Laguna</span>
+                    <span>LDM Construction — Engineers • Architects • Builders ("Giving Life to Your Dreams")</span>
                   </div>
                   <div className="flex items-center gap-3 text-slate-300">
                     <div className="w-8 h-8 rounded-lg bg-slate-900 border border-slate-800 flex items-center justify-center text-amber-400 shrink-0">
                       <Phone className="w-4 h-4" />
                     </div>
                     <span>
-                      <a href="tel:0495447724" className="hover:text-amber-400 transition-colors" title="Call Laguna Landline">(049) 544 7724</a> •{' '}
-                      <a href="tel:09338278885" className="hover:text-amber-400 transition-colors" title="Call Mobile 1">0933-827-8885</a> •{' '}
-                      <a href="tel:09162974604" className="hover:text-amber-400 transition-colors" title="Call Mobile 2">0916-297-4604</a>
+                      <a href="tel:+639456810515" className="hover:text-amber-400 transition-colors" title="Call / Viber / WhatsApp">(+63) 945 681 0515</a> (Phone / Viber / WhatsApp)
                     </span>
                   </div>
                   <div className="flex items-center gap-3 text-slate-300">
@@ -1815,15 +1502,34 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                       <Mail className="w-4 h-4" />
                     </div>
                     <span>
-                      <a href="mailto:concierge@ctvill.com?subject=General%20Inquiry%20-%20CTVill" className="hover:text-amber-400 transition-colors underline decoration-slate-700 hover:decoration-amber-400" title="Email Concierge Desk">concierge@ctvill.com</a> (queries) •{' '}
-                      <a href="mailto:estimate@ctvill.com?subject=Fit-Out%20Quotation%20Request%20-%20CTVill" className="hover:text-amber-400 transition-colors underline decoration-slate-700 hover:decoration-amber-400" title="Email Estimator Desk">estimate@ctvill.com</a> (quotations)
+                      <a href="mailto:ldmengineeringdesign@gmail.com?subject=Design%20%26%20Build%20Inquiry%20-%20LDM%20Construction" className="hover:text-amber-400 transition-colors underline decoration-slate-700 hover:decoration-amber-400" title="Email LDM Construction">ldmengineeringdesign@gmail.com</a>
                     </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-3 pt-1">
+                    <a
+                      href="https://www.facebook.com/ldm.designbuild"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-amber-300 text-[11px] flex items-center gap-1.5"
+                    >
+                      <span>Facebook: ldm.designbuild</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                    <a
+                      href="https://ldmconstruction.my.canva.site/ldmportfolio/interior-designs"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 hover:border-amber-500/50 text-amber-300 text-[11px] flex items-center gap-1.5"
+                    >
+                      <span>Design Portfolio</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
                   </div>
                 </div>
               </div>
 
               {/* Interactive Quotation Launcher Box */}
-              <div className="lg:col-span-6 bg-slate-950 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-4">
+              <div className={`lg:col-span-6 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-[#F4F6F9] border-[#CBD5E1]'} border rounded-2xl p-6 sm:p-8 space-y-4`}>
                 <h3 className="font-sans font-bold text-lg text-white">
                   Fast-Track Your Fit-Out Bid
                 </h3>
@@ -1913,7 +1619,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                         ? 'Validating & Dispatching...'
                         : quoteCooldownSec > 0
                         ? `Request Sent • Cooldown (${quoteCooldownSec}s)`
-                        : 'Submit to Estimating Desk (estimate@ctvill.com)'}
+                        : 'Submit to Estimating Desk (ldmengineeringdesign@gmail.com)'}
                     </span>
                   </button>
                 </form>
@@ -1926,27 +1632,47 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
       </section>
 
       {/* 10. FOOTER */}
-      <footer className="bg-slate-950 text-slate-400 pt-16 pb-8 border-t border-slate-800 font-sans" id="corporate-footer">
+      <footer className="preserve-dark-surface bg-[#0B0F19] text-slate-400 pt-16 pb-8 border-t border-slate-800 font-sans" id="corporate-footer" style={{ backgroundColor: '#0B0F19' }}>
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10 pb-12 border-b border-slate-800">
             
             {/* Brand Profile */}
             <div className="lg:col-span-4 space-y-4 text-left">
               <div className="flex items-center gap-3">
-                <div className="h-10 w-10 rounded-xl bg-black border border-slate-800 flex items-center justify-center shadow-md shrink-0 overflow-hidden">
-                  <img src={logoJpg} alt="CTVill Logo" className="w-full h-full object-cover" loading="lazy" decoding="async" />
+                <div className="bg-white rounded-lg p-1.5 shadow-sm border border-slate-200/80 shrink-0">
+                  <img src={PRIMARY_LDM_LOGO} alt="LDM Construction" className="h-9 w-auto object-contain" />
                 </div>
-                <span className="font-sans font-black text-white text-base tracking-tight">
-                  CTVILL DESIGN & CONSTRUCTION
-                </span>
+                <div>
+                  <span className="font-sans font-black text-white text-base tracking-tight block leading-tight">
+                    LDM CONSTRUCTION
+                  </span>
+                  <span className="text-[9px] font-mono text-amber-400 uppercase tracking-widest font-bold">
+                    ENGINEERS • ARCHITECTS • BUILDERS
+                  </span>
+                </div>
               </div>
               <p className="text-xs text-slate-400 leading-relaxed">
-                A premier commercial, corporate, and retail fit-out contractor uniting scientific ergonomics with innovative architecture across Metro Manila, Laguna, and nationwide.
+                "Giving Life to Your Dreams" — Full-service Architectural Design, Custom Interior Fit-Out, &amp; Turnkey Residential/Commercial Construction.
               </p>
-              <div className="space-y-1.5 pt-2 text-xs font-mono text-slate-400">
-                <p>Unit 201-202B Centennial Plaza Bldg.</p>
-                <p>Brgy. San Isidro, Cabuyao, Laguna, Philippines</p>
-                <p className="text-amber-400">(049) 544 7724 • 0933-827-8885</p>
+              <div className="space-y-2 pt-2 text-xs font-mono text-slate-400">
+                <div className="flex items-center gap-2">
+                  <Mail className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <a href="mailto:ldmengineeringdesign@gmail.com" className="hover:text-amber-400 transition-colors truncate">
+                    ldmengineeringdesign@gmail.com
+                  </a>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Phone className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <a href="tel:+639456810515" className="hover:text-amber-400 text-slate-300 font-medium transition-colors">
+                    (+63) 945 681 0515 <span className="text-slate-500 font-normal">(Viber / WhatsApp)</span>
+                  </a>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Globe className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <a href="https://www.facebook.com/ldm.designbuild" target="_blank" rel="noopener noreferrer" className="hover:text-amber-400 transition-colors">
+                    facebook.com/ldm.designbuild
+                  </a>
+                </div>
               </div>
             </div>
 
@@ -1956,12 +1682,12 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                 CORE WORKFLOWS
               </h4>
               <ul className="space-y-2.5 text-xs text-slate-400">
-                <li><a href="#create" className="hover:text-amber-400 transition-colors">01 Design Conceptualization</a></li>
-                <li><a href="#create" className="hover:text-amber-400 transition-colors">02 Engineering Design (MEPFS / FDAS)</a></li>
-                <li><a href="#create" className="hover:text-amber-400 transition-colors">03 Permitting (MACEA, PEZA, LGU)</a></li>
-                <li><a href="#create" className="hover:text-amber-400 transition-colors">04 Construction Planning & Gantt</a></li>
-                <li><a href="#construct" className="hover:text-amber-400 transition-colors">Turnkey Fit-Out Execution</a></li>
-                <li><a href="#aftercare" className="hover:text-amber-400 transition-colors">After Care & Warranty Support</a></li>
+                <li><a href="#create" className="hover:text-amber-400 transition-colors">01 Architectural Design &amp; 3D Visualization</a></li>
+                <li><a href="#create" className="hover:text-amber-400 transition-colors">02 Structural Engineering &amp; BOM Estimation</a></li>
+                <li><a href="#create" className="hover:text-amber-400 transition-colors">03 Permitting (City Hall &amp; LGU Approvals)</a></li>
+                <li><a href="#create" className="hover:text-amber-400 transition-colors">04 Master WBS &amp; Gantt Construction Planning</a></li>
+                <li><a href="#portfolio-showcase" className="hover:text-amber-400 transition-colors">05 Turnkey Construction &amp; Interior Fit-Out</a></li>
+                <li><a href="#aftercare" className="hover:text-amber-400 transition-colors">06 Handover, After-Care &amp; Warranty Support</a></li>
               </ul>
             </div>
 
@@ -1970,49 +1696,63 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
               <h4 className="text-[10px] font-mono font-bold text-slate-300 tracking-wider uppercase border-l-2 border-blue-500 pl-2">
                 PMS WORKSPACES
               </h4>
-              <ul className="space-y-2.5 text-xs">
+              <ul className="space-y-3 text-xs">
                 <li>
-                  <button onClick={handleSmoothEnterPortal} className="text-slate-400 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors bg-transparent border-none p-0">
-                    <Activity className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Executive Hub</span>
+                  <button onClick={handleSmoothEnterPortal} className="group text-left cursor-pointer transition-colors bg-transparent border-none p-0 block w-full">
+                    <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-amber-400 transition-colors">
+                      <Activity className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                      <span className="font-medium">Operations Manager Hub</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 block pl-5 font-mono">Executive &amp; Approvals</span>
                   </button>
                 </li>
                 <li>
-                  <button onClick={handleSmoothEnterPortal} className="text-slate-400 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors bg-transparent border-none p-0">
-                    <HardHat className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Site Quality Inspector</span>
+                  <button onClick={handleSmoothEnterPortal} className="group text-left cursor-pointer transition-colors bg-transparent border-none p-0 block w-full">
+                    <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-blue-400 transition-colors">
+                      <HardHat className="w-3.5 h-3.5 text-blue-400 shrink-0" />
+                      <span className="font-medium">Site Engineer &amp; PM Portal</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 block pl-5 font-mono">14-Phase Gantt &amp; Field Logs</span>
                   </button>
                 </li>
                 <li>
-                  <button onClick={handleSmoothEnterPortal} className="text-slate-400 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors bg-transparent border-none p-0">
-                    <Users className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Client Project Portal</span>
+                  <button onClick={handleSmoothEnterPortal} className="group text-left cursor-pointer transition-colors bg-transparent border-none p-0 block w-full">
+                    <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-emerald-400 transition-colors">
+                      <Calculator className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span className="font-medium">Finance &amp; BOM Commercial</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 block pl-5 font-mono">Quotations, Payroll &amp; Ledger</span>
                   </button>
                 </li>
                 <li>
-                  <button onClick={handleSmoothEnterPortal} className="text-slate-400 hover:text-white flex items-center gap-1.5 cursor-pointer transition-colors bg-transparent border-none p-0">
-                    <Scale className="w-3.5 h-3.5 text-purple-400" />
-                    <span>Permits & Compliance</span>
+                  <button onClick={handleSmoothEnterPortal} className="group text-left cursor-pointer transition-colors bg-transparent border-none p-0 block w-full">
+                    <div className="flex items-center gap-1.5 text-slate-300 group-hover:text-purple-400 transition-colors">
+                      <Clock className="w-3.5 h-3.5 text-purple-400 shrink-0" />
+                      <span className="font-medium">Timekeeper DTR Roll-Call</span>
+                    </div>
+                    <span className="text-[10px] text-slate-500 block pl-5 font-mono">Artisan Attendance &amp; Muster</span>
                   </button>
                 </li>
               </ul>
             </div>
 
-            {/* Design Collaborators */}
+            {/* Design & Build Studio */}
             <div className="lg:col-span-3 space-y-4 text-left">
               <h4 className="text-[10px] font-mono font-bold text-slate-300 tracking-wider uppercase border-l-2 border-emerald-500 pl-2">
-                PARTNER FIRMS
+                LDM DESIGN & BUILD STUDIO
               </h4>
               <div className="bg-slate-900 p-3.5 rounded-xl border border-slate-800 space-y-2">
                 <div className="flex items-center gap-2.5">
-                  <img src={designerMakeplace} alt="Make Place Studio" className="w-8 h-8 rounded-lg object-cover" loading="lazy" decoding="async" />
+                  <div className="bg-white rounded-lg p-1.5 shadow-sm border border-slate-200/80 shrink-0">
+                    <img src={PRIMARY_LDM_LOGO} alt="LDM Construction" className="h-7 w-auto object-contain" />
+                  </div>
                   <div>
-                    <h5 className="text-xs font-bold text-white leading-tight">Make Place Studio</h5>
-                    <p className="text-[10px] text-slate-400">Collaborative Design Partner</p>
+                    <h5 className="text-xs font-bold text-white leading-tight">LDM Design & Build Studio</h5>
+                    <p className="text-[10px] text-slate-400 font-mono">Engineers • Architects • Builders</p>
                   </div>
                 </div>
-                <p className="text-[11px] text-slate-400 leading-relaxed italic">
-                  "Creating meaningful, human-centered spaces with high aesthetic and experiential impact."
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Laguna / CALABARZON &amp; Metro Manila • Residential, Commercial &amp; Custom Interior Design-Build
                 </p>
               </div>
             </div>
@@ -2023,11 +1763,11 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
           <div className="py-6 flex flex-wrap items-center justify-between gap-6 border-b border-slate-800 text-[10px] font-mono text-slate-500">
             <div className="flex items-center gap-2">
               <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>PEZA PERMITTING & FIT-OUT CLEARANCE</span>
+              <span>LGU &amp; CITY HALL BUILDING PERMIT COMPLIANCE</span>
             </div>
             <div className="flex items-center gap-2">
               <Award className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>MACEA (MAKATI CBD) PROTOCOL QUALIFIED</span>
+              <span>SUBDIVISION &amp; HOA ARCHITECTURAL BOARD QUALIFIED</span>
             </div>
             <div className="flex items-center gap-2">
               <Building2 className="w-4 h-4 text-blue-400 shrink-0" />
@@ -2035,30 +1775,31 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
             </div>
             <div className="flex items-center gap-2">
               <CheckCircle2 className="w-4 h-4 text-purple-400 shrink-0" />
-              <span>FULL MEPFS & FDAS CODE ADHERENCE</span>
+              <span>FULL MEPFS &amp; FDAS CODE ADHERENCE</span>
             </div>
           </div>
 
           {/* Legal Notice */}
           <div className="pt-6 flex flex-col md:flex-row justify-between items-center gap-4 text-[10px] text-slate-500">
             <p>
-              &copy; {new Date().getFullYear()} CTVill Design & Construction. All rights reserved.
+              &copy; {new Date().getFullYear()} LDM Construction — Engineers • Architects • Builders. All rights reserved.
             </p>
             <div className="flex flex-wrap items-center justify-center md:justify-end gap-3 font-mono">
               <a 
-                href="mailto:concierge@ctvill.com?subject=General%20Inquiry%20-%20CTVill%20Design%20%26%20Construction"
+                href="mailto:ldmengineeringdesign@gmail.com?subject=Design%20%26%20Build%20Inquiry%20-%20LDM%20Construction"
                 className="hover:text-amber-400 transition-colors cursor-pointer"
-                title="Send inquiry to concierge@ctvill.com"
+                title="Email LDM Construction"
               >
-                concierge@ctvill.com
+                ldmengineeringdesign@gmail.com
               </a>
               <span>•</span>
               <a 
-                href="mailto:estimate@ctvill.com?subject=Fit-Out%20Quotation%20Request%20-%20CTVill%20Design%20%26%20Construction"
+                href="https://ldmconstruction.my.canva.site/ldmportfolio/interior-designs"
+                target="_blank"
+                rel="noopener noreferrer"
                 className="hover:text-amber-400 transition-colors cursor-pointer"
-                title="Send quotation request to estimate@ctvill.com"
               >
-                estimate@ctvill.com
+                Design Portfolio
               </a>
               <span>•</span>
               <button 
@@ -2075,319 +1816,57 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
         </div>
       </footer>
 
-      {/* MODAL: PROJECT DETAIL DEEP-DIVE WITH LIVE SYNCHRONIZED BLUEPRINT */}
-      {selectedProject && (
-        <div className="fixed inset-0 bg-black/92 flex items-center justify-center p-3 sm:p-6 z-50 animate-fadeIn overscroll-contain">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-4xl w-full p-5 sm:p-8 space-y-6 shadow-2xl animate-slideUp max-h-[92vh] overflow-y-auto transform-gpu overscroll-contain will-change-scroll [contain:paint]">
-            
-            {/* Modal Top Bar */}
-            <div className="flex items-start justify-between border-b border-slate-800 pb-4 gap-4">
-              <div className="space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-[10px] font-mono text-amber-400 bg-amber-400/10 border border-amber-500/30 px-2.5 py-0.5 rounded-full uppercase font-bold tracking-wider">
-                    {selectedProject.categoryLabel}
-                  </span>
-                  <span className="text-[10px] font-mono text-slate-300 bg-slate-800 border border-slate-700 px-2.5 py-0.5 rounded-full font-bold">
-                    Completed {selectedProject.year}
-                  </span>
-                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-bold">
-                    {selectedProject.timeline} Delivery
-                  </span>
-                </div>
-                <h3 className="text-2xl sm:text-3xl font-black text-white">{selectedProject.title}</h3>
-                <p className="text-xs text-slate-400 font-mono flex items-center gap-1.5">
-                  <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                  <span>{selectedProject.subtitle} • {selectedProject.location}</span>
-                </p>
-              </div>
-              <button 
-                onClick={() => setSelectedProject(null)}
-                className="w-9 h-9 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-300 flex items-center justify-center text-sm font-bold cursor-pointer transition-colors shrink-0"
-                title="Close modal"
-              >
-                ✕
-              </button>
-            </div>
-
-            {/* 1. Main Photo Carousel Viewport */}
-            <div className="h-64 sm:h-[400px] md:h-[440px] rounded-2xl border border-slate-800 relative bg-black flex items-center justify-center select-none group shadow-2xl overflow-hidden">
-              <img 
-                src={selectedProject.bannerImgs[modalActivePhotoIndex]} 
-                alt={`${selectedProject.title} Slide ${modalActivePhotoIndex + 1}`} 
-                className="w-full h-full object-cover transition-all duration-300"
-                decoding="async" 
-              />
-
-              {/* Previous Photo Button */}
-              <button
-                onClick={() => setModalActivePhotoIndex((prev) => (prev - 1 + selectedProject.bannerImgs.length) % selectedProject.bannerImgs.length)}
-                className="absolute left-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-slate-950/80 hover:bg-amber-500 hover:text-slate-950 text-white backdrop-blur-md border border-slate-800 transition-all cursor-pointer shadow-lg opacity-80 hover:opacity-100"
-                title="Previous Photo"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-
-              {/* Next Photo Button */}
-              <button
-                onClick={() => setModalActivePhotoIndex((prev) => (prev + 1) % selectedProject.bannerImgs.length)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-slate-950/80 hover:bg-amber-500 hover:text-slate-950 text-white backdrop-blur-md border border-slate-800 transition-all cursor-pointer shadow-lg opacity-80 hover:opacity-100"
-                title="Next Photo"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </button>
-
-              {/* Photo Counter Overlay */}
-              <span className="absolute top-3 right-3 bg-slate-950/85 backdrop-blur-md px-3 py-1 rounded-lg text-xs font-mono text-slate-200 border border-slate-800 shadow-md">
-                Photo {modalActivePhotoIndex + 1} of {selectedProject.bannerImgs.length}
-              </span>
-
-              {/* Location Badge */}
-              <span className="absolute bottom-3 left-3 bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-xl text-xs font-mono text-amber-400 font-bold border border-slate-800 shadow-md">
-                {selectedProject.title} • {selectedProject.location}
-              </span>
-            </div>
-
-            {/* 2. Synchronized Specs & Floor Plan Section (Matching ctvill.com Layout) */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center bg-slate-950/70 p-5 sm:p-6 rounded-2xl border border-slate-800 shadow-xl">
-              
-              {/* Left Column: Headline with Info Button & Specs Table */}
-              <div className="lg:col-span-6 space-y-4">
-                <div className="flex items-center gap-2.5">
-                  <h4 className="font-sans font-black text-2xl sm:text-3xl text-white tracking-tight">
-                    {selectedProject.headline}
-                  </h4>
-                  <button
-                    onClick={() => setShowStoryModal(!showStoryModal)}
-                    className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold font-serif cursor-pointer transition-all shrink-0 ${
-                      showStoryModal 
-                        ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/30 ring-2 ring-amber-400' 
-                        : 'bg-amber-500/20 text-amber-400 hover:bg-amber-500 hover:text-slate-950 border border-amber-500/40'
-                    }`}
-                    title={showStoryModal ? "Hide story details" : "View full project story & highlights"}
-                  >
-                    i
-                  </button>
-                </div>
-
-                {/* Specification Table */}
-                <div className="space-y-2 text-xs font-mono">
-                  <div className="flex items-baseline">
-                    <span className="text-slate-400 w-32 shrink-0 font-medium tracking-wide text-[11px]">PROJECT YEAR</span>
-                    <span className="text-white font-bold">{selectedProject.year}</span>
-                  </div>
-                  <div className="flex items-baseline">
-                    <span className="text-slate-400 w-32 shrink-0 font-medium tracking-wide text-[11px]">TYPE</span>
-                    <span className="text-white font-bold">{selectedProject.subtitle}</span>
-                  </div>
-                  <div className="flex items-baseline">
-                    <span className="text-slate-400 w-32 shrink-0 font-medium tracking-wide text-[11px]">LOCATION</span>
-                    <span className="text-white font-bold">{selectedProject.location}</span>
-                  </div>
-                  <div className="flex items-baseline">
-                    <span className="text-slate-400 w-32 shrink-0 font-medium tracking-wide text-[11px]">AREA</span>
-                    <span className="text-white font-bold">{selectedProject.area}</span>
-                  </div>
-                  <div className="flex items-baseline">
-                    <span className="text-slate-400 w-32 shrink-0 font-medium tracking-wide text-[11px]">TIMELINE</span>
-                    <span className="text-emerald-400 font-bold">{selectedProject.timeline}</span>
-                  </div>
-                  <div className="flex items-baseline">
-                    <span className="text-slate-400 w-32 shrink-0 font-medium tracking-wide text-[11px]">DESIGNER</span>
-                    <span className="text-amber-400 font-bold">{selectedProject.designer}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Column: Live Synchronized Blueprint Floor Plan Canvas */}
-              <div className="lg:col-span-6 space-y-2">
-                <div className="flex items-center justify-between text-[11px] font-mono">
-                  <span className="text-slate-400 flex items-center gap-1.5 font-bold">
-                    <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
-                    SYNCHRONIZED FLOOR PLAN
-                  </span>
-                  <span className="text-amber-400 font-bold">
-                    Zone {modalActivePhotoIndex + 1} of {selectedProject.bannerImgs.length}
-                  </span>
-                </div>
-
-                {/* Floor plan container with white canvas and orange highlighted active zone */}
-                <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-700/80 shadow-2xl flex items-center justify-center min-h-[170px] sm:min-h-[200px] overflow-hidden">
-                  <img 
-                    key={modalActivePhotoIndex}
-                    src={selectedProject.blueprintImgs[modalActivePhotoIndex] || selectedProject.blueprintImgs[0]} 
-                    alt={`${selectedProject.title} Blueprint Zone ${modalActivePhotoIndex + 1}`} 
-                    className="w-full h-auto max-h-[200px] object-contain transition-opacity duration-300 animate-fadeIn" 
-                    decoding="async"
-                  />
-                </div>
-              </div>
-
-            </div>
-
-            {/* 3. Photo Thumbnail Navigation Strip */}
-            <div className="space-y-1.5">
-              <span className="text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider block">
-                Jump to Room / Zone Photo ({selectedProject.bannerImgs.length} Captures)
-              </span>
-              <div className="flex gap-2 overflow-x-auto py-2 px-1 scrollbar-thin overscroll-x-contain">
-                {selectedProject.bannerImgs.map((_img, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setModalActivePhotoIndex(idx)}
-                    className={`h-16 w-24 sm:h-20 sm:w-28 shrink-0 rounded-xl overflow-hidden border-2 transition-all cursor-pointer relative ${
-                      modalActivePhotoIndex === idx
-                        ? 'border-amber-400 ring-2 ring-amber-400/40 scale-102 shadow-lg shadow-amber-500/20'
-                        : 'border-slate-800 opacity-60 hover:opacity-100 hover:border-slate-600'
-                    }`}
-                    title={`View Photo ${idx + 1}`}
-                  >
-                    <img 
-                      src={selectedProject.bannerThumbs?.[idx] || selectedProject.bannerImgs[idx]} 
-                      alt={`Thumb ${idx + 1}`} 
-                      className="w-full h-full object-cover pointer-events-none" 
-                      loading="lazy"
-                      decoding="async"
-                    />
-                    <span className="absolute bottom-1 right-1 bg-black/80 px-1.5 py-0.5 rounded text-[9px] font-mono text-white">
-                      {idx + 1}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* 4. Project Story & Engineering Highlights Drawer */}
-            {showStoryModal && (
-              <div className="space-y-4 bg-slate-950/80 border border-slate-800 rounded-2xl p-5 sm:p-6 animate-fadeIn">
-                <div className="space-y-2 text-xs text-slate-300">
-                  <h4 className="font-bold text-sm text-white font-sans flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-amber-400" />
-                    <span>Project Narrative & Spatial Strategy</span>
-                  </h4>
-                  <p className="leading-relaxed text-slate-300">{selectedProject.story}</p>
-                </div>
-
-                {/* Highlights */}
-                <div className="space-y-2 pt-2">
-                  <h5 className="text-[11px] font-mono text-amber-400 font-bold uppercase">
-                    ENGINEERING & FIT-OUT HIGHLIGHTS
-                  </h5>
-                  <ul className="space-y-1.5 text-xs text-slate-400">
-                    {selectedProject.highlights.map((h, i) => (
-                      <li key={i} className="flex items-start gap-2">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-amber-400 shrink-0 mt-0.5" />
-                        <span>{h}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-
-                {/* Challenges & Solution */}
-                <div className="bg-amber-950/20 border border-amber-500/30 p-4 rounded-xl space-y-1">
-                  <span className="text-[10px] font-mono text-amber-300 font-bold uppercase block">
-                    PROJECT CHALLENGE & CTVILL SOLUTION
-                  </span>
-                  <p className="text-xs text-slate-300 leading-relaxed">
-                    {selectedProject.keyChallenges}
-                  </p>
-                </div>
-
-                {/* Designer Card */}
-                <div className="bg-slate-900/90 p-4 rounded-xl border border-slate-800 flex items-center gap-4">
-                  <img 
-                    src={selectedProject.designerImg} 
-                    alt={selectedProject.designer} 
-                    className="w-12 h-12 rounded-xl object-cover border border-slate-700 shrink-0"
-                  />
-                  <div className="space-y-0.5">
-                    <span className="text-[9px] font-mono text-amber-400 uppercase font-bold">PROJECT DESIGN LEAD</span>
-                    <h5 className="text-xs font-bold text-white">{selectedProject.designer}</h5>
-                    <p className="text-[11px] text-slate-400">{selectedProject.designerOrg}</p>
-                    {selectedProject.designerContact && (
-                      <p className="text-[10px] text-slate-500 font-mono">{selectedProject.designerContact}</p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 5. Action Buttons */}
-            <div className="flex flex-col sm:flex-row gap-3 pt-2">
-              <button
-                onClick={() => {
-                  setSelectedProject(null);
-                  setProjectScope(`Fit-Out Consultation based on ${selectedProject.title} style`);
-                  setShowQuoteModal(true);
-                }}
-                className="flex-1 py-3 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs cursor-pointer transition-colors shadow-lg shadow-amber-500/20 text-center"
-              >
-                Inquire for Similar Project ➔
-              </button>
-              <button
-                onClick={() => setShowStoryModal(!showStoryModal)}
-                className="py-3 px-5 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs cursor-pointer transition-colors text-center"
-              >
-                {showStoryModal ? 'Hide Narrative' : 'Read Project Story (i)'}
-              </button>
-              <button
-                onClick={() => setSelectedProject(null)}
-                className="py-3 px-6 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs cursor-pointer transition-colors text-center"
-              >
-                Close Viewer
-              </button>
-            </div>
-
-          </div>
-        </div>
-      )}
-
       {/* MODAL: REQUEST A QUOTE / ESTIMATION */}
       {showQuoteModal && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50 animate-fadeIn overscroll-contain">
-          <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 sm:p-8 space-y-5 shadow-2xl animate-slideUp transform-gpu [contain:paint]">
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn overscroll-contain">
+          <div className={`${isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-2xl'} border rounded-3xl max-w-lg w-full p-6 sm:p-8 space-y-5 animate-slideUp transform-gpu [contain:paint]`}>
             
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div className={`flex items-center justify-between border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-3`}>
               <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
+                <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500">
                   <Sparkles className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-white">Request Fit-Out Quotation</h3>
-                  <p className="text-[10px] text-slate-400 font-mono">Direct to CTVill Estimating Desk</p>
+                  <h3 className={`text-base font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Request Project Quotation</h3>
+                  <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'} font-mono`}>Direct to LDM Construction Estimating Desk</p>
                 </div>
               </div>
               <button 
                 onClick={() => setShowQuoteModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs font-bold cursor-pointer"
+                className={`w-8 h-8 rounded-full ${
+                  isDark
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                } flex items-center justify-center text-xs font-bold cursor-pointer transition-colors`}
               >
                 ✕
               </button>
             </div>
 
             {quoteSubmitted ? (
-              <div className="bg-emerald-950/80 border border-emerald-600 text-emerald-200 text-xs p-6 rounded-2xl text-center space-y-4 animate-fadeIn">
-                <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto" />
+              <div className={`${isDark ? 'bg-emerald-950/80 border-emerald-600 text-emerald-200' : 'bg-emerald-50 border-emerald-300 text-emerald-900'} border text-xs p-6 rounded-2xl text-center space-y-4 animate-fadeIn`}>
+                <CheckCircle2 className={`w-12 h-12 ${isDark ? 'text-emerald-400' : 'text-emerald-600'} mx-auto`} />
                 <div>
-                  <h4 className="font-bold text-lg text-white">Quotation Request Dispatched!</h4>
-                  <p className="text-[11px] font-mono text-emerald-400 mt-0.5">Confirmation Emailed & Synced to Database</p>
+                  <h4 className={`font-bold text-lg ${isDark ? 'text-white' : 'text-emerald-950'}`}>Quotation Request Dispatched!</h4>
+                  <p className={`text-[11px] font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-700'} mt-0.5`}>Confirmation Emailed &amp; Synced to Database</p>
                 </div>
 
-                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-3.5 text-left text-[11px] space-y-2 text-slate-300">
+                <div className={`${isDark ? 'bg-slate-950/80 border-slate-800 text-slate-300' : 'bg-white border-emerald-200 text-slate-700'} border rounded-xl p-3.5 text-left text-[11px] space-y-2`}>
                   <div className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                    <span>Formal quotation receipt emailed to: <strong className="text-amber-400">{quoteSubmittedEmail}</strong></span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    <span>Formal quotation receipt emailed to: <strong className="text-amber-500">{quoteSubmittedEmail}</strong></span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                    <span>Admin alert dispatched to: <strong className="text-white">estimate@ctvill.com</strong></span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    <span>Admin alert dispatched to: <strong className={isDark ? 'text-white' : 'text-slate-900'}>ldmengineeringdesign@gmail.com</strong></span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                    <span>Permanently logged into CTVill Project Management System</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                    <span>Permanently logged into LDM Construction ERP System</span>
                   </div>
                 </div>
 
-                <p className="leading-relaxed text-slate-300">
+                <p className={`leading-relaxed ${isDark ? 'text-slate-300' : 'text-slate-600'}`}>
                   Our licensed architects and estimators will review your spatial requirements and contact you within 24 hours to schedule a free ocular site survey.
                 </p>
 
@@ -2401,7 +1880,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                     setClientPhone('');
                     setProjectNotes('');
                   }}
-                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors"
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs cursor-pointer transition-colors shadow-sm"
                 >
                   Close Window
                 </button>
@@ -2416,62 +1895,62 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                 )}
 
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Company or Individual Name *</label>
+                  <label className={`block ${isDark ? 'text-slate-400' : 'text-slate-700 font-semibold'} mb-1`}>Company or Individual Name *</label>
                   <input
                     type="text"
                     required
                     value={clientName}
                     onChange={(e) => setClientName(e.target.value)}
-                    placeholder="e.g. NexBridge Software"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-500"
+                    placeholder="e.g. Engr. & Mrs. Dan Ramos (Proyecto Bahia)"
+                    className={`w-full ${isDark ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400'} border rounded-xl p-2.5 focus:outline-none focus:border-amber-500`}
                   />
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Email Address (with domain) *</label>
+                    <label className={`block ${isDark ? 'text-slate-400' : 'text-slate-700 font-semibold'} mb-1`}>Email Address (with domain) *</label>
                     <input
                       type="email"
                       required
                       value={clientEmail}
                       onChange={(e) => setClientEmail(e.target.value)}
                       placeholder="hello@company.com"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-500 font-mono"
+                      className={`w-full ${isDark ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400'} border rounded-xl p-2.5 focus:outline-none focus:border-amber-500 font-mono`}
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Mobile / WhatsApp *</label>
+                    <label className={`block ${isDark ? 'text-slate-400' : 'text-slate-700 font-semibold'} mb-1`}>Mobile / WhatsApp *</label>
                     <input
                       type="tel"
                       required
                       value={clientPhone}
                       onChange={(e) => setClientPhone(e.target.value)}
                       placeholder="0917-123-4567"
-                      className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-500"
+                      className={`w-full ${isDark ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400'} border rounded-xl p-2.5 focus:outline-none focus:border-amber-500`}
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Project Scope / Estimated Area *</label>
+                  <label className={`block ${isDark ? 'text-slate-400' : 'text-slate-700 font-semibold'} mb-1`}>Project Scope / Estimated Area *</label>
                   <input
                     type="text"
                     required
                     value={projectScope}
                     onChange={(e) => setProjectScope(e.target.value)}
-                    placeholder="e.g. 500 sqm BPO Office Fit-Out, Cabuyao"
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-500"
+                    placeholder="e.g. 2-Storey Modern Residential Build / Interior Fit-Out"
+                    className={`w-full ${isDark ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400'} border rounded-xl p-2.5 focus:outline-none focus:border-amber-500`}
                   />
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Specific Requirements / Target Move-in Date</label>
+                  <label className={`block ${isDark ? 'text-slate-400' : 'text-slate-700 font-semibold'} mb-1`}>Specific Requirements / Target Move-in Date</label>
                   <textarea
                     rows={3}
                     value={projectNotes}
                     onChange={(e) => setProjectNotes(e.target.value)}
                     placeholder="Provide details such as leased building address, target handover month, or required specialized facilities..."
-                    className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-500"
+                    className={`w-full ${isDark ? 'bg-slate-950 border-slate-800 text-white placeholder:text-slate-600' : 'bg-slate-50 border-slate-300 text-slate-900 placeholder:text-slate-400'} border rounded-xl p-2.5 focus:outline-none focus:border-amber-500`}
                   />
                 </div>
 
@@ -2493,7 +1972,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   ) : (
                     <>
                       <Send className="w-3.5 h-3.5" />
-                      <span>Send Request to estimate@ctvill.com</span>
+                      <span>Send Request to ldmengineeringdesign@gmail.com</span>
                     </>
                   )}
                 </button>
@@ -2521,7 +2000,11 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
               <button
                 type="button"
                 onClick={() => setShowReviewModal(false)}
-                className="w-7 h-7 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs font-bold cursor-pointer"
+                className={`w-8 h-8 rounded-full ${
+                  isDark
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                } flex items-center justify-center text-xs font-bold cursor-pointer transition-colors`}
               >
                 ✕
               </button>
@@ -2535,7 +2018,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   <p className="text-[11px] font-mono text-emerald-400 mt-0.5">Status: Pending Admin Moderation</p>
                 </div>
                 <p className="leading-relaxed text-slate-300">
-                  Thank you for sharing your experience with <strong>CTVill Design &amp; Construction</strong>. To protect our portfolio against spam, all public reviews enter the <strong>Admin Moderation Queue</strong> and are published immediately upon verification.
+                  Thank you for sharing your experience with <strong>LDM Construction</strong>. To protect our portfolio against spam, all public reviews enter the <strong>Admin Moderation Queue</strong> and are published immediately upon verification.
                 </p>
                 <button
                   type="button"
@@ -2575,13 +2058,13 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                     />
                   </div>
                   <div>
-                    <label className="block text-slate-400 font-semibold mb-1">Company / Fit-Out Project *</label>
+                    <label className="block text-slate-400 font-semibold mb-1">Company / Residential Project *</label>
                     <input
                       type="text"
                       required
                       value={reviewCompanyProject}
                       onChange={(e) => setReviewCompanyProject(e.target.value)}
-                      placeholder="e.g. Vertex BPO Hub • BGC"
+                      placeholder="e.g. Modern Villa Residence • Laguna"
                       className="w-full bg-slate-950 border border-slate-800 rounded-xl p-2.5 text-white focus:outline-none focus:border-amber-500"
                     />
                   </div>
@@ -2686,7 +2169,11 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
               <button
                 type="button"
                 onClick={() => setShowPrivacyModal(false)}
-                className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                className={`w-8 h-8 rounded-full ${
+                  isDark
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700'
+                    : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
+                } flex items-center justify-center transition-colors cursor-pointer`}
                 title="Close Privacy Policy"
               >
                 <X className="w-4 h-4" />
@@ -2701,7 +2188,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   Commitment to Confidentiality & Data Integrity
                 </p>
                 <p className="text-slate-400 text-[11px]">
-                  CTVill Design & Construction is fully dedicated to safeguarding personal and proprietary project information entrustment by clients, corporate partners, and site contractors in accordance with Republic Act No. 10173 (Data Privacy Act of 2012) and its Implementing Rules and Regulations.
+                  LDM Construction (Engineers • Architects • Builders) is fully dedicated to safeguarding personal and proprietary project information entrusted by clients, corporate partners, and site contractors in accordance with Republic Act No. 10173 (Data Privacy Act of 2012) and its Implementing Rules and Regulations.
                 </p>
               </div>
 
@@ -2716,7 +2203,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                 <ul className="list-disc pl-5 space-y-1 text-slate-400 text-[11px]">
                   <li><strong>Client Identification:</strong> Name, corporate business name, designated contact person, official email address, and phone numbers.</li>
                   <li><strong>Engineering & Technical Data:</strong> Building location, floor plans, CAD drawings, Bill of Quantities (BOQ), and fit-out architectural specifications.</li>
-                  <li><strong>Statutory & Jobsite Records:</strong> LGU/PEZA building permits, contractor workforce deployment rosters, daily safety logs, and QA defect punchlists.</li>
+                  <li><strong>Statutory & Jobsite Records:</strong> LGU City Hall building permits, subdivision HOA clearances, contractor workforce deployment rosters, daily safety logs, and QA defect punchlists.</li>
                 </ul>
               </div>
 
@@ -2730,7 +2217,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                 </p>
                 <ul className="list-disc pl-5 space-y-1 text-slate-400 text-[11px]">
                   <li>Calibrating accurate commercial fit-out proposals, cost estimates, and timelines.</li>
-                  <li>Processing statutory building clearances with the City Building Official, PEZA, Bureau of Fire Protection (BFP), and building property managers.</li>
+                  <li>Processing statutory building clearances with the City Building Official, Bureau of Fire Protection (BFP), and property administration.</li>
                   <li>Managing trade craft dispatch, material procurement logistics, and QA punchlist closeout.</li>
                 </ul>
               </div>
@@ -2741,7 +2228,7 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   3. Non-Disclosure & Blueprint Intellectual Property
                 </h4>
                 <p className="text-slate-400">
-                  All submitted architectural blueprints, interior designs, and corporate fit-out concepts remain the intellectual property of the client or designer. CTVill enforces strict Non-Disclosure Agreement (NDA) protocols. We never sell, lease, or monetize client data to third parties.
+                  All submitted architectural blueprints, interior designs, and construction concepts remain the intellectual property of the client or designer. LDM Construction enforces strict Non-Disclosure Agreement (NDA) protocols. We never sell, lease, or monetize client data to third parties.
                 </p>
               </div>
 
@@ -2764,9 +2251,9 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
                   To request data access, correction, or inquire regarding our compliance standards, contact our compliance desk:
                 </p>
                 <div className="p-3 bg-slate-950 border border-slate-800 rounded-xl font-mono text-[11px] text-slate-300 space-y-1">
-                  <div><strong>Email:</strong> <a href="mailto:concierge@ctvill.com" className="text-amber-400 hover:underline">concierge@ctvill.com</a></div>
-                  <div><strong>Phone:</strong> (049) 544 7724 • 0933-827-8885</div>
-                  <div><strong>Headquarters:</strong> CTVill Laguna Design & Construction Directorate, Philippines</div>
+                  <div><strong>Email:</strong> <a href="mailto:ldmengineeringdesign@gmail.com" className="text-amber-400 hover:underline">ldmengineeringdesign@gmail.com</a></div>
+                  <div><strong>Phone / Viber / WhatsApp:</strong> (+63) 945 681 0515</div>
+                  <div><strong>Company:</strong> LDM Construction — Engineers • Architects • Builders</div>
                 </div>
               </div>
 
@@ -2786,6 +2273,123 @@ export default function LandingPage({ onEnterPortal }: LandingPageProps) {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: FULL-SCREEN ZERO-LAG LIGHTBOX FOR 120-ASSET GALLERY */}
+      {lightboxAsset && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4 sm:p-8 animate-fadeIn"
+          onClick={() => setLightboxAsset(null)}
+        >
+          <div
+            className="preserve-dark-surface relative max-w-5xl w-full bg-[#0B0F19] border border-slate-800 rounded-3xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+            style={{ backgroundColor: '#0B0F19' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Lightbox Header */}
+            <div className="preserve-dark-surface p-4 sm:p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950">
+              <div className="flex items-center gap-3">
+                <span className="bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-mono font-bold px-2.5 py-1 rounded-full uppercase">
+                  {lightboxAsset.categoryLabel}
+                </span>
+                <span className="text-white font-bold text-sm hidden sm:inline">
+                  {lightboxAsset.title}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono font-bold tracking-wider text-amber-400/90 bg-amber-500/10 border border-amber-500/30 px-3 py-1 rounded-full hidden sm:inline-flex items-center gap-1.5">
+                  <ShieldCheck className="w-3 h-3 text-amber-400" />
+                  LDM DESIGN &amp; BUILD • VERIFIED PORTFOLIO
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setLightboxAsset(null)}
+                  className="w-8 h-8 rounded-full bg-slate-800 hover:bg-slate-700 text-slate-100 hover:text-white border border-slate-700 flex items-center justify-center cursor-pointer transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            {/* Lightbox Active Photo (Zero Lag - mounts strictly 1 active image) */}
+            <div className="relative flex-1 bg-slate-950 flex items-center justify-center overflow-hidden min-h-[300px] sm:min-h-[500px]">
+              <img
+                src={lightboxAsset.url}
+                alt={lightboxAsset.title}
+                className="max-h-[70vh] w-auto max-w-full object-contain mx-auto"
+                loading="eager"
+                decoding="async"
+              />
+
+              {/* Prev / Next navigation */}
+              {(() => {
+                const currentList =
+                  portfolioTab === 'all'
+                    ? allLdmPortfolioAssets
+                    : portfolioTab === 'architectural'
+                    ? ldmArchitecturalAssets
+                    : portfolioTab === 'interior'
+                    ? ldmInteriorAssets
+                    : portfolioTab === 'construction'
+                    ? ldmSiteConstructionAssets
+                    : allLdmPortfolioAssets;
+                const curIdx = currentList.findIndex((a) => a.id === lightboxAsset.id);
+
+                const handlePrev = () => {
+                  const prevIdx = (curIdx - 1 + currentList.length) % currentList.length;
+                  setLightboxAsset(currentList[prevIdx]);
+                };
+                const handleNext = () => {
+                  const nextIdx = (curIdx + 1) % currentList.length;
+                  setLightboxAsset(currentList[nextIdx]);
+                };
+
+                return (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handlePrev}
+                      className="absolute left-4 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-slate-900/80 hover:bg-amber-500 hover:text-slate-950 text-white border border-slate-700 transition-all cursor-pointer shadow-lg"
+                      title="Previous Photo"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleNext}
+                      className="absolute right-4 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-slate-900/80 hover:bg-amber-500 hover:text-slate-950 text-white border border-slate-700 transition-all cursor-pointer shadow-lg"
+                      title="Next Photo"
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Lightbox Footer Actions */}
+            <div className="preserve-dark-surface p-4 bg-slate-950 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
+              <div className="text-slate-400 font-mono text-[11px] flex items-center gap-2">
+                <Building2 className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>LDM Construction • Engineers • Architects • Builders — Official Project Archive</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setProjectScope(`${lightboxAsset.title} (${lightboxAsset.categoryLabel})`);
+                    setLightboxAsset(null);
+                    setShowQuoteModal(true);
+                  }}
+                  className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer shadow-md"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>Inquire Regarding This Project ➔</span>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

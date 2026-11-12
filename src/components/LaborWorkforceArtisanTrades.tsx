@@ -20,12 +20,15 @@ import {
   ProjectProfile, isOfficeOrExecutive, isIndividualStaffOrEngineer
 } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { normalizeRole, UserRole } from '../utils/rbac';
 import WorkforceMessengerRoster from './WorkforceMessengerRoster';
 
 export interface LaborWorkforceArtisanTradesProps {
   contractors: Contractor[];
   manpowerAudits: DailyManpowerAudit[];
   projects: ProjectProfile[];
+  userRole?: string;
+  isAdmin?: boolean;
   aiRecommendations: AIManpowerRecommendation[];
   isAiScanning: boolean;
   aiScanMessage: string | null;
@@ -94,6 +97,8 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
   contractors,
   manpowerAudits,
   projects,
+  userRole,
+  isAdmin = false,
   aiRecommendations,
   isAiScanning,
   aiScanMessage,
@@ -123,9 +128,37 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
   isFinance = false,
   hideTabs = false,
 }) => {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
-  const [activeSubTab, setActiveSubTab] = useState<WorkforceTabId>(initialTab ?? 'workbench');
+  const { isDark } = useTheme();
+
+  const currentRole = normalizeRole(userRole);
+  const isOM = currentRole === UserRole.OM || isAdmin;
+  const isPM = currentRole === UserRole.PM;
+
+  const availableTabs = useMemo(() => {
+    return TABS.filter(tab => {
+      // Tab 1 (Dispatch Workbench): Show ONLY for PM / Site Engineer (hide for OM)
+      if (tab.id === 'workbench') return isPM || (!isOM && !isPM);
+      // Tab 2 (Workforce Analytics & Reports): Show ONLY for OM (hide for PM / Site Engineer)
+      if (tab.id === 'analytics') return isOM;
+      // Tab 3 (Personnel Directory & Roster): Show for both
+      return true;
+    });
+  }, [isOM, isPM]);
+
+  const [activeSubTab, setActiveSubTab] = useState<WorkforceTabId>(() => {
+    if (initialTab) return initialTab;
+    if (isOM) return 'analytics';
+    return 'workbench';
+  });
+
+  // Guard activeSubTab if role changes or tab is unauthorized
+  useEffect(() => {
+    if (isOM && activeSubTab === 'workbench') {
+      setActiveSubTab('analytics');
+    } else if (isPM && activeSubTab === 'analytics') {
+      setActiveSubTab('workbench');
+    }
+  }, [isOM, isPM, activeSubTab]);
   const [recommendationQueue, setRecommendationQueue] = useState<AIManpowerRecommendation[]>([]);
   const [appliedTransfersHistory, setAppliedTransfersHistory] = useState<AIManpowerRecommendation[]>([]);
 
@@ -810,7 +843,7 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
       outsourcedDailyBurn,
       ratio: Math.round((inHouse / total) * 100),
       chartData: [
-        { name: 'CTVill In-House Core', value: inHouse, dailyBurn: inHouseDailyBurn, color: '#10b981' },
+        { name: 'LDM In-House Core', value: inHouse, dailyBurn: inHouseDailyBurn, color: '#10b981' },
         { name: 'Outsourced Trade Partners', value: outsourced, dailyBurn: outsourcedDailyBurn, color: '#f59e0b' }
       ]
     };
@@ -896,7 +929,7 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
 
           {/* Top-Level Tab Switcher (Tab 1: Dispatch Workbench | Tab 2: Workforce Analytics & Reports | Personnel Directory) */}
           <div className={`flex items-center gap-2 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-2 overflow-x-auto`}>
-            {TABS.map(tab => {
+            {availableTabs.map(tab => {
               const isActive = activeSubTab === tab.id;
               const IconComponent = tab.icon;
               const count =
@@ -949,6 +982,8 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
             contractors={localContractors}
             manpowerAudits={manpowerAudits}
             projects={projects}
+            userRole={userRole}
+            isAdmin={isAdmin}
             onRegisterClick={onRegisterWorkerClick}
             onVerifyRollCall={onVerifyRollCall}
             onDeleteContractor={onDeleteContractor}
@@ -2091,7 +2126,7 @@ export const LaborWorkforceArtisanTrades: React.FC<LaborWorkforceArtisanTradesPr
                       <div className="flex items-center justify-between gap-2">
                         <div className="flex items-center gap-1.5 font-bold text-white">
                           <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-                          <span>CTVill In-House Core</span>
+                          <span>LDM In-House Core</span>
                         </div>
                         <span className="text-[11px] font-mono text-amber-400">
                           ₱{liveInHouseAndOutsourced.inHouseDailyBurn.toLocaleString()}/day

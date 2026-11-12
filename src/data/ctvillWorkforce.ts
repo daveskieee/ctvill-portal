@@ -29,9 +29,9 @@ export const CTVILL_ORGANIZATION_HIERARCHY: DepartmentConfig[] = [
     badgeColor: 'border-blue-600/60 text-blue-300 bg-blue-950/60',
     roles: [
       { title: 'Principal Architect', defaultDailyRate: 2800, description: 'Lead architectural vision, spatial planning & design sign-offs', isFieldRole: false },
-      { title: 'Design & Interior Architects', defaultDailyRate: 2200, description: 'Commercial fit-out and office interior architectural layouts', isFieldRole: false },
-      { title: 'Lead Electrical & Mechanical Engineers', defaultDailyRate: 2400, description: 'MEP engineering calculations, equipment sizing & PEZA compliance', isFieldRole: false },
-      { title: 'PEZA Permitting Specialists', defaultDailyRate: 1800, description: 'Economic zone clearances, building permits & regulatory filings', isFieldRole: false },
+      { title: 'Design & Interior Architects', defaultDailyRate: 2200, description: 'Residential, commercial, and custom interior architectural layouts', isFieldRole: false },
+      { title: 'Lead Electrical & Mechanical Engineers', defaultDailyRate: 2400, description: 'MEP engineering calculations, equipment sizing & building code compliance', isFieldRole: false },
+      { title: 'PEZA Permitting Specialists', defaultDailyRate: 1800, description: 'City hall clearances, building permits & regulatory filings', isFieldRole: false },
       { title: 'Quantity Surveyors & Estimators', defaultDailyRate: 2000, description: 'Bill of Quantities (BOQ), material takeoffs & procurement budgets', isFieldRole: false },
     ]
   },

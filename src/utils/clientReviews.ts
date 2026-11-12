@@ -27,12 +27,12 @@ export const REVIEW_SUBMISSION_COOLDOWN_MS = 45 * 1000; // 45-second anti-spam r
 export const DEFAULT_CLIENT_REVIEWS: ClientReviewItem[] = [
   {
     id: 'REV-1001',
-    clientName: 'NexBridge Technologies',
-    companyOrProject: 'System Developer Headquarters (350 sqm)',
-    roleOrLocation: 'System Developer • Malolos, Bulacan',
+    clientName: 'Engr. & Mrs. Roberto Santos',
+    companyOrProject: '2-Storey Residential Residence in Batangas',
+    roleOrLocation: 'Homeowners • Batangas',
     rating: 5,
     message:
-      'CTVill constructed our 75 sqm office in 5 days, and when we tripled in size they built out our 350 sqm headquarters in Bulacan. Their detail-oriented craftsmanship — from binary decals to acoustic pods — gave our engineers a real sanctuary.',
+      'LDM Construction executed our 2-storey residential build with stellar structural integrity and clean finishes. From architectural 3D plans to concrete pouring and roof trusses, Engr. Dan Ramos and his site engineers were completely transparent and ahead of schedule.',
     status: 'Approved',
     createdAt: '2026-08-14T09:00:00.000Z',
     moderatedAt: '2026-08-14T10:30:00.000Z',
@@ -40,12 +40,12 @@ export const DEFAULT_CLIENT_REVIEWS: ClientReviewItem[] = [
   },
   {
     id: 'REV-1002',
-    clientName: 'Make Place Studio',
-    companyOrProject: 'Owl Milk Tea & BG Comm Fit-Outs',
-    roleOrLocation: 'Interior Design Firm • Est. 2016',
+    clientName: 'Dr. Camille Villanueva',
+    companyOrProject: 'Modern Farmhouse Build',
+    roleOrLocation: 'Property Owner • Tagaytay / Cavite',
     rating: 5,
     message:
-      'Collaborating with CTVill as our construction arm has allowed our interior design visions to become reality without friction. Their problem-solving on the ground — like tile-printed terrazzo at Owl Milk Tea — makes them our go-to partner.',
+      'The 360° virtual tours gave us total peace of mind before interior fit-out started. The exposed beam cathedral ceiling, custom fluted carpentry, and waterproofed balcony were crafted with exceptional artisan craftsmanship.',
     status: 'Approved',
     createdAt: '2026-09-02T14:15:00.000Z',
     moderatedAt: '2026-09-02T16:00:00.000Z',
@@ -53,12 +53,12 @@ export const DEFAULT_CLIENT_REVIEWS: ClientReviewItem[] = [
   },
   {
     id: 'REV-1003',
-    clientName: 'BG Comm Operations Board',
-    companyOrProject: '1,000 sqm BPO Call Center Fit-Out',
-    roleOrLocation: 'BPO Headquarters • Dumaguete, Negros',
+    clientName: 'Arch. Marco & Sofia Dizon',
+    companyOrProject: 'Proyecto Bahia 2-Storey Residence',
+    roleOrLocation: 'Architect & Client • Laguna',
     rating: 5,
     message:
-      'Delivering a 1,000 sqm regional BPO facility outside Luzon within a strict 90-day window required military-grade logistics. CTVill handled sea freight, acoustic baffle zoning, and custom modular desks with 100% on-schedule handover.',
+      'As design professionals, our standards for structural tolerance and architectural millwork are uncompromising. LDM Construction surpassed every milestone on our 14-phase WBS with meticulous engineering discipline.',
     status: 'Approved',
     createdAt: '2026-10-10T11:20:00.000Z',
     moderatedAt: '2026-10-10T13:00:00.000Z',
@@ -66,13 +66,13 @@ export const DEFAULT_CLIENT_REVIEWS: ClientReviewItem[] = [
   },
   {
     id: 'REV-1004',
-    clientName: 'Ar. Lorenzo Villareal',
-    companyOrProject: 'Redbin Creative Advertising Studio (135 sqm)',
-    roleOrLocation: 'Facilities Director • Makati CBD',
+    clientName: 'Apex Commercial Properties',
+    companyOrProject: 'Commercial Building',
+    roleOrLocation: 'Commercial Developer • Metro South',
     rating: 5,
     message:
-      'Navigating MACEA work permits and strict Makati noise hours is notoriously difficult, yet CTVill completed our acoustic sliding partitions and open-air patio deck ahead of schedule with zero citations.',
-    email: 'l.villareal@redbincreative.ph',
+      'Turnkey delivery of our commercial showroom and multi-tenant complex was handled with total cost transparency via their detailed BOM quotations and on-site QA logs. Highly recommended turnkey contractor.',
+    email: 'projects@apexcommercial.ph',
     status: 'Pending',
     createdAt: new Date(Date.now() - 3600 * 1000 * 5).toISOString(),
   },
@@ -88,8 +88,21 @@ export function getClientReviews(): ClientReviewItem[] {
     }
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed) || parsed.length === 0) {
+      localStorage.setItem(CLIENT_REVIEWS_STORAGE_KEY, JSON.stringify(DEFAULT_CLIENT_REVIEWS));
       return DEFAULT_CLIENT_REVIEWS;
     }
+
+    // Auto-migrate legacy CTVill/NexBridge/old test reviews to official LDM Construction reviews
+    const hasLegacyData = parsed.some((r: any) => {
+      const text = `${r.clientName || ''} ${r.companyOrProject || ''} ${r.message || ''}`.toLowerCase();
+      return text.includes('ctvill') || text.includes('nexbridge') || text.includes('dan ramos') || text.includes('eduardo & sofia') || text.includes('raymond castillo');
+    });
+
+    if (hasLegacyData) {
+      localStorage.setItem(CLIENT_REVIEWS_STORAGE_KEY, JSON.stringify(DEFAULT_CLIENT_REVIEWS));
+      return DEFAULT_CLIENT_REVIEWS;
+    }
+
     return parsed;
   } catch {
     return DEFAULT_CLIENT_REVIEWS;

@@ -7,7 +7,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   ClipboardCheck, Calendar, HardHat, Check, X, Clock, AlertCircle,
   Lock, RefreshCw, CheckCircle2, Search, ShieldCheck, Info,
-  AlertTriangle, CloudRain, DollarSign, Timer, Printer
+  AlertTriangle, CloudRain, DollarSign, Timer, Printer, Building2
 } from 'lucide-react';
 import {
   ProjectProfile, SiteWorker, AttendanceRecord, AttendanceStatus,
@@ -15,6 +15,8 @@ import {
 } from '../types';
 import { normalizeRole, UserRole } from '../utils/rbac';
 import { openEnterprisePrintWindow, escapePrintHtml } from '../utils/printEngine';
+import { logAuditEvent } from '../utils/auditLogger';
+import { useTheme } from '../context/ThemeContext';
 
 export type GranularAttendanceStatus =
   | 'PRESENT'
@@ -195,9 +197,9 @@ function toApiAttendanceStatus(granular: GranularAttendanceStatus, regHours: num
 const FALLBACK_COMMERCIAL_PROJECTS: ProjectProfile[] = [
   {
     id: 'PRJ-001',
-    name: 'NexBridge Software Hub',
-    clientName: 'NexBridge Technologies Inc.',
-    description: 'Turnkey Commercial Office & Data Center Fit-Out',
+    name: 'LDM Prime Residential Build',
+    clientName: 'LDM Client',
+    description: 'Turnkey Residential Build & Custom Interior Fit-Out',
     location: 'BGC, Taguig City',
     budget: 14500000,
     fundsCollected: 8500000,
@@ -278,6 +280,7 @@ export default function TimekeeperAttendanceDashboard({
   onRefreshData,
   onNotify
 }: TimekeeperAttendanceDashboardProps) {
+  const { isDark } = useTheme();
   // 1. Live Ticking Digital Clock State
   const [nowClock, setNowClock] = useState<Date>(() => new Date());
   useEffect(() => {
@@ -393,6 +396,7 @@ export default function TimekeeperAttendanceDashboard({
   const isPM = currentRole === UserRole.PM;
   const isTimekeeper = currentRole === UserRole.TIMEKEEPER;
   const isFinance = currentRole === UserRole.FINANCE || session?.role === 'FINANCE';
+  const isReadOnlyReview = isFinance || isOM;
 
   // Auto-clear toast
   useEffect(() => {
@@ -838,6 +842,46 @@ export default function TimekeeperAttendanceDashboard({
   // ---------------------------------------------------------------------------
   // 3. ENHANCED QUICK BATCH ACTIONS
   // ---------------------------------------------------------------------------
+  const handleBatchMarkAllPresent = () => {
+    if (isDateLocked || isReadOnlyReview) return;
+    const stamp = `Stamped ${formatAuditClockTime()}`;
+    setLocalDtr(prev => {
+      const next = new Map(prev);
+      for (const [wId, val] of next.entries()) {
+        next.set(wId, {
+          ...val,
+          granularStatus: 'PRESENT',
+          timeIn: '08:00',
+          timeOut: '17:00',
+          remarks: 'Marked Present (Standard Shift 08:00–17:00)',
+          auditTimestamp: stamp
+        });
+      }
+      return next;
+    });
+    setToastMessage({ text: '✓ Mark All Present (08:00 AM – 05:00 PM) applied to all workers.', type: 'info' });
+  };
+
+  const handleBatchResetAll = () => {
+    if (isDateLocked || isReadOnlyReview) return;
+    const stamp = `Reset ${formatAuditClockTime()}`;
+    setLocalDtr(prev => {
+      const next = new Map(prev);
+      for (const [wId, val] of next.entries()) {
+        next.set(wId, {
+          ...val,
+          granularStatus: 'PRESENT',
+          timeIn: '08:00',
+          timeOut: '17:00',
+          remarks: 'Standard Shift',
+          auditTimestamp: stamp
+        });
+      }
+      return next;
+    });
+    setToastMessage({ text: '↺ Reset All: restored standard 08:00–17:00 shift for all workers.', type: 'info' });
+  };
+
   const handleBatchTimeInAll = () => {
     if (isDateLocked || isFinance) return;
     const stamp = `Stamped ${formatAuditClockTime()}`;
@@ -1125,6 +1169,15 @@ export default function TimekeeperAttendanceDashboard({
         persistProjectDtrLedger(selectedProjectId, activeProjectName, selectedDate, workers, localDtr, true);
         window.dispatchEvent(new CustomEvent('ctvill-dtr-manpower-sync'));
         window.dispatchEvent(new CustomEvent('ctvill-dtr-payroll-sync', { detail: { projectId: selectedProjectId, date: selectedDate } }));
+
+        logAuditEvent({
+          entityType: 'CIVIL_WORKS',
+          entityId: `DTR-${selectedProjectId}-${selectedDate}`,
+          action: 'ATTENDANCE_LOGGED',
+          actorName: session?.name || 'Rodelio Cruz',
+          actorRole: 'Timekeeper',
+          details: `Daily Artisan Muster Sealed: ${stats.totalAssigned} workers (${stats.onSitePresentCount} present) recorded for ${activeProjectName} on ${selectedDate}. Daily labor wage: ₱${receipt.totalDailyWageBurn.toLocaleString()}`
+        });
       } catch {}
 
       // Sync computed daily labor cost to the project's Disbursed Labor Expenses
@@ -1178,6 +1231,7 @@ export default function TimekeeperAttendanceDashboard({
               <div style="font-size: 7.5pt; color: #475569;">${escapePrintHtml(w.id)} • ₱${(w.dailyRate || 750).toLocaleString()}/day</div>
             </td>
             <td>${escapePrintHtml(w.position || w.trade || 'Skilled Artisan')}</td>
+            <td><strong style="color: #0284c7;">${escapePrintHtml(w.assignedProject || activeProjectName)}</strong></td>
             <td class="text-center">
               <span class="badge ${statusBadge}">${escapePrintHtml(entry.granularStatus.replace(/_/g, ' '))}</span>
             </td>
@@ -1201,6 +1255,7 @@ export default function TimekeeperAttendanceDashboard({
             <th class="text-center" style="width: 32px;">#</th>
             <th>Worker Name & Daily Rate</th>
             <th>Trade / Designation</th>
+            <th>Assigned Project Site</th>
             <th class="text-center">Attendance Status</th>
             <th class="text-center">Time-In</th>
             <th class="text-center">Time-Out</th>
@@ -1216,7 +1271,7 @@ export default function TimekeeperAttendanceDashboard({
         </tbody>
         <tfoot>
           <tr>
-            <td colspan="6" class="text-right">DAILY MUSTER ROLL TOTALS:</td>
+            <td colspan="7" class="text-right">DAILY MUSTER ROLL TOTALS:</td>
             <td class="text-right mono">${stats.totalRegularHours.toFixed(1)}h</td>
             <td class="text-right mono">+${stats.totalOtHours.toFixed(1)}h</td>
             <td class="text-right mono" style="color: #047857;">₱${stats.totalDailyPayrollBurn.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
@@ -1233,9 +1288,9 @@ export default function TimekeeperAttendanceDashboard({
       orientation: 'landscape',
       projectMeta: {
         name: activeProjectName,
-        location: activeProject?.location || 'Commercial Fit-Out Jobsite',
+        location: activeProject?.location || 'LDM Project Site',
         period: `Attendance Date: ${selectedDate} (08:00 AM – 05:00 PM Shift)`,
-        client: (activeProject as any)?.clientName || (activeProject as any)?.client || 'CTVill Commercial Operations'
+        client: (activeProject as any)?.clientName || (activeProject as any)?.client || 'LDM Construction Operations'
       },
       kpiSummary: [
         { label: 'On-Site Present', value: `${stats.onSitePresentCount + stats.halfDayRainoutCount} / ${stats.totalAssigned} Artisans` },
@@ -1287,24 +1342,24 @@ export default function TimekeeperAttendanceDashboard({
                 className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-medium border ${
                   isFinance
                     ? 'bg-blue-500/10 text-blue-300 border-blue-500/30'
+                    : isOM
+                    ? 'bg-purple-500/10 text-purple-300 border-purple-500/30'
                     : isDateLocked
                     ? 'bg-slate-800 text-slate-400 border-slate-700/80'
                     : isTimekeeper
                     ? 'bg-teal-500/10 text-teal-300 border-teal-500/30'
-                    : isPM
-                    ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
-                    : 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                    : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
                 }`}
               >
                 {isFinance
-                  ? 'AUDIT & READ-ONLY (FINANCE)'
+                  ? 'STRICTLY READ-ONLY (FINANCE)'
+                  : isOM
+                  ? 'STRICTLY READ-ONLY (OPERATIONS MANAGER)'
                   : isDateLocked
                   ? 'LOCKED & FINALIZED'
                   : isTimekeeper
-                  ? 'TIMEKEEPER DTR'
-                  : isPM
-                  ? 'PM VERIFICATION'
-                  : 'OM OVERVIEW'}
+                  ? 'TIMEKEEPER EDIT MODE'
+                  : 'PM VERIFICATION'}
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -1328,7 +1383,7 @@ export default function TimekeeperAttendanceDashboard({
                 {session?.name || (isTimekeeper ? 'Site Timekeeper' : isPM ? 'Site Project Manager' : 'Operations Manager')}
               </div>
               <div className="text-[10px] text-slate-400 font-mono">
-                {session?.email || (isTimekeeper ? 'timekeeper@ctvill.com' : 'user@ctvill.com')}
+                {session?.email || (isTimekeeper ? 'timekeeper@ldmconstruction.ph' : 'user@ldmconstruction.ph')}
               </div>
             </div>
           </div>
@@ -1447,42 +1502,67 @@ export default function TimekeeperAttendanceDashboard({
           </div>
         )}
 
-        {/* Enhanced Quick Batch Bar */}
-        {!isDateLocked && (
+        {/* Strictly Read-Only Mode Banner for Finance & OM */}
+        {isReadOnlyReview && (
+          <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs text-slate-300">
+            <div className="flex items-center gap-2">
+              <ClipboardCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>
+                <strong>{isFinance ? 'Finance Payroll Review' : 'Operations Manager Audit'}:</strong> In-House Artisan Roll-Call is in strictly read-only mode. Attendance is logged on-site by the designated Site Timekeeper.
+              </span>
+            </div>
+            <span className="font-mono text-[10px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded border border-slate-700">
+              READ-ONLY MODE
+            </span>
+          </div>
+        )}
+
+        {/* Enhanced Quick Batch Bar (TIMEKEEPER ONLY) */}
+        {isTimekeeper && !isDateLocked && (
           <div className="flex flex-wrap items-center justify-between gap-3 pt-2.5 border-t border-slate-800/80 text-xs">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[11px] font-mono uppercase text-slate-400 font-semibold">Quick Batch:</span>
               <button
                 type="button"
-                disabled={isFinance}
+                onClick={handleBatchMarkAllPresent}
+                className="px-2.5 py-1 bg-emerald-950/70 hover:bg-emerald-900/70 text-emerald-300 border border-emerald-700/60 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
+              >
+                ✓ Mark All Present
+              </button>
+              <button
+                type="button"
                 onClick={handleBatchTimeInAll}
-                className="px-2.5 py-1 bg-emerald-950/70 hover:bg-emerald-900/70 text-emerald-300 border border-emerald-700/60 rounded-lg text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50"
+                className="px-2.5 py-1 bg-teal-950/70 hover:bg-teal-900/70 text-teal-300 border border-teal-700/60 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
               >
-                ⏱️ Batch Time-In All (08:00 AM)
+                ⏱️ Batch Time-In (08:00 AM)
               </button>
               <button
                 type="button"
-                disabled={isFinance}
                 onClick={handleBatchTimeOutAll}
-                className="px-2.5 py-1 bg-teal-950/70 hover:bg-teal-900/70 text-teal-300 border border-teal-700/60 rounded-lg text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50"
+                className="px-2.5 py-1 bg-teal-950/70 hover:bg-teal-900/70 text-teal-300 border border-teal-700/60 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
               >
-                ⏱️ Batch Time-Out All (05:00 PM)
+                ⏱️ Batch Time-Out (05:00 PM)
               </button>
               <button
                 type="button"
-                disabled={isFinance}
                 onClick={handleBatchRainoutStoppage}
-                className="px-2.5 py-1 bg-sky-950/70 hover:bg-sky-900/70 text-sky-300 border border-sky-700/60 rounded-lg text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50"
+                className="px-2.5 py-1 bg-sky-950/70 hover:bg-sky-900/70 text-sky-300 border border-sky-700/60 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
               >
-                🌧️ Mark Rainout Stoppage (Half-Day)
+                🌧️ Rainout Stoppage
               </button>
               <button
                 type="button"
-                disabled={isFinance}
                 onClick={handleBatchAbsentAll}
-                className="px-2.5 py-1 bg-rose-950/70 hover:bg-rose-900/70 text-rose-300 border border-rose-700/60 rounded-lg text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50"
+                className="px-2.5 py-1 bg-rose-950/70 hover:bg-rose-900/70 text-rose-300 border border-rose-700/60 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
               >
                 Mark All Absent
+              </button>
+              <button
+                type="button"
+                onClick={handleBatchResetAll}
+                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-lg text-[11px] font-medium transition-colors cursor-pointer"
+              >
+                ↺ Reset All
               </button>
             </div>
 
@@ -1609,6 +1689,7 @@ export default function TimekeeperAttendanceDashboard({
               <tr>
                 <th className="py-3 px-3 w-10">#</th>
                 <th className="py-3 px-3">Worker Name, Trade &amp; Daily Rate (₱/day)</th>
+                <th className="py-3 px-3">Assigned Project</th>
                 <th className="py-3 px-3">Attendance Status</th>
                 <th className="py-3 px-3">Time In &amp; Time Out</th>
                 <th className="py-3 px-3">Computed Hours</th>
@@ -1619,7 +1700,7 @@ export default function TimekeeperAttendanceDashboard({
             <tbody className="divide-y divide-slate-800/60">
               {filteredWorkers.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-10 text-center text-slate-500">
+                  <td colSpan={8} className="py-10 text-center text-slate-500">
                     {isLoading || !hasLoadedArtisans ? (
                       <div className="flex flex-col items-center gap-2">
                         <div className="w-5 h-5 border-2 border-amber-500 border-t-transparent rounded-full animate-spin" />
@@ -1672,76 +1753,151 @@ export default function TimekeeperAttendanceDashboard({
                         </div>
                       </td>
 
+                      {/* 2b. Assigned Project */}
+                      <td className="py-3 px-3 font-mono">
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-300 border border-amber-500/30 text-[11px] font-medium">
+                          <Building2 className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span className="truncate max-w-[130px]">{worker.assignedProject || activeProjectName}</span>
+                        </span>
+                      </td>
+
                       {/* 3. Attendance Status */}
                       <td className="py-3 px-3">
-                        <select
-                          disabled={isDateLocked || isFinance}
-                          value={entry.granularStatus}
-                          onChange={(e) =>
-                            handleStatusChange(worker.id, e.target.value as GranularAttendanceStatus)
-                          }
-                          className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold border focus:outline-none cursor-pointer ${
+                        {!isReadOnlyReview && !isDateLocked ? (
+                          <select
+                            value={entry.granularStatus}
+                            onChange={(e) =>
+                              handleStatusChange(worker.id, e.target.value as GranularAttendanceStatus)
+                            }
+                            className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold border focus:outline-none cursor-pointer ${
+                              entry.granularStatus === 'PRESENT'
+                                ? isDark
+                                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/50'
+                                  : 'bg-[#FFFFFF] text-[#065F46] border-[#CBD5E1] shadow-2xs font-bold'
+                                : entry.granularStatus === 'LATE_UNDERTIME'
+                                ? isDark
+                                  ? 'bg-amber-950/80 text-amber-300 border-amber-600/50'
+                                  : 'bg-[#FFFFFF] text-[#92400E] border-[#CBD5E1] shadow-2xs font-bold'
+                                : entry.granularStatus === 'WEATHER_RAINOUT'
+                                ? isDark
+                                  ? 'bg-sky-950/80 text-sky-300 border-sky-600/50'
+                                  : 'bg-[#FFFFFF] text-[#1E40AF] border-[#CBD5E1] shadow-2xs font-bold'
+                                : entry.granularStatus === 'ABSENT'
+                                ? isDark
+                                  ? 'bg-rose-950/80 text-rose-300 border-rose-600/50'
+                                  : 'bg-[#FFFFFF] text-[#9F1239] border-[#CBD5E1] shadow-2xs font-bold'
+                                : isDark
+                                ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600/50'
+                                : 'bg-[#FFFFFF] text-[#5B21B6] border-[#CBD5E1] shadow-2xs font-bold'
+                            }`}
+                          >
+                            <option value="PRESENT">Present (Full Shift)</option>
+                            <option value="LATE_UNDERTIME">Late / Undertime</option>
+                            <option value="HALF_DAY_AM">Half-Day AM (08:00–12:00)</option>
+                            <option value="HALF_DAY_PM">Half-Day PM (13:00–17:00)</option>
+                            <option value="WEATHER_RAINOUT">Weather Rainout</option>
+                            <option value="ABSENT">Absent</option>
+                          </select>
+                        ) : (
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
                             entry.granularStatus === 'PRESENT'
-                              ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/50'
+                              ? isDark
+                                ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/50'
+                                : 'bg-[#D1FAE5] text-[#065F46] border-[#10B981]'
                               : entry.granularStatus === 'LATE_UNDERTIME'
-                              ? 'bg-amber-950/80 text-amber-300 border-amber-600/50'
+                              ? isDark
+                                ? 'bg-amber-950/80 text-amber-300 border-amber-600/50'
+                                : 'bg-[#FEF3C7] text-[#92400E] border-[#F59E0B]'
                               : entry.granularStatus === 'WEATHER_RAINOUT'
-                              ? 'bg-sky-950/80 text-sky-300 border-sky-600/50'
+                              ? isDark
+                                ? 'bg-sky-950/80 text-sky-300 border-sky-600/50'
+                                : 'bg-[#DBEAFE] text-[#1E40AF] border-[#3B82F6]'
                               : entry.granularStatus === 'ABSENT'
-                              ? 'bg-rose-950/80 text-rose-300 border-rose-600/50'
-                              : 'bg-indigo-950/80 text-indigo-300 border-indigo-600/50'
-                          }`}
-                        >
-                          <option value="PRESENT">Present (Full Shift)</option>
-                          <option value="LATE_UNDERTIME">Late / Undertime</option>
-                          <option value="HALF_DAY_AM">Half-Day AM (08:00–12:00)</option>
-                          <option value="HALF_DAY_PM">Half-Day PM (13:00–17:00)</option>
-                          <option value="WEATHER_RAINOUT">Weather Rainout</option>
-                          <option value="ABSENT">Absent</option>
-                        </select>
+                              ? isDark
+                                ? 'bg-rose-950/80 text-rose-300 border-rose-600/50'
+                                : 'bg-[#FFE4E6] text-[#9F1239] border-[#F43F5E]'
+                              : isDark
+                              ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600/50'
+                              : 'bg-[#EDE9FE] text-[#5B21B6] border-[#8B5CF6]'
+                          }`}>
+                            {entry.granularStatus === 'PRESENT' && '● Present'}
+                            {entry.granularStatus === 'LATE_UNDERTIME' && '▲ Late / UT'}
+                            {entry.granularStatus === 'HALF_DAY_AM' && '◐ Half-Day AM'}
+                            {entry.granularStatus === 'HALF_DAY_PM' && '◑ Half-Day PM'}
+                            {entry.granularStatus === 'WEATHER_RAINOUT' && '🌧️ Rainout'}
+                            {entry.granularStatus === 'ABSENT' && '✕ Absent'}
+                          </span>
+                        )}
                       </td>
 
                       {/* 4. Time In & Time Out + Quick [Punch In] / [Punch Out] */}
                       <td className="py-3 px-3">
-                        <div className="flex flex-col gap-1.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-mono text-slate-400 w-7">IN:</span>
-                            <input
-                              type="time"
-                              disabled={isDateLocked || isFinance || isAbsent}
-                              value={entry.timeIn}
-                              onChange={(e) => handleTimeChange(worker.id, 'timeIn', e.target.value)}
-                              className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs font-mono text-white focus:border-amber-500 focus:outline-none disabled:opacity-40"
-                            />
-                            <button
-                              type="button"
-                              disabled={isDateLocked || isFinance}
-                              onClick={() => handleTimeChange(worker.id, 'timeIn', formatNow24h())}
-                              className="px-2 py-0.5 rounded bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[10px] font-mono font-semibold cursor-pointer disabled:opacity-40"
-                            >
-                              Punch In
-                            </button>
-                          </div>
+                        {!isReadOnlyReview && !isDateLocked ? (
+                          <div className="flex flex-col gap-1.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-[10px] font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'} w-7`}>IN:</span>
+                              <input
+                                type="time"
+                                disabled={isAbsent}
+                                value={entry.timeIn}
+                                onChange={(e) => handleTimeChange(worker.id, 'timeIn', e.target.value)}
+                                className={`border rounded px-2 py-0.5 text-xs font-mono focus:border-amber-500 focus:outline-none disabled:opacity-40 ${
+                                  isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-[#FFFFFF] border-[#CBD5E1] text-[#0F172A] shadow-2xs'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleTimeChange(worker.id, 'timeIn', formatNow24h())}
+                                className={`px-2 py-0.5 rounded ${
+                                  isDark
+                                    ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/30'
+                                    : 'bg-emerald-50 hover:bg-emerald-100 text-[#065F46] border-emerald-300 shadow-2xs'
+                                } border text-[10px] font-mono font-semibold cursor-pointer disabled:opacity-40`}
+                              >
+                                Punch In
+                              </button>
+                            </div>
 
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-[10px] font-mono text-slate-400 w-7">OUT:</span>
-                            <input
-                              type="time"
-                              disabled={isDateLocked || isFinance || isAbsent}
-                              value={entry.timeOut}
-                              onChange={(e) => handleTimeChange(worker.id, 'timeOut', e.target.value)}
-                              className="bg-slate-950 border border-slate-700 rounded px-2 py-0.5 text-xs font-mono text-white focus:border-amber-500 focus:outline-none disabled:opacity-40"
-                            />
-                            <button
-                              type="button"
-                              disabled={isDateLocked || isFinance}
-                              onClick={() => handleTimeChange(worker.id, 'timeOut', formatNow24h())}
-                              className="px-2 py-0.5 rounded bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 text-[10px] font-mono font-semibold cursor-pointer disabled:opacity-40"
-                            >
-                              Punch Out
-                            </button>
+                            <div className="flex items-center gap-1.5">
+                              <span className={`text-[10px] font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'} w-7`}>OUT:</span>
+                              <input
+                                type="time"
+                                disabled={isAbsent}
+                                value={entry.timeOut}
+                                onChange={(e) => handleTimeChange(worker.id, 'timeOut', e.target.value)}
+                                className={`border rounded px-2 py-0.5 text-xs font-mono focus:border-amber-500 focus:outline-none disabled:opacity-40 ${
+                                  isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-[#FFFFFF] border-[#CBD5E1] text-[#0F172A] shadow-2xs'
+                                }`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => handleTimeChange(worker.id, 'timeOut', formatNow24h())}
+                                className={`px-2 py-0.5 rounded ${
+                                  isDark
+                                    ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/30'
+                                    : 'bg-amber-50 hover:bg-amber-100 text-[#92400E] border-amber-300 shadow-2xs'
+                                } border text-[10px] font-mono font-semibold cursor-pointer disabled:opacity-40`}
+                              >
+                                Punch Out
+                              </button>
+                            </div>
                           </div>
-                        </div>
+                        ) : (
+                          <div className="flex flex-col gap-1 text-[11px] font-mono">
+                            <div className={`${isDark ? 'text-slate-300' : 'text-slate-700'} flex items-center gap-1.5`}>
+                              <span className={`${isDark ? 'text-slate-500' : 'text-slate-400'} text-[10px] w-7`}>IN:</span>
+                              <span className={`font-semibold ${isDark ? 'text-emerald-400' : 'text-[#065F46]'}`}>
+                                {entry.timeIn ? (entry.timeIn.includes(':') ? (parseInt(entry.timeIn.split(':')[0]) > 12 ? `${String(parseInt(entry.timeIn.split(':')[0]) - 12).padStart(2, '0')}:${entry.timeIn.split(':')[1]} PM` : `${entry.timeIn} AM`) : entry.timeIn) : '08:00 AM'}
+                              </span>
+                            </div>
+                            <div className={`${isDark ? 'text-slate-300' : 'text-slate-700'} flex items-center gap-1.5`}>
+                              <span className={`${isDark ? 'text-slate-500' : 'text-slate-400'} text-[10px] w-7`}>OUT:</span>
+                              <span className={`font-semibold ${isDark ? 'text-amber-400' : 'text-[#92400E]'}`}>
+                                {entry.timeOut ? (entry.timeOut.includes(':') ? (parseInt(entry.timeOut.split(':')[0]) >= 12 ? `${String(parseInt(entry.timeOut.split(':')[0]) === 12 ? 12 : parseInt(entry.timeOut.split(':')[0]) - 12).padStart(2, '0')}:${entry.timeOut.split(':')[1]} PM` : `${entry.timeOut} AM`) : entry.timeOut) : '05:00 PM'}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </td>
 
                       {/* 5. Computed Hours (Regular Hrs, Late/Undertime Mins, Overtime Hrs) */}

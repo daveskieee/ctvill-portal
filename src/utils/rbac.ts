@@ -4,7 +4,7 @@
  */
 
 /**
- * Canonical System Roles for CTVill Construction ERP
+ * Canonical System Roles for LDM Construction ERP
  */
 export enum UserRole {
   OM = 'OPERATIONS_MANAGER',      // Top-Tier: Operations Manager / Admin (Weight: 100)
@@ -68,7 +68,7 @@ export type AppModuleId =
   | 'change-orders'          // Commercial Change Orders
   | 'risks'                  // Jobsite Safety & Risk Matrix
   | 'quotation-leads'        // Fit-Out Estimates & Leads
-  | 'permits'                // PEZA & City Hall Permits
+  | 'permits'                // Building & LGU Permits
   | 'schedule'               // Company Calendar
   | 'timekeeper-attendance'  // Daily Roll-Call & Attendance Check-In
   | 'worker-masterlist'      // Worker Master & Wage Rates
@@ -89,67 +89,80 @@ export function canAccessModule(roleInput: UserRole | string, moduleId: string):
   const role = normalizeRole(roleInput);
 
   switch (moduleId) {
-    // 1. Executive Analytics & Dashboards
+    // 1. Executive Analytics & Dashboards (OM Only)
     case 'dashboard':
-      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE;
+      return role === UserRole.OM;
 
     case 'operations-settings':
       return role === UserRole.OM;
 
-    // 2. Financial Controls, Wage Rates, Payroll & Billings
+    // 2. Master Gantt & Timeline (PM / Site Engineer Only - On-Site Execution)
+    case 'gantt':
+      return role === UserRole.PM;
+
+    // 3. Commercial Sites / Projects Hub (OM, PM, Client)
+    case 'projects':
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.CLIENT;
+
+    // 4. Progress & Activity Reports (OM: Read-Only, PM: Submit & Full Edit)
+    case 'kanban':
+      return role === UserRole.OM || role === UserRole.PM;
+
+    // 5. Company Calendar (Universal for Internal Roles)
+    case 'schedule':
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.TIMEKEEPER || role === UserRole.FINANCE;
+
+    // 6. Site Diary & Weather (OM: View, PM: Log)
+    case 'site-diary':
+      return role === UserRole.OM || role === UserRole.PM;
+
+    // 7. Procurement, Approvals & Deliveries (OM: Approvals, PM: PR Submission & Receiving)
+    case 'rfis':
+      return role === UserRole.OM || role === UserRole.PM;
+
+    // 8. Commercial Change Orders (OM & PM)
+    case 'change-orders':
+      return role === UserRole.OM || role === UserRole.PM;
+
+    // 9. Labor Workforce & Artisan Trades (OM: Analytics & Approvals, PM: Dispatch & Reallocations)
+    case 'contractors':
+      return role === UserRole.OM || role === UserRole.PM;
+
+    // 10. Technical Drawings, CAD & Blueprints (OM, PM, Client)
+    case 'documents':
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.CLIENT;
+
+    // 11. Statutory & LGU Permits (OM, PM)
+    case 'permits':
+      return role === UserRole.OM || role === UserRole.PM;
+
+    // 12. Audit Trail & Logs (OM, PM, Timekeeper, Finance)
+    case 'audit-trail':
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.TIMEKEEPER || role === UserRole.FINANCE;
+
+    // 13. Attendance Roll-Call (Timekeeper: Edit; Finance & OM: Strictly Read-Only)
+    case 'timekeeper-attendance':
+      return role === UserRole.OM || role === UserRole.TIMEKEEPER || role === UserRole.FINANCE;
+
+    // 14. Finance & Commercial Controls (Finance Only)
     case 'worker-masterlist':
     case 'finance-payroll':
     case 'payroll':
     case 'payments':
     case 'subcontractor-payables':
-      return role === UserRole.OM || role === UserRole.FINANCE;
+      return role === UserRole.FINANCE;
 
-    // 2b. Finance Subcontractor Roll-Call Audits
-    case 'subcontractor-audits':
-      return role === UserRole.OM || role === UserRole.FINANCE;
-
-    // 3. Commercial Sites / Projects
-    case 'projects':
-      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE || role === UserRole.CLIENT;
-
-    // 3b. Quotation Leads / Estimates (Client sees their own quotes)
+    // 15. Quotation Estimates & Bill of Materials (Finance, Client)
     case 'quotation-leads':
-      return role === UserRole.OM || role === UserRole.FINANCE || role === UserRole.CLIENT;
+      return role === UserRole.FINANCE || role === UserRole.CLIENT;
 
-    // 4. Operational Site Execution Modules (PM & OM Only)
-    case 'gantt':
-    case 'site-diary':
-    case 'kanban':
-    case 'rfis':
-    case 'risks':
-    case 'schedule':
-    case 'contractors':
-      return role === UserRole.OM || role === UserRole.PM;
-
-    // 4b. Technical Drawings, CAD & Blueprints (OM, PM, and Client for handover specs)
-    case 'documents':
-      return role === UserRole.OM || role === UserRole.PM || role === UserRole.CLIENT;
-
-    // 4c. Statutory Permits & Clearances (OM, PM, Finance)
-    case 'permits':
-      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE;
-
-    // 4d. Audit Trail (OM, PM, Finance)
-    case 'audit-trail':
-      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE;
-
-    // 5. Change Orders (OM, PM for field variations; Finance for fund releases)
-    case 'change-orders':
-      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE;
-
-    // 6. Attendance Roll-Call (All internal roles; Blocked for Client)
-    case 'timekeeper-attendance':
-      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE || role === UserRole.TIMEKEEPER;
-
-    // 7. Profile & Security (Universal access for all authenticated roles)
+    // 16. Profile & Security
     case 'account-settings':
       return role !== UserRole.UNAUTHORIZED;
 
+    // 17. Deprecated / Removed Modules
+    case 'risks':
+    case 'subcontractor-audits':
     default:
       return false;
   }
@@ -162,14 +175,14 @@ export function getAttendanceCapabilities(roleInput: UserRole | string) {
   const role = normalizeRole(roleInput);
   return {
     role,
-    // Can submit and edit daily batch attendance
-    canLogAttendance: role === UserRole.TIMEKEEPER || role === UserRole.OM,
+    // Can submit and edit daily batch attendance (Timekeeper ONLY)
+    canLogAttendance: role === UserRole.TIMEKEEPER,
     // Has full override and backfill capabilities across all company projects
-    canOverrideAndBackfill: role === UserRole.OM,
+    canOverrideAndBackfill: false,
     // Can view and endorse attendance for assigned projects
-    canEndorse: role === UserRole.PM || role === UserRole.OM,
+    canEndorse: role === UserRole.PM,
     // Read-only inspection / review
-    isReadOnlyReview: role === UserRole.PM || role === UserRole.FINANCE,
+    isReadOnlyReview: role === UserRole.OM || role === UserRole.FINANCE,
     // Dedicated site timekeeper roll-call mode
     isTimekeeperCheckIn: role === UserRole.TIMEKEEPER,
   };

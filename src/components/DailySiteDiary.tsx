@@ -14,7 +14,7 @@ import {
   Bell, Play, Pause, Megaphone, Smartphone, CheckCheck
 } from 'lucide-react';
 import { DailySiteLog, ProjectProfile, Contractor } from '../types';
-import { resolveProjectCoordinatesSync } from '../utils/geocoding';
+import { resolveProjectCoordinatesSync, searchLocationsNationwide, resolveLocalGeocoding } from '../utils/geocoding';
 import { useTheme } from '../context/ThemeContext';
 
 interface DailySiteDiaryProps {
@@ -36,7 +36,7 @@ export interface SiteLocation {
 
 export const DEFAULT_SITE_LOCATION: SiteLocation = {
   id: 'ctvill-main',
-  name: 'CTVill Main Development Site',
+  name: 'LDM Main Project Site',
   region: 'Laguna, Philippines',
   lat: 14.2789,
   lon: 121.1245,
@@ -275,8 +275,7 @@ export function getSmoothCurvePath(points: { x: number; y: number }[]): string {
 }
 
 export default function DailySiteDiary({ logs, projects = [], contractors = [], onAddLog, onToggleWeatherSuspension }: DailySiteDiaryProps) {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const { isDark } = useTheme();
   // Coordinate resolver for project sites (explicit lat/lon or comprehensive geocoding)
   const resolveProjectCoordinates = useCallback((p: ProjectProfile): { lat: number; lon: number; name: string } => {
     return resolveProjectCoordinatesSync(p.location, p.name, p.latitude, p.longitude);
@@ -346,6 +345,116 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [isGpsLocating, setIsGpsLocating] = useState(false);
+
+  // Interactive Map Pinpoint Coordinate Picker States
+  const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
+  const [pickerLat, setPickerLat] = useState<number>(selectedLocation.lat);
+  const [pickerLon, setPickerLon] = useState<number>(selectedLocation.lon);
+  const [pickerLocationName, setPickerLocationName] = useState<string>(selectedLocation.region || selectedLocation.name);
+  const [mapSearchInput, setMapSearchInput] = useState('');
+  const [mapSuggestions, setMapSuggestions] = useState<any[]>([]);
+  const [isMapSearching, setIsMapSearching] = useState(false);
+
+  const PHILIPPINE_CITY_PRESETS = [
+    { name: 'Cabuyao, Laguna (LDM Main)', lat: 14.2789, lon: 121.1245 },
+    { name: 'Santa Rosa, Laguna', lat: 14.3122, lon: 121.1114 },
+    { name: 'Calamba, Laguna', lat: 14.2117, lon: 121.1654 },
+    { name: 'Tagaytay, Cavite', lat: 14.1153, lon: 120.9621 },
+    { name: 'BGC Taguig, Metro Manila', lat: 14.5498, lon: 121.0506 },
+    { name: 'Makati CBD, Metro Manila', lat: 14.5547, lon: 121.0244 },
+    { name: 'Quezon City, Metro Manila', lat: 14.6760, lon: 121.0437 },
+    { name: 'Cebu City, Visayas', lat: 10.3157, lon: 123.8854 },
+    { name: 'Davao City, Mindanao', lat: 7.1907, lon: 125.4553 }
+  ];
+
+  const handleOpenMapPicker = () => {
+    setPickerLat(selectedLocation.lat);
+    setPickerLon(selectedLocation.lon);
+    setPickerLocationName(selectedLocation.region || selectedLocation.name);
+    setMapSearchInput('');
+    setMapSuggestions([]);
+    setIsMapPickerOpen(true);
+  };
+
+  const handleMapSearch = async (val: string) => {
+    setMapSearchInput(val);
+    if (!val || val.trim().length < 2) {
+      setMapSuggestions([]);
+      return;
+    }
+    setIsMapSearching(true);
+    try {
+      const results = await searchLocationsNationwide(val);
+      setMapSuggestions(results);
+    } catch {
+      // Fallback local lookup
+      const local = resolveLocalGeocoding(val);
+      if (local) {
+        setMapSuggestions([{ displayName: local.name, subLabel: local.region || '', lat: local.lat, lon: local.lon }]);
+      }
+    } finally {
+      setIsMapSearching(false);
+    }
+  };
+
+  const handleSelectPresetOrSuggestion = (lat: number, lon: number, name: string) => {
+    setPickerLat(parseFloat(lat.toFixed(6)));
+    setPickerLon(parseFloat(lon.toFixed(6)));
+    setPickerLocationName(name);
+    setMapSuggestions([]);
+    setMapSearchInput(name);
+  };
+
+  const handleNudgePin = (deltaLat: number, deltaLon: number) => {
+    setPickerLat(prev => parseFloat((prev + deltaLat).toFixed(6)));
+    setPickerLon(prev => parseFloat((prev + deltaLon).toFixed(6)));
+  };
+
+  const handleSavePinpointCoordinates = () => {
+    const cleanLat = parseFloat(Number(pickerLat).toFixed(6));
+    const cleanLon = parseFloat(Number(pickerLon).toFixed(6));
+    const cleanName = pickerLocationName.trim() || selectedLocation.name;
+
+    setSelectedLocation(prev => ({
+      ...prev,
+      lat: cleanLat,
+      lon: cleanLon,
+      region: cleanName,
+    }));
+
+    try {
+      const raw = localStorage.getItem('ctvill_projects');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const updated = parsed.map((p: any) => {
+            if (p.id === selectedLocation.projectId || p.name === selectedLocation.name || p.title === selectedLocation.name) {
+              return {
+                ...p,
+                lat: cleanLat,
+                lon: cleanLon,
+                latitude: cleanLat,
+                longitude: cleanLon,
+                coordinates: `${cleanLat}, ${cleanLon}`,
+                location: cleanName
+              };
+            }
+            return p;
+          });
+          localStorage.setItem('ctvill_projects', JSON.stringify(updated));
+          localStorage.setItem('ctvill_cached_projects', JSON.stringify(updated));
+          window.dispatchEvent(new CustomEvent('ctvill_projects_updated', { detail: updated }));
+        }
+      }
+    } catch (e) {
+      console.error('Failed to save project coordinates to localStorage:', e);
+    }
+
+    setIsMapPickerOpen(false);
+    setNotification(`📍 Site coordinates saved to ${cleanLat}° N, ${cleanLon}° E. Weather refreshed.`);
+    setTimeout(() => setNotification(null), 4000);
+    fetchWeather(false, true);
+  };
 
   // Force Majeure Weather Suspension State
   const activeProject = projects.find(p => p.id === selectedLocation.projectId);
@@ -575,7 +684,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
       activeHeadcount: broadcastHeadcount,
       equipmentOnSite: `Force Majeure Stoppage: Wind ${liveWeather?.windSpeed.toFixed(1) || 0} km/h, Rain ${liveWeather?.precipitation.toFixed(1) || 0} mm.${testMobileNumbers ? ` Test GSM dispatch: ${testMobileNumbers}.` : ''}`,
       toolboxTopic: `EMERGENCY BROADCAST: Force Majeure Work Stoppage (${selectedLocation.name})`,
-      workCompleted: `OFFICIAL CTVILL SAFETY NOTICE: Work suspended under Force Majeure at ${selectedLocation.name}. Emergency GSM/Push dispatch transmitted at ${nowPht} PHT. Recipient target: ${recipientSummary}. High-elevation and outdoor operations halted; personnel evacuated to CTVill base camp safety shelter. Protocol compliant with DOLE-OSHC weather guidelines. Alert payload: "${customBroadcastMessage}"`,
+      workCompleted: `OFFICIAL LDM SAFETY NOTICE: Work suspended under Force Majeure at ${selectedLocation.name}. Emergency GSM/Push dispatch transmitted at ${nowPht} PHT. Recipient target: ${recipientSummary}. High-elevation and outdoor operations halted; personnel evacuated to LDM base camp safety shelter. Protocol compliant with DOLE-OSHC weather guidelines. Alert payload: "${customBroadcastMessage}"`,
       delaysOrIssues: `Contractual Weather Delay Initiated: ${suspensionReason}`,
       supervisorName: observerName,
     });
@@ -830,7 +939,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
       const windVal = liveWeather ? liveWeather.windSpeed.toFixed(1) : manualWind;
       const rainVal = liveWeather ? liveWeather.precipitation.toFixed(1) : '0.0';
       setCustomBroadcastMessage(
-        `⚠️ [CTVILL SAFETY ALERT] EMERGENCY WORK SUSPENSION: Operations at ${selectedLocation.name} are suspended under Force Majeure effective immediately due to adverse weather (${currentWeatherInfo.label}, Wind: ${windVal} km/h, Rain: ${rainVal} mm). All high-elevation scaffolding, crane lifting, hot works, and exterior activities are strictly halted. All trade personnel must secure loose materials, disconnect power, and muster at CTVill Base Camp Safety Shelter.`
+        `⚠️ [LDM SAFETY ALERT] EMERGENCY WORK SUSPENSION: Operations at ${selectedLocation.name} are suspended under Force Majeure effective immediately due to adverse weather (${currentWeatherInfo.label}, Wind: ${windVal} km/h, Rain: ${rainVal} mm). All high-elevation scaffolding, crane lifting, hot works, and exterior activities are strictly halted. All trade personnel must secure loose materials, disconnect power, and muster at LDM Base Camp Safety Shelter.`
       );
     }
   }, [selectedLocation, currentWeatherInfo.label, liveWeather, manualWind, isMessageCustomized]);
@@ -1534,6 +1643,16 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                     <span className="font-mono text-[11px] text-slate-300">
                       GPS: {selectedLocation.lat.toFixed(4)}° N, {selectedLocation.lon.toFixed(4)}° E
                     </span>
+                    <span className="text-slate-600">•</span>
+                    <button
+                      type="button"
+                      onClick={handleOpenMapPicker}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-[11px] font-mono font-bold cursor-pointer transition shadow-xs"
+                      title="Pinpoint project on interactive map & update site telemetry"
+                    >
+                      <MapPin className="w-3 h-3 text-amber-400" />
+                      <span>📍 Pinpoint Project on Map</span>
+                    </button>
                     <span className="text-slate-600">•</span>
                     <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 font-mono font-semibold">
                       Site Synced
@@ -2404,7 +2523,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
                 <label className="block text-xs font-mono text-slate-400 uppercase font-bold">
-                  Emergency Alert Payload (CTVill Safety & DOLE-OSHC Notice)
+                  Emergency Alert Payload (LDM Safety &amp; DOLE-OSHC Notice)
                 </label>
                 <button
                   type="button"
@@ -2413,12 +2532,12 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                     const rainVal = liveWeather ? liveWeather.precipitation.toFixed(1) : '0.0';
                     setIsMessageCustomized(false);
                     setCustomBroadcastMessage(
-                      `⚠️ [CTVILL SAFETY ALERT] EMERGENCY WORK SUSPENSION: Operations at ${selectedLocation.name} are suspended under Force Majeure effective immediately due to adverse weather (${currentWeatherInfo.label}, Wind: ${windVal} km/h, Rain: ${rainVal} mm). All high-elevation scaffolding, crane lifting, hot works, and exterior activities are strictly halted. All trade personnel must secure loose materials, disconnect power, and muster at CTVill Base Camp Safety Shelter.`
+                      `⚠️ [LDM SAFETY ALERT] EMERGENCY WORK SUSPENSION: Operations at ${selectedLocation.name} are suspended under Force Majeure effective immediately due to adverse weather (${currentWeatherInfo.label}, Wind: ${windVal} km/h, Rain: ${rainVal} mm). All high-elevation scaffolding, crane lifting, hot works, and exterior activities are strictly halted. All trade personnel must secure loose materials, disconnect power, and muster at LDM Base Camp Safety Shelter.`
                     );
                   }}
                   className="text-[10px] font-mono text-amber-400 hover:underline cursor-pointer"
                 >
-                  Reset to Standard CTVill Template
+                  Reset to Standard LDM Template
                 </button>
               </div>
               <textarea
@@ -2453,7 +2572,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               <div className="bg-emerald-950/80 border border-emerald-500/50 rounded-xl p-3.5 flex items-center gap-3 text-xs text-emerald-300 animate-fadeIn">
                 <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
                 <div>
-                  <strong className="font-bold text-white block">CTVill Safety Dispatch Transmitted & Logged</strong>
+                  <strong className="font-bold text-white block">LDM Safety Dispatch Transmitted &amp; Logged</strong>
                   <span>
                     Official stoppage notice recorded for <strong>{selectedLocation.name}</strong> at {lastBroadcastTimestamp} PHT.
                     {testMobileNumbers && ` Test alerts queued to [${testMobileNumbers}].`}
@@ -2483,6 +2602,247 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                 <Radio className={`w-4 h-4 ${isBroadcasting ? 'animate-spin' : ''}`} />
                 <span>{isBroadcasting ? 'Transmitting Alert Dispatch...' : broadcastConfirmed ? 'Re-transmit Alert' : 'Transmit Emergency Dispatch Now'}</span>
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================== */}
+      {/* MODAL: INTERACTIVE MAP PINPOINT COORDINATE PICKER                     */}
+      {/* ===================================================================== */}
+      {isMapPickerOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-slate-800 pb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                  <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider">
+                    DYNAMIC SITE TELEMETRY GEOCODING
+                  </span>
+                </div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <MapPin className="w-5 h-5 text-amber-400" />
+                  Pinpoint Project Location on Interactive Map
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Set exact coordinates for <strong className="text-white">{selectedLocation.name}</strong> to calibrate live Open-Meteo weather telemetry and DOLE-OSHC rain thresholds.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMapPickerOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Autocomplete Search & Presets */}
+            <div className="space-y-2">
+              <label className="block text-[11px] font-mono uppercase text-slate-400 font-bold">
+                Search Philippine Location or Project Address
+              </label>
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={mapSearchInput}
+                  onChange={(e) => handleMapSearch(e.target.value)}
+                  placeholder="Search city, municipality, barangay, or landmark (e.g. Cabuyao, Nuvali, BGC)..."
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none"
+                />
+                {isMapSearching && (
+                  <div className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-mono text-amber-400 animate-pulse">
+                    Searching...
+                  </div>
+                )}
+
+                {/* Suggestions Dropdown */}
+                {mapSuggestions.length > 0 && (
+                  <div className="absolute left-0 right-0 top-full mt-1.5 bg-slate-950 border border-amber-500/50 rounded-xl shadow-2xl z-30 max-h-48 overflow-y-auto divide-y divide-slate-800">
+                    {mapSuggestions.map((sug, idx) => (
+                      <button
+                        key={`${sug.displayName}-${idx}`}
+                        type="button"
+                        onClick={() => handleSelectPresetOrSuggestion(sug.lat, sug.lon, sug.displayName)}
+                        className="w-full px-3.5 py-2.5 text-left text-xs hover:bg-amber-500/10 cursor-pointer flex items-center justify-between transition-colors"
+                      >
+                        <div>
+                          <div className="font-semibold text-white">{sug.displayName}</div>
+                          {sug.subLabel && <div className="text-[10px] text-slate-400">{sug.subLabel}</div>}
+                        </div>
+                        <div className="font-mono text-[10px] text-amber-400 shrink-0">
+                          {sug.lat.toFixed(4)}°, {sug.lon.toFixed(4)}°
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Quick City Presets */}
+              <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                <span className="text-[10px] font-mono uppercase text-slate-500 mr-1">Quick Presets:</span>
+                {PHILIPPINE_CITY_PRESETS.map((city) => (
+                  <button
+                    key={city.name}
+                    type="button"
+                    onClick={() => handleSelectPresetOrSuggestion(city.lat, city.lon, city.name)}
+                    className="px-2 py-0.5 rounded-md text-[10px] font-mono font-medium bg-slate-950 hover:bg-amber-500/15 hover:text-amber-300 text-slate-400 border border-slate-800 cursor-pointer transition-colors"
+                  >
+                    {city.name.split(' (')[0]}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Interactive OpenStreetMap Embed Canvas */}
+            <div className="rounded-xl overflow-hidden border border-slate-800 bg-slate-950 relative">
+              <iframe
+                title="Interactive Project Map View"
+                width="100%"
+                height="280"
+                frameBorder="0"
+                scrolling="no"
+                marginHeight={0}
+                marginWidth={0}
+                src={`https://www.openstreetmap.org/export/embed.html?bbox=${(pickerLon - 0.008).toFixed(6)}%2C${(pickerLat - 0.006).toFixed(6)}%2C${(pickerLon + 0.008).toFixed(6)}%2C${(pickerLat + 0.006).toFixed(6)}&layer=mapnik&marker=${pickerLat.toFixed(6)}%2C${pickerLon.toFixed(6)}`}
+                className="w-full h-72 opacity-90 contrast-105"
+              />
+
+              {/* Live Pin Information Overlay Pill */}
+              <div className="absolute top-3 left-3 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-lg px-3 py-1.5 shadow-lg flex items-center gap-2">
+                <MapPin className="w-4 h-4 text-amber-400 animate-bounce" />
+                <div>
+                  <div className="text-[10px] font-mono uppercase text-slate-400">Current Pin Target</div>
+                  <div className="text-xs font-mono font-bold text-white">
+                    {pickerLat.toFixed(6)}° N, {pickerLon.toFixed(6)}° E
+                  </div>
+                </div>
+              </div>
+
+              {/* Directional Nudge Pad (Precision Fine-Tuning) */}
+              <div className="absolute bottom-3 right-3 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-xl p-1.5 shadow-lg flex flex-col items-center gap-1">
+                <span className="text-[9px] font-mono uppercase text-slate-400 tracking-wider">Nudge Pin</span>
+                <button
+                  type="button"
+                  onClick={() => handleNudgePin(0.001, 0)}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-mono cursor-pointer"
+                  title="Nudge North (+0.001°)"
+                >
+                  ▲ North
+                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => handleNudgePin(0, -0.001)}
+                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-mono cursor-pointer"
+                    title="Nudge West (-0.001°)"
+                  >
+                    ◀ West
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleNudgePin(0, 0.001)}
+                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-mono cursor-pointer"
+                    title="Nudge East (+0.001°)"
+                  >
+                    East ▶
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => handleNudgePin(-0.001, 0)}
+                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-mono cursor-pointer"
+                  title="Nudge South (-0.001°)"
+                >
+                  ▼ South
+                </button>
+              </div>
+            </div>
+
+            {/* Coordinate Numeric Inputs & Address */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                  Latitude (Decimal Degrees) *
+                </label>
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={pickerLat}
+                  onChange={(e) => setPickerLat(parseFloat(e.target.value) || 0)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                  Longitude (Decimal Degrees) *
+                </label>
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={pickerLon}
+                  onChange={(e) => setPickerLon(parseFloat(e.target.value) || 0)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">
+                  Location / Site Label
+                </label>
+                <input
+                  type="text"
+                  value={pickerLocationName}
+                  onChange={(e) => setPickerLocationName(e.target.value)}
+                  placeholder="e.g. Cabuyao, Laguna, Philippines"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition((pos) => {
+                      handleSelectPresetOrSuggestion(
+                        pos.coords.latitude,
+                        pos.coords.longitude,
+                        `Device GPS (${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)})`
+                      );
+                    });
+                  }
+                }}
+                className="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-medium cursor-pointer flex items-center gap-1.5 transition"
+              >
+                <LocateFixed className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Use Current Device GPS</span>
+              </button>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setIsMapPickerOpen(false)}
+                  className="px-4 py-2 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-xs font-medium cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSavePinpointCoordinates}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-md shadow-amber-500/10 transition"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Save Coordinates &amp; Refresh Telemetry</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

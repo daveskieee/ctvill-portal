@@ -18,6 +18,7 @@ import {
 import { SubcontractorPayable, SubcontractorPayableStatus, DailyManpowerAudit, Contractor, ProjectProfile } from '../types';
 import { isTradeGroupOrOutsourcedContractor } from '../types';
 import { openEnterprisePrintWindow, escapePrintHtml } from '../utils/printEngine';
+import { useTheme } from '../context/ThemeContext';
 
 interface SubcontractorBillingsDisbursementsProps {
   manpowerAudits?: DailyManpowerAudit[];
@@ -27,7 +28,21 @@ interface SubcontractorBillingsDisbursementsProps {
   onNotify?: (msg: string) => void;
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Helpers & Sanitizer ───────────────────────────────────────────────────
+
+export const SUBCONTRACTOR_PAYABLES_KEY = 'ctvill_subcontractor_payables';
+const LEGACY_PROJECTS_REGEX = /NexBridge(\s*Software\s*Hub)?|BG Comm|Maker Piece|Owl Milk Tea|Redbin/gi;
+
+export const sanitizeText = (txt: string | undefined | null): string => {
+  return String(txt || '').replace(LEGACY_PROJECTS_REGEX, '2-Storey Residential House');
+};
+
+export const sanitizePayable = (r: SubcontractorPayable): SubcontractorPayable => ({
+  ...r,
+  projectSite: sanitizeText(r.projectSite),
+  remarks: sanitizeText(r.remarks),
+  payeeContractorName: sanitizeText(r.payeeContractorName),
+});
 
 const STATUS_CONFIG: Record<SubcontractorPayableStatus, { label: string; color: string; icon: React.ElementType }> = {
   PENDING_AUDIT: { label: 'Pending Audit Verification', color: 'bg-amber-500/15 text-amber-300 border-amber-500/30', icon: Clock },
@@ -72,9 +87,34 @@ export default function SubcontractorBillingsDisbursements({
   onNotify,
 }: SubcontractorBillingsDisbursementsProps) {
   const notify = (msg: string) => onNotify?.(msg);
+  const { isDark } = useTheme();
+
+  // Cleanse incoming audits to ensure no legacy mock projects bleed into payables
+  const sanitizedAudits = useMemo(() => {
+    return (manpowerAudits || []).map(a => ({
+      ...a,
+      contractorName: sanitizeText(a.contractorName),
+      assignedSectorOrLot: sanitizeText(a.assignedSectorOrLot),
+    }));
+  }, [manpowerAudits]);
 
   // ── State ──
-  const [records, setRecords] = useState<SubcontractorPayable[]>([]);
+  const [records, setRecords] = useState<SubcontractorPayable[]>(() => {
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem(SUBCONTRACTOR_PAYABLES_KEY);
+      if (raw) {
+        try {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            const sanitized = parsed.map(sanitizePayable);
+            localStorage.setItem(SUBCONTRACTOR_PAYABLES_KEY, JSON.stringify(sanitized));
+            return sanitized;
+          }
+        } catch {}
+      }
+    }
+    return [];
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -100,7 +140,7 @@ export default function SubcontractorBillingsDisbursements({
       payeeContractorId: 'CONT-1789598922028',
       payeeContractorName: 'Brent',
       tradeSpecialty: 'Concrete Pouring & Structural Works',
-      projectSite: 'NexBridge Software Hub',
+      projectSite: 'LDM Modern Villa Site',
       auditId: 'AUD-1790357393677',
       verifiedHeadcount: 15,
       claimedHeadcount: 15,
@@ -109,7 +149,7 @@ export default function SubcontractorBillingsDisbursements({
       billedAmount: 45000,
       paymentMethod: 'Bank Wire',
       status: 'PENDING_AUDIT',
-      remarks: '15 Men Verified on-site for NexBridge Concrete Pouring shift. Gate muster 100% matched, pending fund release.',
+      remarks: '15 Men Verified on-site for LDM Concrete Pouring shift. Gate muster 100% matched, pending fund release.',
       createdBy: 'Finance Department',
       createdAt: '2026-09-25T18:00:00.000Z'
     },
@@ -119,7 +159,7 @@ export default function SubcontractorBillingsDisbursements({
       payeeContractorId: 'CONT-1789599140157',
       payeeContractorName: 'Paul',
       tradeSpecialty: 'Skilled Trade Crews (Electricians, Carpenters, Painters, Masons)',
-      projectSite: 'NexBridge Software Hub',
+      projectSite: 'LDM Modern Villa Site',
       auditId: 'AUD-67542',
       verifiedHeadcount: 10,
       claimedHeadcount: 10,
@@ -140,7 +180,7 @@ export default function SubcontractorBillingsDisbursements({
       payeeContractorId: 'CONT-1789599064683',
       payeeContractorName: 'Lizter',
       tradeSpecialty: 'Site Foremen & General Labor Muster',
-      projectSite: 'NexBridge Software Hub',
+      projectSite: 'LDM Modern Villa Site',
       auditId: 'AUD-08944',
       verifiedHeadcount: 50,
       claimedHeadcount: 50,
@@ -152,7 +192,7 @@ export default function SubcontractorBillingsDisbursements({
       paymentMethod: 'Bank Wire',
       referenceNo: 'BW-889123-BDO',
       status: 'PAID',
-      remarks: 'Full 50-man field supervision gang verified across all NexBridge levels. Disbursed via BDO wire.',
+      remarks: 'Full 50-man field supervision gang verified across all LDM project levels. Disbursed via BDO wire.',
       createdBy: 'Finance Department',
       createdAt: '2026-09-17T14:15:00.000Z'
     }
@@ -173,8 +213,8 @@ export default function SubcontractorBillingsDisbursements({
       }
     });
 
-    // Also include any crews directly recorded in manpowerAudits (e.g. Brent, Paul, Lizter)
-    manpowerAudits.forEach(a => {
+    // Also include any crews directly recorded in sanitizedAudits (e.g. Brent, Paul, Lizter)
+    sanitizedAudits.forEach(a => {
       if (a.contractorName && !seenNames.has(a.contractorName.toLowerCase())) {
         list.push({
           id: a.contractorId || `AUD-CONT-${a.id}`,
@@ -188,18 +228,18 @@ export default function SubcontractorBillingsDisbursements({
     });
 
     return list;
-  }, [contractors, manpowerAudits]);
+  }, [contractors, sanitizedAudits]);
 
   const projectNames = useMemo(
     () => Array.from(new Set([
-      ...projects.map(p => p.name),
+      ...projects.map(p => sanitizeText(p.name)),
       ...records.map(r => r.projectSite),
-      ...manpowerAudits.map(a => a.assignedSectorOrLot),
-      'NexBridge Software Hub',
+      ...sanitizedAudits.map(a => a.assignedSectorOrLot),
+      'LDM Modern Villa Site',
       '2-Storey Residential House',
-      'BGComm 1200sqm BPO Center'
+      'Laguna Residential Turnkey Build'
     ])).filter(Boolean),
-    [projects, records, manpowerAudits]
+    [projects, records, sanitizedAudits]
   );
 
   // ── Data fetch ──
@@ -209,14 +249,33 @@ export default function SubcontractorBillingsDisbursements({
     try {
       const res = await fetch('/api/subcontractor-payables');
       if (res.ok) {
-        const data: SubcontractorPayable[] = await res.json();
-        setRecords(data && data.length > 0 ? data : SEED_PAYABLES);
+        const rawData: SubcontractorPayable[] = await res.json();
+        const raw = rawData && rawData.length > 0 ? rawData : SEED_PAYABLES;
+        const sanitized = raw.map(sanitizePayable);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(SUBCONTRACTOR_PAYABLES_KEY, JSON.stringify(sanitized));
+        }
+        setRecords(sanitized);
       } else {
-        setRecords(prev => prev.length > 0 ? prev : SEED_PAYABLES);
+        setRecords(prev => {
+          const fallback = prev.length > 0 ? prev : SEED_PAYABLES;
+          const sanitized = fallback.map(sanitizePayable);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem(SUBCONTRACTOR_PAYABLES_KEY, JSON.stringify(sanitized));
+          }
+          return sanitized;
+        });
       }
     } catch (err) {
       console.warn('Failed to fetch subcontractor payables:', err);
-      setRecords(prev => prev.length > 0 ? prev : SEED_PAYABLES);
+      setRecords(prev => {
+        const fallback = prev.length > 0 ? prev : SEED_PAYABLES;
+        const sanitized = fallback.map(sanitizePayable);
+        if (typeof window !== 'undefined') {
+          localStorage.setItem(SUBCONTRACTOR_PAYABLES_KEY, JSON.stringify(sanitized));
+        }
+        return sanitized;
+      });
     } finally {
       setIsLoading(false);
       setIsRefreshing(false);
@@ -305,7 +364,7 @@ export default function SubcontractorBillingsDisbursements({
       }));
       return;
     }
-    const audit = manpowerAudits.find(a => a.id === auditId);
+    const audit = sanitizedAudits.find(a => a.id === auditId);
     if (audit) {
       const rate = 1000;
       const days = Number(form.billedDays) || 1;
@@ -315,13 +374,13 @@ export default function SubcontractorBillingsDisbursements({
         auditId,
         verifiedHeadcount: String(audit.verifiedHeadcount),
         claimedHeadcount: String(audit.claimedHeadcount),
-        payeeContractorName: audit.contractorName || prev.payeeContractorName,
+        payeeContractorName: sanitizeText(audit.contractorName) || prev.payeeContractorName,
         tradeSpecialty: audit.specialty || prev.tradeSpecialty,
-        projectSite: audit.assignedSectorOrLot || prev.projectSite,
+        projectSite: sanitizeText(audit.assignedSectorOrLot) || prev.projectSite,
         ratePerDay: prev.ratePerDay || String(rate),
         billedDays: String(days),
         billedAmount: prev.billedAmount || String(rate * days * hc),
-        remarks: `${audit.verifiedHeadcount} / ${audit.claimedHeadcount} Men Verified on-site for ${audit.assignedSectorOrLot || 'site'} via Audit ${audit.id}.`,
+        remarks: `${audit.verifiedHeadcount} / ${audit.claimedHeadcount} Men Verified on-site for ${sanitizeText(audit.assignedSectorOrLot) || 'site'} via Audit ${audit.id}.`,
       }));
     }
   };
@@ -498,7 +557,7 @@ export default function SubcontractorBillingsDisbursements({
       docRef: `AP-SUB-${Date.now().toString().slice(-6)}`,
       orientation: 'landscape',
       projectMeta: {
-        name: projectFilter === 'ALL' ? 'All Active CTVill Commercial Sites' : projectFilter,
+        name: projectFilter === 'ALL' ? 'All Active LDM Construction Sites' : projectFilter,
         period: new Date().toLocaleDateString('en-PH'),
       },
       kpiSummary: [
@@ -865,12 +924,12 @@ export default function SubcontractorBillingsDisbursements({
       </div>
 
       {/* ── Audit-Linked Records from DailyManpowerAudit ── */}
-      {manpowerAudits.length > 0 && (
+      {sanitizedAudits.length > 0 && (
         <div className="bg-slate-950/60 border border-slate-800/60 rounded-2xl overflow-hidden">
           <div className="px-5 py-3 border-b border-slate-800/60 flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400" />
             <span className="text-sm font-bold text-white">Certified Audit Headcounts — Available for Billing Linkage</span>
-            <span className="ml-auto text-[10px] font-mono text-slate-400">{manpowerAudits.length} audit records</span>
+            <span className="ml-auto text-[10px] font-mono text-slate-400">{sanitizedAudits.length} audit records</span>
           </div>
           <div className="overflow-x-auto max-h-72 overflow-y-auto">
             <table className="w-full text-xs">
@@ -882,7 +941,7 @@ export default function SubcontractorBillingsDisbursements({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/30">
-                {manpowerAudits.slice(0, 15).map(audit => {
+                {sanitizedAudits.slice(0, 15).map(audit => {
                   const linked = records.some(r => r.auditId === audit.id);
                   const isBilled = linked || (audit as any).isBilled === true || (audit as any).status === 'Billed' || (audit as any).status === 'BILLED';
                   return (
@@ -953,19 +1012,19 @@ export default function SubcontractorBillingsDisbursements({
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setIsModalOpen(false)} />
-          <div className="relative w-full max-w-2xl bg-slate-950 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden">
+          <div className={`relative w-full max-w-2xl ${isDark ? 'bg-slate-950 border-slate-700/80 text-white' : 'bg-white border-slate-200 text-slate-900'} border rounded-2xl shadow-2xl overflow-hidden`}>
             {/* Header */}
-            <div className="p-6 pb-4 border-b border-slate-800 flex items-center justify-between">
+            <div className={`p-6 pb-4 border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} flex items-center justify-between`}>
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-xl bg-emerald-500/10 border border-emerald-500/25 flex items-center justify-center">
                   <Receipt className="w-4 h-4 text-emerald-400" />
                 </div>
                 <div>
-                  <h2 className="font-bold text-white text-sm">Record Contractor Disbursement</h2>
-                  <p className="text-[10px] text-slate-400">Log invoice billing linked to verified roll-call audit</p>
+                  <h2 className={`font-bold ${isDark ? 'text-white' : 'text-slate-900'} text-sm`}>Record Contractor Disbursement</h2>
+                  <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Log invoice billing linked to verified roll-call audit</p>
                 </div>
               </div>
-              <button onClick={() => setIsModalOpen(false)} className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer">
+              <button onClick={() => setIsModalOpen(false)} className={`p-2 rounded-lg ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-100 text-slate-500 hover:text-slate-900'} transition-colors cursor-pointer`}>
                 <X className="w-4 h-4" />
               </button>
             </div>
@@ -975,12 +1034,12 @@ export default function SubcontractorBillingsDisbursements({
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Payee */}
                 <div className="sm:col-span-2">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Payee / Subcontractor Name *</label>
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>Payee / Subcontractor Name *</label>
                   {tradeContractors.length > 0 ? (
                     <select
                       value={form.payeeContractorName}
                       onChange={e => handleContractorSelect(e.target.value)}
-                      className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 cursor-pointer"
+                      className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 cursor-pointer`}
                       required
                     >
                       <option value="">— Select Subcontractor —</option>
@@ -994,7 +1053,7 @@ export default function SubcontractorBillingsDisbursements({
                       value={form.payeeContractorName}
                       onChange={e => handleFormChange('payeeContractorName', e.target.value)}
                       placeholder="e.g. Rodolfo Alonte - Manpower Supply"
-                      className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60"
+                      className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60`}
                       required
                     />
                   )}
@@ -1003,7 +1062,7 @@ export default function SubcontractorBillingsDisbursements({
                       value={''}
                       onChange={e => handleFormChange('payeeContractorName', e.target.value)}
                       placeholder="Enter contractor name"
-                      className="w-full mt-2 bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60"
+                      className={`w-full mt-2 ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60`}
                       required
                     />
                   )}
@@ -1011,22 +1070,22 @@ export default function SubcontractorBillingsDisbursements({
 
                 {/* Trade */}
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Trade Specialty</label>
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>Trade Specialty</label>
                   <input
                     value={form.tradeSpecialty}
                     onChange={e => handleFormChange('tradeSpecialty', e.target.value)}
                     placeholder="e.g. Concrete Pouring, Masonry"
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60"
+                    className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60`}
                   />
                 </div>
 
                 {/* Project Site */}
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Project Site *</label>
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>Project Site *</label>
                   <select
                     value={form.projectSite}
                     onChange={e => handleFormChange('projectSite', e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 cursor-pointer"
+                    className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 cursor-pointer`}
                     required
                   >
                     <option value="">— Select Site —</option>
@@ -1043,10 +1102,10 @@ export default function SubcontractorBillingsDisbursements({
                   <select
                     value={form.auditId}
                     onChange={e => handleAuditSelect(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 cursor-pointer"
+                    className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 cursor-pointer`}
                   >
                     <option value="">-- No Audit Linked --</option>
-                    {manpowerAudits.map(a => (
+                    {sanitizedAudits.map(a => (
                       <option key={a.id} value={a.id}>
                         {fmtDate(a.date)} — {a.contractorName} | {a.verifiedHeadcount}/{a.claimedHeadcount} verified ({a.verificationStatus})
                       </option>
@@ -1061,60 +1120,60 @@ export default function SubcontractorBillingsDisbursements({
 
                 {/* Headcounts */}
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Verified Headcount</label>
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>Verified Headcount</label>
                   <input type="number" min={0} value={form.verifiedHeadcount} onChange={e => handleFormChange('verifiedHeadcount', e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60" placeholder="0" />
+                    className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60`} placeholder="0" />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Claimed Headcount</label>
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>Claimed Headcount</label>
                   <input type="number" min={0} value={form.claimedHeadcount} onChange={e => handleFormChange('claimedHeadcount', e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60" placeholder="0" />
+                    className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60`} placeholder="0" />
                 </div>
 
                 {/* Rate calculation */}
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Billed Days</label>
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>Billed Days</label>
                   <input type="number" min={0} step={0.5} value={form.billedDays} onChange={e => handleFormChange('billedDays', e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60" placeholder="e.g. 10" />
+                    className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60`} placeholder="e.g. 10" />
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Rate Per Day (₱)</label>
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>Rate Per Day (₱)</label>
                   <input type="number" min={0} value={form.ratePerDay} onChange={e => handleFormChange('ratePerDay', e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60" placeholder="e.g. 600" />
+                    className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60`} placeholder="e.g. 600" />
                 </div>
 
                 {/* Billed Amount */}
                 <div className="sm:col-span-2">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                    Total Billed Amount (₱) * <span className="text-slate-600">— auto-calculated from days × rate</span>
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>
+                    Total Billed Amount (₱) * <span className="text-slate-500 font-normal">— auto-calculated from days × rate</span>
                   </label>
                   <input type="number" min={0} value={form.billedAmount} onChange={e => handleFormChange('billedAmount', e.target.value)}
-                    className="w-full bg-slate-900 border border-amber-500/40 text-white font-bold px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-amber-500/60" required placeholder="₱0.00" />
+                    className={`w-full ${isDark ? 'bg-slate-900 border-amber-500/40 text-white' : 'bg-amber-50/50 border-amber-500/60 text-slate-900'} border font-bold px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-amber-500/60`} required placeholder="₱0.00" />
                 </div>
 
                 {/* Payment method */}
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Payment Channel</label>
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>Payment Channel</label>
                   <select value={form.paymentMethod} onChange={e => handleFormChange('paymentMethod', e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 cursor-pointer">
+                    className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 cursor-pointer`}>
                     {['Bank Wire', 'Check', 'Cash Voucher', 'GCash', 'Maya'].map(m => <option key={m}>{m}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Reference No.</label>
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>Reference No.</label>
                   <input value={form.referenceNo} onChange={e => handleFormChange('referenceNo', e.target.value)}
                     placeholder="Check #1042 / Wire Ref…"
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60" />
+                    className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60`} />
                 </div>
 
                 {/* Status */}
                 <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">Initial Status</label>
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>Initial Status</label>
                   <select
                     value={!form.auditId ? 'PENDING_AUDIT' : form.status}
                     disabled={!form.auditId}
                     onChange={e => handleFormChange('status', e.target.value as any)}
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+                    className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer`}
                   >
                     {!form.auditId ? (
                       <option value="PENDING_AUDIT">Pending Audit Verification</option>
@@ -1128,8 +1187,8 @@ export default function SubcontractorBillingsDisbursements({
 
                 {/* Remarks / Justification */}
                 <div className="sm:col-span-2">
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
-                    Audit Notes / Justification {!form.auditId && <span className="text-amber-400 font-bold">* (Required for Unverified Payouts)</span>}
+                  <label className={`block text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'} uppercase tracking-wider mb-1.5`}>
+                    Audit Notes / Justification {!form.auditId && <span className="text-amber-500 font-bold">* (Required for Unverified Payouts)</span>}
                   </label>
                   <textarea
                     value={form.remarks}
@@ -1137,13 +1196,13 @@ export default function SubcontractorBillingsDisbursements({
                     rows={2}
                     required={!form.auditId}
                     placeholder={!form.auditId ? "Justification required for executive OM sign-off on unverified manual payout..." : "Notes, billing dispute context, etc."}
-                    className="w-full bg-slate-900 border border-slate-700 text-slate-200 px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 resize-none"
+                    className={`w-full ${isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-slate-50 border-slate-300 text-slate-900'} border px-3 py-2.5 rounded-xl text-sm focus:outline-none focus:border-emerald-500/60 resize-none`}
                   />
                 </div>
               </div>
 
-              <div className="flex justify-end gap-3 pt-2 border-t border-slate-800">
-                <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition cursor-pointer">
+              <div className={`flex justify-end gap-3 pt-2 border-t ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+                <button type="button" onClick={() => setIsModalOpen(false)} className={`px-4 py-2 rounded-xl ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'} text-xs font-semibold transition cursor-pointer`}>
                   Cancel
                 </button>
                 <button type="submit" disabled={isSaving} className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition-colors shadow-xs cursor-pointer disabled:opacity-60">

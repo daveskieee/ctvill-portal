@@ -334,7 +334,7 @@ export default function DocumentManager({
 
   // Real download trigger
   const handleDownloadFile = (doc: ProjectDocument) => {
-    const dummyContent = `CTVill Construction ERP Centralized Project Archive\nDocument: ${doc.title}\nVersion: ${doc.version}\nCategory: ${doc.category}\nStatus: ${doc.status}\nAuthor: ${doc.uploadedBy}\nNotes: ${doc.notes || 'None'}\nExported: ${new Date().toISOString()}`;
+    const dummyContent = `LDM Construction ERP Centralized Project Archive\nDocument: ${doc.title}\nVersion: ${doc.version}\nCategory: ${doc.category}\nStatus: ${doc.status}\nAuthor: ${doc.uploadedBy}\nNotes: ${doc.notes || 'None'}\nExported: ${new Date().toISOString()}`;
     const blob = new Blob([dummyContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');

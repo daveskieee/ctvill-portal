@@ -63,7 +63,7 @@ export const GanttSkeleton: React.FC = () => {
         {/* Gantt Row Items */}
         <div className="divide-y divide-slate-800/60">
           {[
-            { wbs: '1.0', name: 'Mobilisation & PEZA Clearances', barStart: '5%', barWidth: '25%' },
+            { wbs: '1.0', name: 'Mobilisation & Building Permits', barStart: '5%', barWidth: '25%' },
             { wbs: '2.0', name: 'MEPFS Rough-in & Circuit Routing', barStart: '20%', barWidth: '35%' },
             { wbs: '3.0', name: 'Acoustic Ceilings & Baffles', barStart: '45%', barWidth: '30%' },
             { wbs: '4.0', name: 'Glass Partitions & Framing', barStart: '55%', barWidth: '28%' },

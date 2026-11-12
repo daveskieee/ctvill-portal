@@ -69,7 +69,7 @@ export default function GovernmentPermitsTracker({
     'Barangay Construction Clearance',
     'Sanitary & Plumbing Clearance',
     'Electrical & Mechanical Installation Permit',
-    'PEZA Environmental & Fit-Out Clearances',
+    'LGU & Subdivision Architectural Clearances',
     'Excavation & Shoring Permit',
     'Architectural Fit-Out Clearances'
   ], []);
@@ -99,10 +99,10 @@ export default function GovernmentPermitsTracker({
   };
 
   // Add Form State
-  const [newProject, setNewProject] = useState(availableProjectNames[0] || 'Commercial Fit-Out Site 1');
+  const [newProject, setNewProject] = useState(availableProjectNames[0] || 'LDM Project Site 1');
   const [newName, setNewName] = useState('');
   const [newType, setNewType] = useState<PermitType>('LGU_BUILDING_PERMIT');
-  const [newAgency, setNewAgency] = useState('City Engineering Office - Cabuyao');
+  const [newAgency, setNewAgency] = useState('City Engineering Office / Building Official');
   const [newRef, setNewRef] = useState('');
   const [newAppDate, setNewAppDate] = useState(new Date().toISOString().split('T')[0]);
   const [newExpDate, setNewExpDate] = useState('2027-02-28');
@@ -331,7 +331,7 @@ export default function GovernmentPermitsTracker({
   const getPermitTypeLabel = (type: PermitType) => {
     switch (type) {
       case 'LGU_BUILDING_PERMIT': return 'LGU Building Permit';
-      case 'PEZA_FITOUT_PERMIT': return 'PEZA Fit-Out Clearance';
+      case 'PEZA_FITOUT_PERMIT': return 'LGU Building / Fit-Out Clearance';
       case 'FSIC_FIRE_SAFETY': return 'BFP Fire Safety (FSIC)';
       case 'DOLE_CSHP': return 'DOLE Safety (CSHP)';
       case 'OCCUPANCY_PERMIT': return 'Certificate of Occupancy';
@@ -392,14 +392,14 @@ export default function GovernmentPermitsTracker({
             <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-semibold tracking-wider uppercase">
               Regulatory Compliance
             </span>
-            <span className="text-xs text-slate-400">Statutory Fit-Out & Safety Permits</span>
+            <span className="text-xs text-slate-400">Statutory Building &amp; Safety Permits</span>
           </div>
           <h1 className="text-base font-bold text-white tracking-tight flex items-center gap-2">
             <FileCheck className="w-5 h-5 text-amber-400" />
-            Government Permits & Legal Compliance
+            Government Permits &amp; Legal Compliance
           </h1>
           <p className="text-slate-400 text-xs mt-0.5">
-            Track legal compliance, regulatory filings, PEZA clearances, and renewal expirations for each commercial fit-out project.
+            Track legal compliance, regulatory filings, LGU clearances, and renewal expirations for each construction project.
           </p>
         </div>
 
@@ -435,7 +435,7 @@ export default function GovernmentPermitsTracker({
             {totalPermits} Filed
           </div>
           <div className="text-xs text-slate-400 mt-1">
-            LGU, PEZA, BFP, and DOLE filings
+            LGU, OBO, BFP, and DOLE filings
           </div>
         </div>
 
@@ -763,10 +763,10 @@ export default function GovernmentPermitsTracker({
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Compliance Notes & Endorsements</label>
+                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Compliance Notes &amp; Endorsements</label>
                 <textarea
                   rows={2}
-                  placeholder="Special conditions, structural engineer sign-off, PEZA endorsement details..."
+                  placeholder="Special conditions, structural engineer sign-off, city hall endorsement details..."
                   value={newNotes}
                   onChange={(e) => setNewNotes(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-amber-500 focus:outline-none"

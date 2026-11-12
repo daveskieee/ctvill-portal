@@ -89,8 +89,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   }, [currentRole, rfisCount, changeOrdersCount, quotationsCount]);
 
   // Theme Hook for Light/Dark Mode Ergonomics
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const { isDark } = useTheme();
 
   return (
     <aside
@@ -181,9 +180,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         style={
                           isActive && !isDark
                             ? {
-                                backgroundColor: '#fff7ed',
-                                color: '#c2410c',
-                                borderLeft: '3px solid #ea580c'
+                                backgroundColor: '#FFFBEB',
+                                color: '#92400E',
+                                borderLeft: '3px solid #D97706'
                               }
                             : undefined
                         }
@@ -193,7 +192,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                           ${isActive
                             ? isDark
                               ? 'bg-amber-500/12 text-amber-300 font-semibold border border-amber-500/30 shadow-xs'
-                              : 'bg-[#fff7ed] text-[#c2410c] font-bold border border-orange-200/80 border-l-[3px] border-l-[#ea580c] shadow-2xs'
+                              : 'bg-[#FFFBEB] text-[#92400E] font-bold border border-amber-200/80 border-l-[3px] border-l-[#D97706] shadow-2xs'
                             : isDark
                               ? 'text-slate-400 hover:text-slate-100 hover:bg-slate-900/70 border border-transparent'
                               : 'text-[#334155] font-medium hover:text-[#0f172a] hover:bg-slate-100 border border-transparent transition-colors'
@@ -208,7 +207,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         <Icon
                           className={`w-4 h-4 shrink-0 transition-colors ${
                             isActive
-                              ? isDark ? 'text-amber-400' : 'text-[#ea580c]'
+                              ? isDark ? 'text-amber-400' : 'text-[#D97706]'
                               : isDark ? 'text-slate-400 group-hover:text-slate-200' : 'text-[#475569] group-hover:text-[#0f172a]'
                           }`}
                         />

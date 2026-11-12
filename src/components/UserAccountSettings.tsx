@@ -59,7 +59,7 @@ export const UserAccountSettings: React.FC<UserAccountSettingsProps> = ({
             <input
               type="email"
               defaultValue={user?.email || ''}
-              placeholder="alexander@ctvill.com"
+              placeholder="alexander@ldmconstruction.ph"
               className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-cyan-400 transition"
             />
           </div>

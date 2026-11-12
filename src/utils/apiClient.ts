@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { getStoredSession } from './session';
+import { getStoredSession, clearExpiredAuthSession, isDemoSession } from './session';
 
 export const CSRF_COOKIE_NAME = 'ctvill_csrf';
 
@@ -16,11 +16,38 @@ export function getCsrfToken(): string | null {
   return match ? decodeURIComponent(match[3]) : null;
 }
 
-// Global authorization failure callback
+// Global authorization failure callback and throttle lock
 let authExpiredHandler: (() => void) | null = null;
+let isHandlingSessionExpiry = false;
 
 export function setAuthExpiredHandler(handler: () => void) {
   authExpiredHandler = handler;
+}
+
+export function getIsHandlingSessionExpiry(): boolean {
+  return isHandlingSessionExpiry;
+}
+
+export function triggerSessionExpired(reason?: string) {
+  if (isHandlingSessionExpiry) return;
+  isHandlingSessionExpiry = true;
+
+  try {
+    clearExpiredAuthSession();
+  } catch { /* silent */ }
+
+  if (authExpiredHandler) {
+    try {
+      authExpiredHandler();
+    } catch (err) {
+      console.error('Error invoking session expiry handler:', err);
+    }
+  }
+
+  // Throttle 2500ms to allow parallel responses from simultaneous dashboard queries to be safely absorbed
+  setTimeout(() => {
+    isHandlingSessionExpiry = false;
+  }, 2500);
 }
 
 /**
@@ -106,9 +133,12 @@ export function setupSecureFetch(onUnauthorized?: () => void) {
         !rawUrl.includes('/api/auth/verify-invite') &&
         !rawUrl.includes('/api/auth/activate')
       ) {
-        if (authExpiredHandler) {
-          authExpiredHandler();
+        const active = getStoredSession();
+        if (active && isDemoSession(active)) {
+          // Do not expire local demo session on 401
+          return response;
         }
+        triggerSessionExpired(`HTTP 401 from ${rawUrl}`);
       }
 
       return response;

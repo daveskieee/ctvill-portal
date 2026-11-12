@@ -4,8 +4,8 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { 
-  LandParcel, Slot, Client, QALog, Contractor, PayrollRecord, 
+import {
+  LandParcel, Slot, Client, QALog, Contractor, PayrollRecord,
   CompanyBudget, UserSession, PunchListDefect, CivilWorksMilestone, ProcessAuditLog, DailyManpowerAudit,
   LaborAllocation, AIManpowerRecommendation, ProjectTask, DailySiteLog, ProjectDocument, ProjectRisk,
   ChangeOrder, CADParsedLot, TaskStatus, GovernmentPermit, ScheduleEvent,
@@ -16,15 +16,19 @@ import LoginPortal from './components/LoginPortal';
 import AdminPortal from './components/AdminPortal';
 import LoadingScreen from './components/LoadingScreen';
 import { ERPShellSkeleton } from './components/skeletons';
-import { 
-  getStoredSession, 
-  saveStoredSession, 
-  updateStoredSession, 
-  clearStoredSession, 
-  SESSION_INACTIVITY_LIMIT_MS 
+import {
+  getStoredSession,
+  saveStoredSession,
+  updateStoredSession,
+  clearStoredSession,
+  clearExpiredAuthSession,
+  isDemoSession,
+  isSessionValid,
+  SESSION_INACTIVITY_LIMIT_MS
 } from './utils/session';
 import { useInactivityTimeout } from './hooks/useInactivityTimeout';
 import { setupSecureFetch, secureFetch, getCsrfToken } from './utils/apiClient';
+import { getStoredAuditLogs, AUDIT_LOGS_UPDATED_EVENT } from './utils/auditLogger';
 
 export default function App() {
   // --- DATABASE STATE MODULES ---
@@ -35,11 +39,11 @@ export default function App() {
   const [qaLogs, setQaLogs] = useState<QALog[]>([]);
   const [payroll, setPayroll] = useState<PayrollRecord[]>([]);
   const [budget, setBudget] = useState<CompanyBudget | null>(null);
-  
+
   // Real Estate Operational Workflow Modules
   const [punchListDefects, setPunchListDefects] = useState<PunchListDefect[]>([]);
   const [civilWorksMilestones, setCivilWorksMilestones] = useState<CivilWorksMilestone[]>([]);
-  const [auditLogs, setAuditLogs] = useState<ProcessAuditLog[]>([]);
+  const [auditLogs, setAuditLogs] = useState<ProcessAuditLog[]>(() => getStoredAuditLogs());
   const [manpowerAudits, setManpowerAudits] = useState<DailyManpowerAudit[]>([]);
   const [laborAllocations, setLaborAllocations] = useState<LaborAllocation[]>([]);
   const [aiRecommendations, setAiRecommendations] = useState<AIManpowerRecommendation[]>([]);
@@ -57,19 +61,44 @@ export default function App() {
   const [projects, setProjects] = useState<ProjectProfile[]>([]);
   const [extendedPayroll, setExtendedPayroll] = useState<ExtendedPayrollItem[]>([]);
 
-  // Explicit Authentication State Machine:
-  // 'checking': Strictly verifying session with backend /api/auth/me (renders lightweight neutral ERPShellSkeleton)
-  // 'authenticated': Valid session confirmed by server (renders AdminPortal)
-  // 'unauthenticated': No active session (renders LandingPage or LoginPortal)
+  // Synchronously compute initial route state from URL to guarantee ZERO skeleton flashing on '/' and '/login'
+  const initialPath = typeof window !== 'undefined' ? window.location.pathname.toLowerCase().trim() : '/';
+  const initialHash = typeof window !== 'undefined' ? window.location.hash.replace(/^#\/?/, '').toLowerCase().trim() : '';
+
+  const initialViewMode: 'landing' | 'login' | 'dashboard' = (() => {
+    if (initialPath === '/login' || initialHash === 'login' || initialHash === 'signin') {
+      return 'login';
+    }
+    const isDashboardRoute = initialPath === '/dashboard' || initialPath.startsWith('/dashboard') || (Boolean(initialHash) && initialHash !== 'landing' && initialHash !== 'home');
+    if (isDashboardRoute) {
+      const stored = getStoredSession();
+      if (stored && isSessionValid(stored)) {
+        return 'dashboard';
+      }
+      return 'login';
+    }
+    return 'landing';
+  })();
+
+  const initialStored = getStoredSession();
+  const initialSessionValid = initialStored && isSessionValid(initialStored);
+
   type AuthStatus = 'checking' | 'authenticated' | 'unauthenticated';
   const [authStatus, setAuthStatus] = useState<AuthStatus>(() => {
-    // If a valid session envelope exists in client storage, mount authenticated immediately
-    // to prevent any shell unmounting or skeleton flashing during initial verification
-    const stored = getStoredSession();
-    return stored ? 'authenticated' : 'checking';
+    // NEVER enter 'checking' if initial view is 'landing' or 'login'
+    if (initialViewMode === 'landing') {
+      return initialSessionValid ? 'authenticated' : 'unauthenticated';
+    }
+    if (initialViewMode === 'login') {
+      return 'unauthenticated';
+    }
+    // Only 'dashboard' route verifies session with checking state
+    return initialSessionValid ? 'authenticated' : 'checking';
   });
-  const [session, setSession] = useState<UserSession | null>(() => getStoredSession());
-  const [unauthView, setUnauthView] = useState<'landing' | 'login'>('landing');
+
+  const [session, setSession] = useState<UserSession | null>(() => (initialSessionValid ? initialStored : null));
+  const [activeView, setActiveView] = useState<'landing' | 'login' | 'dashboard'>(initialViewMode);
+  const [unauthView, setUnauthView] = useState<'landing' | 'login'>(initialViewMode === 'login' ? 'login' : 'landing');
   const [urlInviteToken, setUrlInviteToken] = useState<string | null>(null);
   const [sessionExpiryNotice, setSessionExpiryNotice] = useState<string | null>(null);
   const [dataReloadTrigger, setDataReloadTrigger] = useState<number>(0);
@@ -98,10 +127,11 @@ export default function App() {
     isLoggedIn: authStatus === 'authenticated' && session !== null,
     timeoutMs: SESSION_INACTIVITY_LIMIT_MS,
     onTimeout: () => {
-      fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
-      clearStoredSession();
+      fetch('/api/auth/logout', { method: 'POST' }).catch(() => { });
+      clearExpiredAuthSession();
       setSession(null);
       setAuthStatus('unauthenticated');
+      setActiveView('login');
       setUnauthView('login');
       setSessionExpiryNotice('Your session has ended after 30 minutes of inactivity for security compliance. Please sign in again.');
     },
@@ -115,38 +145,57 @@ export default function App() {
 
     // Configure global secure fetch interceptor with automatic 401 handling
     setupSecureFetch(() => {
-      clearStoredSession();
+      clearExpiredAuthSession();
       setSession(null);
       setAuthStatus('unauthenticated');
+      setActiveView('login');
       setUnauthView('login');
       setSessionExpiryNotice('Your session has expired or is invalid. Please sign in again.');
+      try {
+        if (window.location.pathname !== '/login') {
+          window.history.pushState({}, '', '/login');
+        }
+      } catch { /* silent */ }
     });
 
     const params = new URLSearchParams(window.location.search);
     const token = params.get('activateToken') || params.get('token');
     const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase().trim();
-    const isLoginHash = hash === 'login' || hash === 'signin';
-    const isProtectedHash = Boolean(hash && !isLoginHash && hash !== 'forbidden-403');
+    const pathname = window.location.pathname.toLowerCase().trim();
+    const isLoginHash = hash === 'login' || hash === 'signin' || pathname === '/login';
+    const isProtectedHash = Boolean(hash && !isLoginHash && hash !== 'forbidden-403') || pathname === '/dashboard' || pathname.startsWith('/dashboard');
 
     if (token) {
       setUrlInviteToken(token);
       setSession(null);
       setAuthStatus('unauthenticated');
+      setActiveView('login');
       setUnauthView('login');
       return;
     }
 
-    // Check if user previously had stored session envelope (to distinguish expired session from guest visitor)
-    const existingStoredEnvelope = getStoredSession();
-
     // Step 1: Validate session in background without resetting user to null/guest
     const verifySession = async () => {
+      const stored = getStoredSession();
+      if (stored && isDemoSession(stored)) {
+        setSession(stored);
+        setAuthStatus('authenticated');
+        setSessionExpiryNotice(null);
+        if (pathname.startsWith('/dashboard/')) {
+          window.history.replaceState({}, '', '/dashboard');
+        }
+        return;
+      }
+
+      const currentPath = typeof window !== 'undefined' ? window.location.pathname.toLowerCase().trim() : '';
+      const isDashboardRoute = currentPath === '/dashboard' || currentPath.startsWith('/dashboard');
+
       try {
         const res = await fetch('/api/auth/me', { credentials: 'include' });
         if (res.ok) {
           const data = await res.json();
           const freshUser = data?.session || data?.user || data;
-          if (freshUser) {
+          if (freshUser && isSessionValid(freshUser)) {
             setSession(freshUser);
             saveStoredSession(freshUser);
             setAuthStatus('authenticated');
@@ -154,33 +203,106 @@ export default function App() {
             setDataReloadTrigger(prev => prev + 1);
           }
         } else if (res.status === 401) {
-          // Only clear if server explicitly rejects token
-          clearStoredSession();
+          // If local demo session is in use, preserve it
+          const current = getStoredSession();
+          if (current && isDemoSession(current)) {
+            return;
+          }
+
+          // Clear invalid session atomically
+          clearExpiredAuthSession();
           setSession(null);
           setAuthStatus('unauthenticated');
 
-          // If the user had an active session envelope, or was directly attempting to access a protected URL:
-          // Redirect cleanly to login portal without exposing protected data or showing landing flash
-          if (existingStoredEnvelope || isProtectedHash) {
+          // If actively on dashboard route, transition to login with notice
+          if (isDashboardRoute || isProtectedHash || isLoginHash) {
+            setActiveView('login');
             setUnauthView('login');
-            if (existingStoredEnvelope) {
+            if (isDashboardRoute || isProtectedHash) {
               setSessionExpiryNotice('Your session has expired or is invalid. Please sign in again.');
-            } else if (isProtectedHash) {
-              setSessionExpiryNotice('Please sign in to access this workspace module.');
             }
-          } else if (isLoginHash) {
-            setUnauthView('login');
+            window.history.pushState({}, '', '/login');
           } else {
+            // Root landing page: silently clear expired state and stay on landing page
+            setActiveView('landing');
             setUnauthView('landing');
+            setSessionExpiryNotice(null);
           }
         }
       } catch (err) {
         // Offline / network hitch: keep cached user so sidebar doesn't collapse
         console.warn('Network issue during session revalidation, preserving cached session', err);
+        if (stored && isSessionValid(stored)) {
+          setSession(stored);
+          setAuthStatus('authenticated');
+        } else {
+          setAuthStatus('unauthenticated');
+        }
       }
     };
 
     verifySession();
+  }, []);
+
+  // Synchronize browser history, URL changes, and multi-tab storage events
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const handleHashOrUrlChange = () => {
+      const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase().trim();
+      const pathname = window.location.pathname.toLowerCase().trim();
+
+      if (hash === 'login' || hash === 'signin' || pathname === '/login') {
+        setActiveView('login');
+        setUnauthView('login');
+        return;
+      }
+
+      if (hash === 'landing' || hash === 'home' || (pathname === '/' && !hash)) {
+        setActiveView('landing');
+        return;
+      }
+
+      if (hash || pathname === '/dashboard' || pathname.startsWith('/dashboard')) {
+        const stored = getStoredSession();
+        if (stored && isSessionValid(stored)) {
+          setActiveView('dashboard');
+          if (pathname.startsWith('/dashboard/')) {
+            window.history.replaceState({}, '', '/dashboard');
+          }
+        } else {
+          setActiveView('login');
+          setUnauthView('login');
+          setSessionExpiryNotice('Please sign in to access this workspace module.');
+        }
+      }
+    };
+
+    const handleStorageChange = (e: StorageEvent) => {
+      // Ignore storage events when user is on '/' or '/login' so background tabs don't hijack the screen
+      const pathname = window.location.pathname.toLowerCase().trim();
+      if (pathname === '/' || pathname === '/login' || pathname === '') {
+        return;
+      }
+      if (e.key === 'xyz_pm_user_session' || e.key === 'ctwll_user_session') {
+        const stored = getStoredSession();
+        if (!stored) {
+          setSession(null);
+          setAuthStatus('unauthenticated');
+          setActiveView('login');
+          setUnauthView('login');
+        }
+      }
+    };
+
+    window.addEventListener('hashchange', handleHashOrUrlChange);
+    window.addEventListener('popstate', handleHashOrUrlChange);
+    window.addEventListener('storage', handleStorageChange);
+    return () => {
+      window.removeEventListener('hashchange', handleHashOrUrlChange);
+      window.removeEventListener('popstate', handleHashOrUrlChange);
+      window.removeEventListener('storage', handleStorageChange);
+    };
   }, []);
 
   // ============================================================================
@@ -254,8 +376,15 @@ export default function App() {
   const fetchAuditLogs = useCallback(async () => {
     try {
       const res = await fetch('/api/audit-logs');
-      if (res.ok) setAuditLogs(await res.json());
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) {
+          setAuditLogs(data);
+          return;
+        }
+      }
     } catch { /* silent */ }
+    setAuditLogs(getStoredAuditLogs());
   }, []);
 
   const fetchPayroll = useCallback(async () => {
@@ -421,7 +550,7 @@ export default function App() {
       setQaLogs(data.qaLogs || []);
       setPunchListDefects((data.punchListDefects || []).filter((d: any) => !isTombstoned(d.id)));
       setCivilWorksMilestones((data.civilWorksMilestones || []).filter((m: any) => !isTombstoned(m.id)));
-      setAuditLogs(data.auditLogs || []);
+      setAuditLogs(data.auditLogs && data.auditLogs.length > 0 ? data.auditLogs : getStoredAuditLogs());
       setPayroll((data.payroll || []).filter((p: any) => !isTombstoned(p.id)));
       setBudget(data.budget || null);
       setManpowerAudits(data.manpowerAudits || []);
@@ -505,22 +634,22 @@ export default function App() {
 
         // Route to the correct granular fetch based on the entity that changed
         switch (msg.entity) {
-          case 'clients':    fetchClients(); break;
-          case 'slots':      fetchSlots(); break;
+          case 'clients': fetchClients(); break;
+          case 'slots': fetchSlots(); break;
           case 'punchLists': fetchPunchLists(); break;
           case 'civilMilestones': fetchCivilMilestones(); break;
-          case 'auditLogs':  fetchAuditLogs(); break;
-          case 'payroll':    fetchPayroll(); break;
-          case 'tasks':      fetchTasks(); break;
+          case 'auditLogs': fetchAuditLogs(); break;
+          case 'payroll': fetchPayroll(); break;
+          case 'tasks': fetchTasks(); break;
           case 'contractors': fetchContractors(); break;
-          case 'siteLogs':   fetchSiteLogs(); break;
-          case 'documents':  fetchDocuments(); break;
-          case 'permits':    fetchPermits(); break;
-          case 'schedule':   fetchSchedule(); break;
-          case 'projects':   fetchProjects(); break;
+          case 'siteLogs': fetchSiteLogs(); break;
+          case 'documents': fetchDocuments(); break;
+          case 'permits': fetchPermits(); break;
+          case 'schedule': fetchSchedule(); break;
+          case 'projects': fetchProjects(); break;
           case 'extendedPayroll': fetchExtendedPayroll(); break;
           case 'changeOrders': fetchChangeOrders(); break;
-          case 'rfis':       fetchRfis(); break;
+          case 'rfis': fetchRfis(); break;
           case 'quotations': fetchQuotations(); break;
           case 'aiRecommendations': reloadAllData(); break;
           case 'manpowerAudits': reloadAllData(); break;
@@ -561,10 +690,24 @@ export default function App() {
     };
   }, [authStatus, connectSSE]);
 
+  // Synchronize client-side audit logs
+  useEffect(() => {
+    const handleLogsUpdate = (e: any) => {
+      if (e?.detail && Array.isArray(e.detail)) setAuditLogs(e.detail);
+      else setAuditLogs(getStoredAuditLogs());
+    };
+    window.addEventListener(AUDIT_LOGS_UPDATED_EVENT, handleLogsUpdate);
+    return () => window.removeEventListener(AUDIT_LOGS_UPDATED_EVENT, handleLogsUpdate);
+  }, []);
+
   // --- SESSION AUTH TRANSITIONS WITH ANIMATION ---
   const handleInitiateLogin = (targetSession: UserSession) => {
     saveStoredSession(targetSession);
     setSessionExpiryNotice(null);
+    setActiveView('dashboard');
+    try {
+      window.history.pushState({}, '', '/dashboard');
+    } catch { /* silent */ }
     setLoadingState({
       active: true,
       mode: 'login',
@@ -573,13 +716,15 @@ export default function App() {
   };
 
   const handleInitiateLogout = () => {
-    fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
-    clearStoredSession();
+    fetch('/api/auth/logout', { method: 'POST' }).catch(() => { });
+    clearExpiredAuthSession();
     try {
       sessionStorage.removeItem('ctvill_active_tab');
-      window.location.hash = '';
+      window.history.pushState({}, '', '/');
     } catch { /* silent */ }
     setSessionExpiryNotice(null);
+    setActiveView('landing');
+    setUnauthView('landing');
     const currentSession = session;
     setLoadingState({
       active: true,
@@ -1113,7 +1258,7 @@ export default function App() {
           discrepancy: Number(auditData.claimedHeadcount || 0) - Number(auditData.verifiedHeadcount || 0),
           assignedSectorOrLot: auditData.assignedSectorOrLot,
           supervisorName: auditData.supervisorName || 'Site Supervisor',
-          gpsCoordinates: auditData.gpsCoordinates || '14.2789° N, 121.1245° E (NexBridge Commercial Site)',
+          gpsCoordinates: auditData.gpsCoordinates || '14.2789° N, 121.1245° E (LDM Project Site)',
           verificationStatus: (Number(auditData.claimedHeadcount || 0) - Number(auditData.verifiedHeadcount || 0)) === 0 ? 'VERIFIED_MATCH' : 'DISCREPANCY_FLAGGED',
           photoEvidenceVerified: true,
           remarks: auditData.remarks || '',
@@ -1137,7 +1282,7 @@ export default function App() {
         discrepancy: Number(auditData.claimedHeadcount || 0) - Number(auditData.verifiedHeadcount || 0),
         assignedSectorOrLot: auditData.assignedSectorOrLot,
         supervisorName: auditData.supervisorName || 'Site Supervisor',
-        gpsCoordinates: auditData.gpsCoordinates || '14.2789° N, 121.1245° E (NexBridge Commercial Site)',
+        gpsCoordinates: auditData.gpsCoordinates || '14.2789° N, 121.1245° E (LDM Project Site)',
         verificationStatus: (Number(auditData.claimedHeadcount || 0) - Number(auditData.verifiedHeadcount || 0)) === 0 ? 'VERIFIED_MATCH' : 'DISCREPANCY_FLAGGED',
         photoEvidenceVerified: true,
         remarks: auditData.remarks || '',
@@ -1186,7 +1331,7 @@ export default function App() {
       const csrfToken = getCsrfToken();
       const res = await secureFetch('/api/labor-allocations/apply-ai-rec', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
         },
@@ -1212,7 +1357,7 @@ export default function App() {
       const csrfToken = getCsrfToken();
       const res = await secureFetch('/api/ai-recommendations/dismiss', {
         method: 'POST',
-        headers: { 
+        headers: {
           'Content-Type': 'application/json',
           ...(csrfToken ? { 'x-csrf-token': csrfToken } : {})
         },
@@ -1302,11 +1447,11 @@ export default function App() {
   const handleUpdateTaskStatus = async (taskId: string, status: TaskStatus) => {
     // Optimistic: update immediately with synchronized progress
     const prevTask = tasks.find(t => t.id === taskId);
-    const newProgress = status === 'COMPLETED' 
-      ? 1.0 
-      : status === 'IN_PROGRESS' 
-      ? (prevTask?.progress && prevTask.progress > 0 ? prevTask.progress : 0.5) 
-      : (status === 'TODO' || status === 'BACKLOG' ? 0.0 : prevTask?.progress ?? 0);
+    const newProgress = status === 'COMPLETED'
+      ? 1.0
+      : status === 'IN_PROGRESS'
+        ? (prevTask?.progress && prevTask.progress > 0 ? prevTask.progress : 0.5)
+        : (status === 'TODO' || status === 'BACKLOG' ? 0.0 : prevTask?.progress ?? 0);
 
     setTasks((prev) => prev.map((t) => (t.id === taskId ? { ...t, status, progress: newProgress } : t)));
     try {
@@ -1789,7 +1934,7 @@ export default function App() {
       id: tempId,
       orderNumber: order.orderNumber || `CO-${Date.now().toString().slice(-4)}`,
       title: order.title || 'Change Request',
-      contractorName: order.contractorName || 'CTVill Construction Crew',
+      contractorName: order.contractorName || 'LDM Construction Crew',
       requestedAmount: Number(order.requestedAmount || 0),
       approvedAmount: null,
       status: 'PENDING',
@@ -1826,8 +1971,8 @@ export default function App() {
       await fetch(`/api/change-orders/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          status, 
+        body: JSON.stringify({
+          status,
           approvedAmount,
           approvedBy: (typeof session === 'object' && session?.name) ? session.name : 'Operations Director'
         })
@@ -1930,7 +2075,7 @@ export default function App() {
   const handleTriggerAiLaborScan = async (): Promise<{ success: boolean; message: string; source?: string }> => {
     try {
       const csrfToken = getCsrfToken();
-      const res = await secureFetch('/api/ai-recommendations/scan', { 
+      const res = await secureFetch('/api/ai-recommendations/scan', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1964,136 +2109,178 @@ export default function App() {
   // --- RENDERING ROUTER ---
 
   const renderActiveWorkspace = () => {
-    // Explicit State 1: Validating existing session with server (shows lightweight neutral ERP shell skeleton)
+    // Priority 1: Landing Page (frame 1 instant render, ZERO skeleton flash)
+    if (activeView === 'landing') {
+      return (
+        <LandingPage
+          session={session}
+          onEnterPortal={() => {
+            if (session && isSessionValid(session)) {
+              setActiveView('dashboard');
+              try {
+                window.history.pushState({}, '', '/dashboard');
+              } catch { /* silent */ }
+            } else {
+              setActiveView('login');
+              setUnauthView('login');
+              setSessionExpiryNotice(null);
+              try {
+                window.history.pushState({}, '', '/login');
+              } catch { /* silent */ }
+            }
+          }}
+        />
+      );
+    }
+
+    // Priority 2: Login Portal (frame 1 instant render, ZERO skeleton flash)
+    if (activeView === 'login') {
+      return (
+        <LoginPortal
+          onLoginSuccess={(s) => handleInitiateLogin(s)}
+          onBackToLanding={() => {
+            setUnauthView('landing');
+            setActiveView('landing');
+            setSessionExpiryNotice(null);
+            try {
+              window.history.pushState({}, '', '/');
+            } catch { /* silent */ }
+          }}
+          initialInviteToken={urlInviteToken}
+        />
+      );
+    }
+
+    // Priority 3: Only when actively on /dashboard:
+    // If validating session with backend, render lightweight neutral ERP shell skeleton
     if (authStatus === 'checking') {
       return <ERPShellSkeleton />;
     }
 
-    // Explicit State 2: Unauthenticated (shows Landing Page or Login Portal)
-    if (authStatus === 'unauthenticated') {
-      if (unauthView === 'login') {
-        return (
-          <LoginPortal 
-            onLoginSuccess={(s) => handleInitiateLogin(s)} 
-            onBackToLanding={() => {
-              setUnauthView('landing');
-              setSessionExpiryNotice(null);
-            }} 
-            initialInviteToken={urlInviteToken}
-          />
-        );
-      }
+    // Priority 4: If unauthenticated on /dashboard route:
+    if (authStatus === 'unauthenticated' || !session) {
       return (
-        <LandingPage 
-          onEnterPortal={() => {
-            setUnauthView('login');
+        <LoginPortal
+          onLoginSuccess={(s) => handleInitiateLogin(s)}
+          onBackToLanding={() => {
+            setUnauthView('landing');
+            setActiveView('landing');
             setSessionExpiryNotice(null);
-          }} 
+            try {
+              window.history.pushState({}, '', '/');
+            } catch { /* silent */ }
+          }}
+          initialInviteToken={urlInviteToken}
         />
       );
     }
 
-    // Explicit State 3: Authenticated — renders CTVill Project Management Operations Portal
+    // Priority 5: Authenticated on dashboard — renders LDM Construction Project Management Operations Portal
     return (
       <AdminPortal
-          parcels={parcels}
-          slots={slots}
-          clients={clients}
-          contractors={contractors}
-          qaLogs={qaLogs}
-          punchListDefects={punchListDefects}
-          civilWorksMilestones={civilWorksMilestones}
-          auditLogs={auditLogs}
-          payroll={payroll}
-          budget={budget}
-          manpowerAudits={manpowerAudits}
-          laborAllocations={laborAllocations}
-          aiRecommendations={aiRecommendations}
-          tasks={tasks}
-          siteLogs={siteLogs}
-          documents={documents}
-          risks={risks}
-          changeOrders={changeOrders}
-          rfis={rfis}
-          quotations={quotations}
-          permits={permits}
-          scheduleEvents={scheduleEvents}
-          projects={projects}
-          extendedPayroll={extendedPayroll}
-          session={session}
-          onAddParcel={handleAddParcel}
-          onSubdivideParcel={handleSubdivideParcel}
-          onRegisterClient={handleRegisterClient}
-          onDeleteClient={handleDeleteClient}
-          onAssignClient={handleAssignClient}
-          onTransitionSlotStatus={handleTransitionSlotStatus}
-          onUpdateTitlePipeline={handleUpdateTitlePipeline}
-          onVerifyKyc={handleVerifyKyc}
-          onCreateDefect={handleCreateDefect}
-          onUpdateDefect={handleUpdateDefect}
-          onUpdateCivilMilestone={handleUpdateCivilMilestone}
-          onRegisterContractor={handleRegisterContractor}
-          onDeleteContractor={handleDeleteContractor}
-          onUpdateContractor={handleUpdateContractor}
-          onUpdateContractors={handleUpdateContractors}
-          onAddQALog={handleAddQALog}
-          onAddPayroll={handleAddPayroll}
-          onCreateManpowerAudit={handleCreateManpowerAudit}
-          onSaveAllocation={handleSaveAllocation}
-          onApplyAIRecommendation={handleApplyAIRecommendation}
-          onDismissAIRecommendation={handleDismissAIRecommendation}
-          onAddTask={handleAddTask}
-          onUpdateTaskStatus={handleUpdateTaskStatus}
-          onDeleteTask={handleDeleteTask}
-          onClearAllTasks={handleClearAllTasks}
-          onAddSiteLog={handleAddSiteLog}
-          onAddDocument={handleAddDocument}
-          onUpdateDocument={handleUpdateDocument}
-          onDeleteDocument={handleDeleteDocument}
-          onSyncSchedule={handleSyncSchedule}
-          onAddRisk={handleAddRisk}
-          onImportCADLots={handleImportCADLots}
-          onClearAllLots={handleClearAllLots}
-          onDeleteParcel={handleDeleteParcel}
-          onApplyAIPricing={handleApplyAIPricing}
-          onAddPermit={handleAddPermit}
-          onUpdatePermitStatus={handleUpdatePermitStatus}
-          onUpdatePermit={handleUpdatePermit}
-          onDeletePermit={handleDeletePermit}
-          onAddScheduleEvent={handleAddScheduleEvent}
-          onUpdateScheduleEvent={handleUpdateScheduleEvent}
-          onDeleteScheduleEvent={handleDeleteScheduleEvent}
-          onCreateProject={handleCreateProject}
-          onUpdateProject={handleUpdateProject}
-          onDeleteProject={handleDeleteProject}
-          onAddExtendedPayroll={handleAddExtendedPayroll}
-          onUpdateExtendedPayroll={handleUpdateExtendedPayroll}
-          onDeleteExtendedPayroll={handleDeleteExtendedPayroll}
-          onRecordPayment={handleRecordPayment}
-          onDisbursePayroll={handleDisbursePayroll}
-          onSubmitChangeOrder={handleSubmitChangeOrder}
-          onUpdateChangeOrderStatus={handleUpdateChangeOrderStatus}
-          onSubmitRfi={handleSubmitRfi}
-          onAnswerRfi={handleAnswerRfi}
-          onUpdateQuotationStatus={handleUpdateQuotationStatus}
-          onConvertQuotationToProject={handleConvertQuotationToProject}
-          onTriggerAiLaborScan={handleTriggerAiLaborScan}
-          onLogManpowerAudit={handleLogManpowerAudit}
-          onLogout={handleInitiateLogout}
-          onUpdateSession={handleUpdateSession}
-          isInitialLoading={isInitialLoading}
-          onRefreshAllData={() => reloadAllData(true)}
-        />
-      );
+        onNavigateToLanding={() => {
+          setActiveView('landing');
+          try {
+            window.history.pushState({}, '', '/');
+          } catch { /* silent */ }
+        }}
+        parcels={parcels}
+        slots={slots}
+        clients={clients}
+        contractors={contractors}
+        qaLogs={qaLogs}
+        punchListDefects={punchListDefects}
+        civilWorksMilestones={civilWorksMilestones}
+        auditLogs={auditLogs}
+        payroll={payroll}
+        budget={budget}
+        manpowerAudits={manpowerAudits}
+        laborAllocations={laborAllocations}
+        aiRecommendations={aiRecommendations}
+        tasks={tasks}
+        siteLogs={siteLogs}
+        documents={documents}
+        risks={risks}
+        changeOrders={changeOrders}
+        rfis={rfis}
+        quotations={quotations}
+        permits={permits}
+        scheduleEvents={scheduleEvents}
+        projects={projects}
+        extendedPayroll={extendedPayroll}
+        session={session}
+        onAddParcel={handleAddParcel}
+        onSubdivideParcel={handleSubdivideParcel}
+        onRegisterClient={handleRegisterClient}
+        onDeleteClient={handleDeleteClient}
+        onAssignClient={handleAssignClient}
+        onTransitionSlotStatus={handleTransitionSlotStatus}
+        onUpdateTitlePipeline={handleUpdateTitlePipeline}
+        onVerifyKyc={handleVerifyKyc}
+        onCreateDefect={handleCreateDefect}
+        onUpdateDefect={handleUpdateDefect}
+        onUpdateCivilMilestone={handleUpdateCivilMilestone}
+        onRegisterContractor={handleRegisterContractor}
+        onDeleteContractor={handleDeleteContractor}
+        onUpdateContractor={handleUpdateContractor}
+        onUpdateContractors={handleUpdateContractors}
+        onAddQALog={handleAddQALog}
+        onAddPayroll={handleAddPayroll}
+        onCreateManpowerAudit={handleCreateManpowerAudit}
+        onSaveAllocation={handleSaveAllocation}
+        onApplyAIRecommendation={handleApplyAIRecommendation}
+        onDismissAIRecommendation={handleDismissAIRecommendation}
+        onAddTask={handleAddTask}
+        onUpdateTaskStatus={handleUpdateTaskStatus}
+        onDeleteTask={handleDeleteTask}
+        onClearAllTasks={handleClearAllTasks}
+        onAddSiteLog={handleAddSiteLog}
+        onAddDocument={handleAddDocument}
+        onUpdateDocument={handleUpdateDocument}
+        onDeleteDocument={handleDeleteDocument}
+        onSyncSchedule={handleSyncSchedule}
+        onAddRisk={handleAddRisk}
+        onImportCADLots={handleImportCADLots}
+        onClearAllLots={handleClearAllLots}
+        onDeleteParcel={handleDeleteParcel}
+        onApplyAIPricing={handleApplyAIPricing}
+        onAddPermit={handleAddPermit}
+        onUpdatePermitStatus={handleUpdatePermitStatus}
+        onUpdatePermit={handleUpdatePermit}
+        onDeletePermit={handleDeletePermit}
+        onAddScheduleEvent={handleAddScheduleEvent}
+        onUpdateScheduleEvent={handleUpdateScheduleEvent}
+        onDeleteScheduleEvent={handleDeleteScheduleEvent}
+        onCreateProject={handleCreateProject}
+        onUpdateProject={handleUpdateProject}
+        onDeleteProject={handleDeleteProject}
+        onAddExtendedPayroll={handleAddExtendedPayroll}
+        onUpdateExtendedPayroll={handleUpdateExtendedPayroll}
+        onDeleteExtendedPayroll={handleDeleteExtendedPayroll}
+        onRecordPayment={handleRecordPayment}
+        onDisbursePayroll={handleDisbursePayroll}
+        onSubmitChangeOrder={handleSubmitChangeOrder}
+        onUpdateChangeOrderStatus={handleUpdateChangeOrderStatus}
+        onSubmitRfi={handleSubmitRfi}
+        onAnswerRfi={handleAnswerRfi}
+        onUpdateQuotationStatus={handleUpdateQuotationStatus}
+        onConvertQuotationToProject={handleConvertQuotationToProject}
+        onTriggerAiLaborScan={handleTriggerAiLaborScan}
+        onLogManpowerAudit={handleLogManpowerAudit}
+        onLogout={handleInitiateLogout}
+        onUpdateSession={handleUpdateSession}
+        isInitialLoading={isInitialLoading}
+        onRefreshAllData={() => reloadAllData(true)}
+      />
+    );
   };
 
   return (
-    <div className={`w-full relative bg-slate-950 ${
-      authStatus === 'authenticated' && session 
-        ? 'h-screen h-[100dvh] overflow-hidden flex flex-col' 
+    <div className={`w-full relative bg-slate-950 ${authStatus === 'authenticated' && session
+        ? 'h-screen h-[100dvh] overflow-hidden flex flex-col'
         : 'min-h-screen flex flex-col justify-between overflow-x-hidden'
-    }`}>
-      
+      }`}>
+
       {/* Session Expiry Security Audit Banner */}
       {sessionExpiryNotice && authStatus === 'unauthenticated' && (
         <div className="bg-amber-950/95 border-b border-amber-600/50 text-amber-200 px-4 py-2.5 text-xs flex items-center justify-between z-50 animate-fadeIn backdrop-blur-md sticky top-0 shadow-lg shrink-0">
@@ -2122,10 +2309,12 @@ export default function App() {
             if (loadingState.mode === 'login' && loadingState.pendingSession) {
               setSession(loadingState.pendingSession);
               setAuthStatus('authenticated');
+              setActiveView('dashboard');
               setDataReloadTrigger(prev => prev + 1);
             } else if (loadingState.mode === 'logout') {
               setSession(null);
               setAuthStatus('unauthenticated');
+              setActiveView('landing');
               setUnauthView('landing');
             }
             setLoadingState({ active: false, mode: 'login', pendingSession: null });

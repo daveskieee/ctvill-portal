@@ -327,7 +327,7 @@ export default function PayrollManager({
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement('a');
     link.setAttribute('href', encodedUri);
-    link.setAttribute('download', `CTVill_Payroll_Roster_${new Date().toISOString().split('T')[0]}.csv`);
+    link.setAttribute('download', `LDM_Payroll_Roster_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -652,12 +652,12 @@ export default function PayrollManager({
             </div>
 
             <form onSubmit={handleAddSubmit} className="space-y-4">
-              {/* Quick Select Registered CTVill Worker / Staff */}
+              {/* Quick Select Registered LDM Worker / Staff */}
               <div className="bg-slate-900/90 border border-emerald-500/40 rounded-xl p-3 space-y-1.5 shadow-sm">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-mono text-emerald-400 font-bold uppercase tracking-wider flex items-center gap-1.5">
                     <UserCheck className="w-3.5 h-3.5 text-emerald-400" />
-                    Select Registered CTVill Staff / Contractor
+                    Select Registered LDM Staff / Contractor
                   </label>
                   <span className="text-[10px] font-mono text-slate-400">Auto-fills details below</span>
                 </div>
@@ -668,7 +668,7 @@ export default function PayrollManager({
                     const worker = contractors.find(c => c.id === selectedId);
                     if (worker) {
                       setNewName(worker.name);
-                      setNewCompany(worker.company || (worker.employmentType === 'INTERNAL' ? 'CTVill Builders Corporation' : worker.name));
+                      setNewCompany(worker.company || (worker.employmentType === 'INTERNAL' ? 'LDM Construction Corporation' : worker.name));
                       setNewRole(worker.roleTitle || worker.specialty || 'Staff');
                       if (worker.dailyRate && worker.dailyRate > 0) {
                         setNewDailyRate(worker.dailyRate);
@@ -682,7 +682,7 @@ export default function PayrollManager({
                   <option value="">-- Choose Registered Worker/Staff to Auto-Fill --</option>
                   {contractors.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {c.name} — {c.roleTitle || c.specialty} ({c.employmentType === 'INTERNAL' ? 'CTVill In-House' : 'Outsourced'}) {c.dailyRate ? `• ₱${c.dailyRate.toLocaleString()}/day` : ''}
+                      {c.name} — {c.roleTitle || c.specialty} ({c.employmentType === 'INTERNAL' ? 'LDM In-House' : 'Outsourced'}) {c.dailyRate ? `• ₱${c.dailyRate.toLocaleString()}/day` : ''}
                     </option>
                   ))}
                 </select>

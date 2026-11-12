@@ -30,7 +30,7 @@ export interface NavSectionConfig {
  * Each role strictly sees only authorized, relevant modules.
  */
 export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
-  // ── OPERATIONS MANAGER / ADMIN ──
+  // ── OPERATIONS MANAGER / ADMIN (Office — Viewing & Approvals) ──
   [UserRole.OM]: [
     {
       id: 'om-projects',
@@ -38,7 +38,6 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       items: [
         { id: 'dashboard', label: 'Executive Portfolio', icon: TrendingUp },
         { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
-        { id: 'gantt', label: 'Master Gantt & Timeline', icon: BarChart3 },
         { id: 'kanban', label: 'Progress & Activity Reports', icon: CheckSquare },
         { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
       ]
@@ -50,7 +49,6 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
         { id: 'site-diary', label: 'Site Diary & Weather', icon: CloudSun },
         { id: 'rfis', label: 'Procurement, Approvals & Deliveries', icon: FileSpreadsheet, badgeKey: 'rfis' },
         { id: 'change-orders', label: 'Commercial Change Orders', icon: FileText, badgeKey: 'changeOrders' },
-        { id: 'risks', label: 'Jobsite Safety & Risk Matrix', icon: ShieldAlert },
       ]
     },
     {
@@ -58,19 +56,7 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       title: 'Workforce & Labor',
       items: [
         { id: 'contractors', label: 'Labor Workforce & Artisan Trades', icon: Users },
-        { id: 'worker-masterlist', label: 'Worker Masterlist & Rates', icon: Users },
         { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call', icon: ClipboardCheck },
-        { id: 'subcontractor-audits', label: 'Subcontractor Roll-Call Audits', icon: ShieldCheck },
-      ]
-    },
-    {
-      id: 'om-finance',
-      title: 'Finance & Commercial',
-      items: [
-        { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote },
-        { id: 'subcontractor-payables', label: 'Subcontractor Payables', icon: Receipt },
-        { id: 'payments', label: 'Progress Billings & Receipts', icon: DollarSign },
-        { id: 'quotation-leads', label: 'Fit-Out Estimates & Leads', icon: Briefcase, badgeKey: 'quotations' },
       ]
     },
     {
@@ -78,8 +64,8 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       title: 'Design & Compliance',
       items: [
         { id: 'documents', label: 'Detailed Engineering & CAD', icon: FileCode },
-        { id: 'permits', label: 'PEZA & City Hall Permits', icon: FileCheck },
-        { id: 'audit-trail', label: 'Audit Trail & QA Logs', icon: History },
+        { id: 'permits', label: 'City Hall & LGU Permits', icon: FileCheck },
+        { id: 'audit-trail', label: 'Audit Trail & Logs', icon: History },
       ]
     },
     {
@@ -92,17 +78,16 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
     }
   ],
 
-  // ── PROJECT MANAGER / SITE ENGINEER ──
+  // ── PROJECT MANAGER / SITE ENGINEER (On-Site — Field Execution & Inputs) ──
   [UserRole.PM]: [
     {
       id: 'pm-projects',
       title: 'Projects & Planning',
       items: [
-        { id: 'dashboard', label: 'Site Command Center', icon: HardHat },
         { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
-        { id: 'gantt', label: 'Site Gantt Schedule', icon: BarChart3 },
+        { id: 'gantt', label: 'Master Gantt & Timeline', icon: BarChart3 },
         { id: 'kanban', label: 'Progress & Activity Reports', icon: CheckSquare },
-        { id: 'schedule', label: 'Site Calendar & Visits', icon: CalendarDays },
+        { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
       ]
     },
     {
@@ -111,8 +96,7 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       items: [
         { id: 'site-diary', label: 'Site Diary & Weather', icon: CloudSun },
         { id: 'rfis', label: 'Procurement, Approvals & Deliveries', icon: FileSpreadsheet, badgeKey: 'rfis' },
-        { id: 'change-orders', label: 'Site Change Orders', icon: FileText, badgeKey: 'changeOrders' },
-        { id: 'risks', label: 'Jobsite Safety & Risk Matrix', icon: ShieldAlert },
+        { id: 'change-orders', label: 'Commercial Change Orders', icon: FileText, badgeKey: 'changeOrders' },
       ]
     },
     {
@@ -120,7 +104,6 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       title: 'Workforce & Site Labor',
       items: [
         { id: 'contractors', label: 'Labor Workforce & Artisan Trades', icon: Users },
-        { id: 'timekeeper-attendance', label: 'Artisan Roll-Call & Logs', icon: ClipboardCheck },
       ]
     },
     {
@@ -128,8 +111,8 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       title: 'Design & Compliance',
       items: [
         { id: 'documents', label: 'Detailed Engineering & CAD', icon: FileCode },
-        { id: 'permits', label: 'PEZA & City Hall Permits', icon: FileCheck },
-        { id: 'audit-trail', label: 'Site Audit Trail & QA Logs', icon: History },
+        { id: 'permits', label: 'City Hall & LGU Permits', icon: FileCheck },
+        { id: 'audit-trail', label: 'Audit Trail & Logs', icon: History },
       ]
     },
     {
@@ -144,27 +127,29 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
   // ── FINANCE CONTROLLER & TREASURY ──
   [UserRole.FINANCE]: [
     {
-      id: 'fin-treasury',
-      title: 'Finance & Commercial',
+      id: 'fin-planning',
+      title: 'Schedule & Workforce Records',
       items: [
-        { id: 'dashboard', label: 'Financial Executive Overview', icon: TrendingUp },
-        { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote },
-        { id: 'subcontractor-payables', label: 'Subcontractor Payables', icon: Receipt },
-        { id: 'payments', label: 'Progress Billings & Receipts', icon: DollarSign },
-        { id: 'change-orders', label: 'Change Order Fund Releases', icon: FileText, badgeKey: 'changeOrders' },
-        { id: 'quotation-leads', label: 'Quotation Estimates CRM', icon: Briefcase, badgeKey: 'quotations' },
+        { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
+        { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call', icon: ClipboardCheck },
       ]
     },
     {
-      id: 'fin-sites',
-      title: 'Commercial Sites & Audit',
+      id: 'fin-treasury',
+      title: 'Finance & Commercial',
       items: [
-        { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
         { id: 'worker-masterlist', label: 'Worker Masterlist & Rates', icon: Users },
-        { id: 'timekeeper-attendance', label: 'In-House Attendance Records', icon: ClipboardCheck },
-        { id: 'subcontractor-audits', label: 'Subcontractor Roll-Call Audits', icon: ShieldCheck },
-        { id: 'permits', label: 'PEZA & LGU Permits', icon: FileCheck },
-        { id: 'audit-trail', label: 'Financial Audit Trail', icon: History },
+        { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote },
+        { id: 'subcontractor-payables', label: 'Subcontractor Payables', icon: Receipt },
+        { id: 'payments', label: 'Progress Billing & Receipts', icon: DollarSign },
+        { id: 'quotation-leads', label: 'Fit-Out Estimates & Leads (Bill of Materials)', icon: Briefcase, badgeKey: 'quotations' },
+      ]
+    },
+    {
+      id: 'fin-audit',
+      title: 'Audit & Compliance',
+      items: [
+        { id: 'audit-trail', label: 'Audit Trail & Logs', icon: History },
       ]
     },
     {
@@ -182,7 +167,9 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       id: 'tk-workforce',
       title: 'Workforce & Attendance',
       items: [
+        { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
         { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call', icon: ClipboardCheck },
+        { id: 'audit-trail', label: 'Audit Trail & Logs', icon: History },
       ]
     },
     {

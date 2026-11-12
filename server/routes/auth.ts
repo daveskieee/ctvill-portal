@@ -7,13 +7,13 @@ import { Router, Request, Response } from 'express';
 import { Role, AccountStatus } from '@prisma/client';
 import { prisma, getSystemSetting, setSystemSetting, hashPassword, verifyPassword } from '../db';
 import { broadcastChange } from '../events';
-import { 
-  createSession, 
-  destroySession, 
+import {
+  createSession,
+  destroySession,
   revokeAllUserSessions,
   generateCsrfToken,
   CSRF_COOKIE_NAME,
-  SESSION_COOKIE_NAME 
+  SESSION_COOKIE_NAME
 } from '../services/sessionService';
 import { setSessionCookie, clearSessionCookie, setCsrfCookie, clearCsrfCookie } from '../middleware/cookies';
 import { requireAuth, requireRole } from '../middleware/auth';
@@ -55,24 +55,24 @@ async function buildSessionPayload(user: {
   const defaultTitle = (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
     ? 'Site Engineer & Project Field Lead'
     : user.role === Role.TIMEKEEPER
-    ? 'Site Timekeeper & Manpower Officer'
-    : user.role === Role.FINANCE
-    ? 'Finance Controller & Corporate Accounting Head'
-    : 'Operations Director & Project Lead';
+      ? 'Site Timekeeper & Manpower Officer'
+      : user.role === Role.FINANCE
+        ? 'Finance Controller & Corporate Accounting Head'
+        : 'Operations Director & Project Lead';
 
   const defaultDivision = user.role === Role.FINANCE
     ? 'Finance & Treasury Department'
     : user.role === Role.TIMEKEEPER
-    ? 'Site Operations & Manpower Field Unit'
-    : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
-    ? 'Civil Engineering & Project Execution'
-    : 'Commercial & Corporate Interiors';
+      ? 'Site Operations & Manpower Field Unit'
+      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
+        ? 'Civil Engineering & Project Execution'
+        : 'Commercial & Corporate Interiors';
 
-  const normalizedRole = user.role === Role.ADMIN ? 'Admin' 
-    : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer' 
-    : user.role === Role.TIMEKEEPER ? 'Timekeeper' 
-    : user.role === Role.FINANCE ? 'Finance' 
-    : 'Client';
+  const normalizedRole = user.role === Role.ADMIN ? 'Admin'
+    : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer'
+      : user.role === Role.TIMEKEEPER ? 'Timekeeper'
+        : user.role === Role.FINANCE ? 'Finance'
+          : 'Client';
 
   return {
     id: user.id,
@@ -130,12 +130,21 @@ authRouter.post('/auth/login', loginRateLimiter, async (req: Request, res: Respo
       return res.status(400).json({ error: 'Email and password are required.' });
     }
 
+    const candidateEmails = [normalizedEmail];
+    if (normalizedEmail.endsWith('@ldmconstruction.ph')) {
+      candidateEmails.push(normalizedEmail.replace(/@ldmconstruction\.ph$/, '@ctvill.com'));
+    } else if (normalizedEmail.endsWith('@ctvill.com')) {
+      candidateEmails.push(normalizedEmail.replace(/@ctvill\.com$/, '@ldmconstruction.ph'));
+    }
+
     const user = await prisma.user.findFirst({
       where: {
-        email: {
-          equals: normalizedEmail,
-          mode: 'insensitive'
-        }
+        OR: candidateEmails.map((em) => ({
+          email: {
+            equals: em,
+            mode: 'insensitive'
+          }
+        }))
       }
     });
 
@@ -159,7 +168,7 @@ authRouter.post('/auth/login', loginRateLimiter, async (req: Request, res: Respo
     }
 
     if (user.accountStatus === AccountStatus.INVITED) {
-      return res.status(403).json({ 
+      return res.status(403).json({
         error: 'This account has not been activated yet. Please use the activation link sent to your email.'
       });
     }
@@ -197,7 +206,7 @@ authRouter.post('/auth/login', loginRateLimiter, async (req: Request, res: Respo
         actorRole: user.role,
         details: `User ${user.email} successfully authenticated from ${ipAddress || 'client'}.`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
     res.json({
       success: true,
@@ -215,7 +224,7 @@ authRouter.post('/auth/login', loginRateLimiter, async (req: Request, res: Respo
 // ============================================================================
 authRouter.post('/auth/logout', async (req: Request, res: Response) => {
   try {
-    const rawToken = req.cookies?.[SESSION_COOKIE_NAME] || 
+    const rawToken = req.cookies?.[SESSION_COOKIE_NAME] ||
       (req.headers['authorization']?.startsWith('Bearer ') ? req.headers['authorization'].substring(7).trim() : undefined);
 
     if (rawToken) {
@@ -296,24 +305,24 @@ authRouter.get('/auth/profile', requireAuth, async (req: Request, res: Response)
     const defaultTitle = (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
       ? 'Site Engineer & Project Field Lead'
       : user.role === Role.TIMEKEEPER
-      ? 'Site Timekeeper & Manpower Officer'
-      : user.role === Role.FINANCE
-      ? 'Finance Controller & Corporate Accounting Head'
-      : 'Operations Director & Project Lead';
+        ? 'Site Timekeeper & Manpower Officer'
+        : user.role === Role.FINANCE
+          ? 'Finance Controller & Corporate Accounting Head'
+          : 'Operations Director & Project Lead';
 
     const defaultDivision = user.role === Role.FINANCE
       ? 'Finance & Treasury Department'
       : user.role === Role.TIMEKEEPER
-      ? 'Site Operations & Manpower Field Unit'
-      : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
-      ? 'Civil Engineering & Project Execution'
-      : 'Commercial & Corporate Interiors';
+        ? 'Site Operations & Manpower Field Unit'
+        : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER)
+          ? 'Civil Engineering & Project Execution'
+          : 'Commercial & Corporate Interiors';
 
     const roleLabel = user.role === Role.ADMIN ? 'Admin'
       : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer'
-      : user.role === Role.TIMEKEEPER ? 'Timekeeper'
-      : user.role === Role.FINANCE ? 'Finance'
-      : 'Client';
+        : user.role === Role.TIMEKEEPER ? 'Timekeeper'
+          : user.role === Role.FINANCE ? 'Finance'
+            : 'Client';
 
     const profile = {
       id: user.id,
@@ -343,7 +352,7 @@ authRouter.get('/auth/profile', requireAuth, async (req: Request, res: Response)
 // POST /api/auth/update-profile — Persist account changes for verified session user
 // ============================================================================
 authRouter.post('/auth/update-profile', requireAuth, sensitiveActionRateLimiter, async (req: Request, res: Response) => {
-  const { 
+  const {
     name, email, contact, title, division, avatarUrl,
     alertGantt, alertPunchlist, alertSiteDiary, alertManpower,
     defaultPmsView, sessionTimeout
@@ -404,7 +413,7 @@ authRouter.post('/auth/update-profile', requireAuth, sensitiveActionRateLimiter,
 
     const defaultTitle = user.role === Role.PROJECT_MANAGER ? 'Senior Project Manager & Field Lead'
       : user.role === Role.FINANCE ? 'Finance Controller & Corporate Accounting Head'
-      : 'Operations Director & Project Lead';
+        : 'Operations Director & Project Lead';
     const defaultDivision = user.role === Role.FINANCE ? 'Finance & Treasury Department'
       : 'Commercial & Corporate Interiors';
 
@@ -437,14 +446,14 @@ authRouter.post('/auth/update-profile', requireAuth, sensitiveActionRateLimiter,
           ? `Updated login email from "${user.email}" to "${updatedEmail}", name: "${settingsPayload.profileName}".`
           : `Updated account settings: Name: "${settingsPayload.profileName}", Contact: "${settingsPayload.profilePhone}", Title: "${settingsPayload.profileTitle}".`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
     broadcastChange('auditLogs');
 
     const roleLabel = user.role === Role.ADMIN ? 'Admin'
       : (user.role === Role.ENGINEER || user.role === Role.PROJECT_MANAGER) ? 'Engineer'
-      : user.role === Role.FINANCE ? 'Finance'
-      : 'Client';
+        : user.role === Role.FINANCE ? 'Finance'
+          : 'Client';
 
     res.json({
       success: true,
@@ -511,7 +520,7 @@ authRouter.post('/auth/change-password', requireAuth, sensitiveActionRateLimiter
         actorRole: user.role,
         details: `Password changed successfully for user account ${user.email}. Previous sessions invalidated.`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
     broadcastChange('auditLogs');
 
@@ -538,11 +547,11 @@ authRouter.get('/staff', requireAuth, requireRole(['ADMIN']), async (_req: Reque
       id: u.id,
       email: u.email,
       name: u.name,
-      role: u.role === Role.ADMIN ? 'Admin' 
-        : (u.role === Role.ENGINEER || u.role === Role.PROJECT_MANAGER) ? 'Engineer' 
-        : u.role === Role.TIMEKEEPER ? 'Timekeeper' 
-        : u.role === Role.FINANCE ? 'Finance' 
-        : 'Client',
+      role: u.role === Role.ADMIN ? 'Admin'
+        : (u.role === Role.ENGINEER || u.role === Role.PROJECT_MANAGER) ? 'Engineer'
+          : u.role === Role.TIMEKEEPER ? 'Timekeeper'
+            : u.role === Role.FINANCE ? 'Finance'
+              : 'Client',
       accountStatus: u.accountStatus,
       contact: u.contact || '',
       createdAt: u.createdAt.toISOString(),
@@ -572,10 +581,10 @@ authRouter.post('/staff', requireAuth, requireRole(['ADMIN']), sensitiveActionRa
       return res.status(409).json({ error: 'An account with this email already exists.' });
     }
 
-    const role = rawRole === 'Admin' ? Role.ADMIN 
-      : rawRole === 'Finance' ? Role.FINANCE 
-      : rawRole === 'Timekeeper' ? Role.TIMEKEEPER 
-      : Role.ENGINEER;
+    const role = rawRole === 'Admin' ? Role.ADMIN
+      : rawRole === 'Finance' ? Role.FINANCE
+        : rawRole === 'Timekeeper' ? Role.TIMEKEEPER
+          : Role.ENGINEER;
 
     const passwordHash = hashPassword(String(password));
     const newUser = await prisma.user.create({
@@ -598,18 +607,18 @@ authRouter.post('/staff', requireAuth, requireRole(['ADMIN']), sensitiveActionRa
         actorRole: 'ADMIN',
         details: `Created ${role} account for ${newUser.name} (${normalizedEmail}).`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
     broadcastChange('auditLogs');
 
     res.status(201).json({
       id: newUser.id,
       email: newUser.email,
       name: newUser.name,
-      role: role === Role.ADMIN ? 'Admin' 
-        : role === Role.ENGINEER ? 'Engineer' 
-        : role === Role.TIMEKEEPER ? 'Timekeeper' 
-        : role === Role.FINANCE ? 'Finance' 
-        : 'Client',
+      role: role === Role.ADMIN ? 'Admin'
+        : role === Role.ENGINEER ? 'Engineer'
+          : role === Role.TIMEKEEPER ? 'Timekeeper'
+            : role === Role.FINANCE ? 'Finance'
+              : 'Client',
       accountStatus: newUser.accountStatus,
       createdAt: newUser.createdAt.toISOString(),
     });
@@ -650,7 +659,7 @@ authRouter.delete('/staff/:id', requireAuth, requireRole(['ADMIN']), async (req:
         actorRole: 'ADMIN',
         details: `Deleted ${target.role} account for ${target.name} (${target.email}).`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
     broadcastChange('auditLogs');
 
     res.json({ success: true });
@@ -669,8 +678,8 @@ authRouter.patch('/staff/:id', requireAuth, requireRole(['ADMIN']), async (req: 
     const target = await prisma.user.findUnique({ where: { id } });
     if (!target) return res.status(404).json({ error: 'Staff account not found.' });
 
-    const isSecuritySensitiveChange = 
-      (role && role !== target.role) || 
+    const isSecuritySensitiveChange =
+      (role && role !== target.role) ||
       (accountStatus && accountStatus !== target.accountStatus);
 
     let mappedRole: Role | undefined;
@@ -715,7 +724,7 @@ authRouter.patch('/staff/:id', requireAuth, requireRole(['ADMIN']), async (req: 
         actorRole: 'ADMIN',
         details: `Updated staff profile for ${target.name} (${target.email}). Role: ${updated.role}, Status: ${updated.accountStatus}.${isSecuritySensitiveChange ? ' Active sessions revoked.' : ''}`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
     broadcastChange('auditLogs');
 
     const sanitizedUser = {
@@ -724,9 +733,9 @@ authRouter.patch('/staff/:id', requireAuth, requireRole(['ADMIN']), async (req: 
       name: updated.name,
       role: updated.role === Role.ADMIN ? 'Admin'
         : (updated.role === Role.ENGINEER || updated.role === Role.PROJECT_MANAGER) ? 'Engineer'
-        : updated.role === Role.TIMEKEEPER ? 'Timekeeper'
-        : updated.role === Role.FINANCE ? 'Finance'
-        : 'Client',
+          : updated.role === Role.TIMEKEEPER ? 'Timekeeper'
+            : updated.role === Role.FINANCE ? 'Finance'
+              : 'Client',
       rawRole: updated.role,
       accountStatus: updated.accountStatus,
       contact: updated.contact || '',
@@ -771,7 +780,7 @@ authRouter.patch('/staff/:id/reset-password', requireAuth, requireRole(['ADMIN']
         actorRole: 'ADMIN',
         details: `Administrator reset password for ${target.name} (${target.email}). Active sessions revoked.`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
     broadcastChange('auditLogs');
 
     res.json({ success: true, message: 'Password reset successfully. Active sessions revoked.' });
@@ -803,9 +812,9 @@ authRouter.post('/auth/verify-invite', sensitiveActionRateLimiter, async (req: R
     });
 
     if (!user) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         error: 'Invalid activation token or account has already been claimed.',
-        alreadyClaimed: true 
+        alreadyClaimed: true
       });
     }
 
@@ -851,9 +860,9 @@ authRouter.post('/auth/activate', sensitiveActionRateLimiter, async (req: Reques
     });
 
     if (!user) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         error: 'Invalid activation token or this account has already been claimed. If you already set a password, please sign in with your email.',
-        alreadyClaimed: true 
+        alreadyClaimed: true
       });
     }
 
@@ -889,7 +898,7 @@ authRouter.post('/auth/activate', sensitiveActionRateLimiter, async (req: Reques
         actorRole: user.role,
         details: `Account ${user.name} claimed portal access and set credentials.`,
       }
-    }).catch(() => {});
+    }).catch(() => { });
 
     const sessionPayload = await buildSessionPayload(updatedUser);
 

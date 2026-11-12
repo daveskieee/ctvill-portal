@@ -59,7 +59,9 @@ body {
 }
 
 
-/* Light Theme Variables and Overrides (WCAG AA+ Enterprise Standard) */
+/* ============================================================================
+   1. LIGHT THEME (monday.com Daylight Enterprise Surface Hierarchy)
+   ============================================================================ */
 html.light,
 html.light-mode,
 html[data-theme="light"] {
@@ -69,140 +71,228 @@ html[data-theme="light"] {
 html.light body,
 html.light-mode body,
 html[data-theme="light"] body {
-  background-color: #f1f5f9;
-  color: #0f172a;
+  background-color: #E8ECF2;
+  color: #0F172A;
 }
 
-/* 1. 3-Tier Surface Hierarchy */
-/* Tier 1: App Canvas Background (#f1f5f9 slate-100 so white cards pop with clear separation) */
+/* Tier 1: App Canvas Background (#E8ECF2 warm architectural stone gray so white cards pop immediately) */
 html.light .min-h-screen,
 html.light #landing-page-root,
 html.light main,
-html.light .workspace-canvas {
-  background-color: #f1f5f9 !important;
-  color: #0f172a !important;
+html.light .workspace-canvas,
+html.light .w-full.relative.bg-slate-950,
+html.light [class*="h-screen"][class*="flex flex-col"] {
+  background-color: #E8ECF2 !important;
+  color: #0F172A !important;
 }
 
-html.light #corporate-footer,
-html.light footer {
-  background-color: #f1f5f9 !important;
-  border-color: #cbd5e1 !important;
-  color: #475569 !important;
+html.light #corporate-footer:not(.preserve-dark-surface),
+html.light footer:not(.preserve-dark-surface) {
+  background-color: #E8ECF2 !important;
+  border-color: #CBD5E1 !important;
+  color: #64748B !important;
 }
 
-/* Tier 2: Primary Card / Panel Surface (#ffffff white with crisp 1px solid #cbd5e1 border & subtle elevation shadow) */
+/* Tier 2: Primary Card / Panel Surface (#FFFFFF white with crisp 1px solid #CBD5E1 border & soft elevation) */
 html.light .bg-white,
-html.light [class*="bg-white"] {
-  background-color: #ffffff !important;
+html.light [class*="bg-white"]:not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  background-color: #FFFFFF !important;
+}
+
+html.light header:not(.preserve-dark-surface),
+html.light aside:not(.preserve-dark-surface) {
+  background-color: #FFFFFF !important;
+  border-color: #CBD5E1 !important;
 }
 
 html.light .shadow-sm,
 html.light .shadow-xs,
+html.light .shadow-md,
+html.light .shadow-lg,
+html.light .shadow-xl,
+html.light .shadow-2xl,
 html.light .rounded-3xl,
 html.light .rounded-2xl,
 html.light .rounded-xl {
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06), 0 1px 2px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 4px 12px -2px rgba(15, 23, 42, 0.08) !important;
 }
 
-/* Primary Slate-950 & Slate-900 Cards, Modals, and Panels -> Crisp White (#ffffff) */
-html.light [class~="bg-slate-950"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas):not(.flex-1.flex-col.min-h-0),
-html.light [class~="bg-slate-900"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
-html.light [class*=" bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
-html.light [class^="bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas) {
-  background-color: #ffffff !important;
+/* Primary Slate-950 & Slate-900 Cards, Modals, and Panels -> Crisp White (#FFFFFF) */
+html.light [class~="bg-slate-950"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas):not(.flex-1.flex-col.min-h-0):not([class*="bg-slate-950/"]):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class~="bg-slate-900"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas):not([class*="bg-slate-900/"]):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class^="bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  background-color: #FFFFFF !important;
+  border-color: #CBD5E1 !important;
 }
 
-/* Full-bleed module canvas containers (e.g., Timekeeper / Finance wrappers) -> #f1f5f9 App Canvas */
+/* Full-bleed module canvas containers (e.g., Timekeeper / Finance wrappers) -> #E8ECF2 App Canvas */
 html.light .flex-1.flex-col.min-h-0[class*="bg-slate-950"] {
-  background-color: #f1f5f9 !important;
+  background-color: #E8ECF2 !important;
 }
 
-/* Tier 3: Secondary / Inset Surface (Table headers, filter bars, form inputs, empty states, sub-cards) -> #f8fafc (slate-50) with 1px solid #cbd5e1 borders */
-html.light [class*=" bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
-html.light [class^="bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
-html.light [class~="bg-slate-800"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
-html.light [class*=" bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
-html.light [class^="bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]) {
-  background-color: #f8fafc !important;
+/* Tier 3: Nested Inner Boxes, Table Headers, Metric Boxes & Secondary Cards -> #F4F6F9 with 1px solid #CBD5E1 */
+html.light [class*=" bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class^="bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class~="bg-slate-800"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class^="bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  background-color: #F4F6F9 !important;
+  border-color: #CBD5E1 !important;
 }
 
-/* Section backgrounds in Landing Page with slate-900 or slate-950 */
-html.light section[class*="bg-slate-900"],
-html.light section[class*="bg-slate-950"] {
-  background-color: #f8fafc !important;
+/* Nested cards and wrappers inside primary cards */
+html.light [class~="bg-slate-900"] [class~="bg-slate-950"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*="from-slate-900"] [class~="bg-slate-950"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light .bg-white [class~="bg-slate-950"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light .bg-white [class~="bg-slate-900"]:not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  background-color: #F4F6F9 !important;
+  border-color: #CBD5E1 !important;
 }
 
-html.light section:nth-of-type(even) {
-  background-color: #ffffff !important;
+/* Section backgrounds in Landing Page: alternating between stone canvas and crisp white */
+html.light section[class*="bg-slate-900"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light section[class*="bg-slate-950"]:not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  background-color: #E8ECF2 !important;
+}
+
+html.light section:nth-of-type(even):not(.preserve-dark-surface) {
+  background-color: #FFFFFF !important;
 }
 
 /* Slate-700 & Slate-600 utility backgrounds */
-html.light [class~="bg-slate-700"],
-html.light [class*=" bg-slate-700/"],
-html.light [class^="bg-slate-700/"] {
-  background-color: #e2e8f0 !important;
+html.light [class~="bg-slate-700"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" bg-slate-700/"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class^="bg-slate-700/"]:not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  background-color: #E2E8F0 !important;
 }
 
 /* Pure Black backgrounds (e.g. logo container, icon boxes) */
-html.light [class~="bg-black"]:not([class*="fixed inset-0"]),
-html.light [class*=" bg-black/"]:not([class*="fixed inset-0"]),
-html.light [class^="bg-black/"]:not([class*="fixed inset-0"]) {
-  background-color: #ffffff !important;
+html.light [class~="bg-black"]:not([class*="fixed inset-0"]):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" bg-black/"]:not([class*="fixed inset-0"]):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class^="bg-black/"]:not([class*="fixed inset-0"]):not(.virtual-tour-overlay):not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  background-color: #FFFFFF !important;
 }
 
 /* Gradients in Light Mode */
-html.light [class*="from-slate-950"],
-html.light [class*="from-slate-900"] {
-  background-image: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%) !important;
+html.light [class*="from-slate-950"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*="from-slate-900"]:not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  background-image: linear-gradient(180deg, #FFFFFF 0%, #F4F6F9 100%) !important;
 }
 
 html.light [class*="from-amber-950"] {
-  background-image: linear-gradient(to right, #fffbeb 0%, #ffffff 60%, #fef3c7 100%) !important;
+  background-image: linear-gradient(to right, #FFFBEB 0%, #FFFFFF 60%, #FEF3C7 100%) !important;
 }
 
 html.light [class*="linear-gradient(to_right,#1e293b"] {
-  background-image: linear-gradient(to right, #cbd5e1 1px, transparent 1px), linear-gradient(to bottom, #cbd5e1 1px, transparent 1px) !important;
+  background-image: linear-gradient(to right, rgba(15, 23, 42, 0.035) 1px, transparent 1px), linear-gradient(to bottom, rgba(15, 23, 42, 0.035) 1px, transparent 1px) !important;
 }
 
 html.light .opacity-25.pointer-events-none {
-  opacity: 0.12 !important;
+  opacity: 0.10 !important;
 }
 
-/* Universal Crisp Borders in Light Mode (#cbd5e1 slate-300) */
-html.light [class~="border-slate-900"],
-html.light [class*=" border-slate-900/"],
-html.light [class^="border-slate-900/"],
-html.light [class~="border-slate-800"],
-html.light [class*=" border-slate-800/"],
-html.light [class^="border-slate-800/"],
-html.light [class~="border-slate-700"],
-html.light [class*=" border-slate-700/"],
-html.light [class^="border-slate-700/"],
-html.light [class~="border-slate-600"],
-html.light [class*=" border-slate-600/"],
-html.light [class^="border-slate-600/"],
+/* Universal Crisp Borders in Light Mode (#CBD5E1 architectural structural divider) */
+html.light [class~="border-slate-900"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" border-slate-900/"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class^="border-slate-900/"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class~="border-slate-800"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" border-slate-800/"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class^="border-slate-800/"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class~="border-slate-700"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" border-slate-700/"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class^="border-slate-700/"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class~="border-slate-600"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" border-slate-600/"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class^="border-slate-600/"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
 html.light [class~="border-slate-200"],
 html.light [class*=" border-slate-200/"] {
-  border-color: #cbd5e1 !important;
+  border-color: #CBD5E1 !important;
 }
 
-html.light [class*="divide-slate-800"] > :not([hidden]) ~ :not([hidden]),
-html.light [class*="divide-slate-900"] > :not([hidden]) ~ :not([hidden]) {
-  border-color: #cbd5e1 !important;
+html.light [class*="divide-slate-800"]:not(.preserve-dark-surface) > :not([hidden]) ~ :not([hidden]),
+html.light [class*="divide-slate-900"]:not(.preserve-dark-surface) > :not([hidden]) ~ :not([hidden]) {
+  border-color: #CBD5E1 !important;
 }
 
-/* 2. Global High-Contrast Text Remapping in Light Mode (WCAG AA+) */
-/* Primary headings, KPI numbers, worker names, and table values -> #0f172a (slate-900) */
-html.light [class~="text-white"]:not([class*="bg-rose-600"]):not([class*="bg-red-600"]):not([class*="bg-emerald-600"]):not([class*="bg-teal-600"]):not([class*="bg-blue-600"]):not([class*="bg-indigo-600"]):not([class*="bg-orange-600"]):not([class*="bg-[#ea580c]"]),
-html.light [class*=" text-white"]:not([class*="bg-rose-600"]):not([class*="bg-red-600"]):not([class*="bg-emerald-600"]):not([class*="bg-teal-600"]):not([class*="bg-blue-600"]):not([class*="bg-indigo-600"]):not([class*="bg-orange-600"]):not([class*="bg-[#ea580c]"]),
-html.light [class~="text-slate-100"],
-html.light [class*=" text-slate-100"],
-html.light [class~="text-slate-200"],
-html.light [class*=" text-slate-200"] {
-  color: #0f172a !important;
+/* ============================================================================
+   PRESERVE DARK SURFACE UTILITY
+   Excludes dark photo overlays, 360° virtual tour stage, floating glass cards,
+   and dark footer from light mode background and text-color inversions.
+   ============================================================================ */
+.preserve-dark-surface,
+html.light .preserve-dark-surface,
+html.light-mode .preserve-dark-surface,
+html[data-theme="light"] .preserve-dark-surface {
+  background-color: #0B0F19 !important;
+  color: #F8FAFC !important;
 }
 
-/* Preserve white text inside solid high-saturation action buttons & Gantt progress bars */
+.preserve-dark-surface h1,
+.preserve-dark-surface h2,
+.preserve-dark-surface h3,
+.preserve-dark-surface h4,
+.preserve-dark-surface h5,
+.preserve-dark-surface h6,
+.preserve-dark-surface .text-white,
+.preserve-dark-surface [class*="text-white"],
+html.light .preserve-dark-surface h1,
+html.light .preserve-dark-surface h2,
+html.light .preserve-dark-surface h3,
+html.light .preserve-dark-surface h4,
+html.light .preserve-dark-surface h5,
+html.light .preserve-dark-surface h6,
+html.light .preserve-dark-surface .text-white,
+html.light .preserve-dark-surface [class*="text-white"],
+html.light .preserve-dark-surface [class*="text-slate-100"],
+html.light .preserve-dark-surface [class*="text-slate-200"] {
+  color: #FFFFFF !important;
+}
+
+.preserve-dark-surface p,
+.preserve-dark-surface span,
+.preserve-dark-surface li,
+.preserve-dark-surface a:not([class*="text-amber-"]):not([class*="text-emerald-"]),
+html.light .preserve-dark-surface p:not([class*="text-amber-"]):not([class*="text-emerald-"]),
+html.light .preserve-dark-surface span:not([class*="text-amber-"]):not([class*="text-emerald-"]):not([class*="text-white"]):not([class*="text-slate-100"]):not([class*="text-slate-200"]),
+html.light .preserve-dark-surface li,
+html.light .preserve-dark-surface a:not([class*="text-amber-"]):not([class*="text-emerald-"]) {
+  color: #CBD5E1 !important;
+}
+
+.preserve-dark-surface [class*="text-amber-"],
+html.light .preserve-dark-surface [class*="text-amber-"] {
+  color: #F59E0B !important;
+}
+
+.preserve-dark-surface [class*="text-emerald-"],
+html.light .preserve-dark-surface [class*="text-emerald-"] {
+  color: #10B981 !important;
+}
+
+.preserve-dark-surface [class*="border-slate-800"],
+.preserve-dark-surface [class*="border-slate-700"],
+html.light .preserve-dark-surface [class*="border-slate-800"],
+html.light .preserve-dark-surface [class*="border-slate-700"] {
+  border-color: #1E293B !important;
+}
+
+/* 2. Global High-Contrast Text Remapping in Light Mode (WCAG AA+ Enterprise Standard) */
+/* Primary headings, KPI numbers, worker names, and table values -> #0F172A */
+html.light h1:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light h2:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light h3:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light h4:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class~="text-white"]:not([class*="bg-rose-"]):not([class*="bg-red-"]):not([class*="bg-emerald-"]):not([class*="bg-teal-"]):not([class*="bg-blue-"]):not([class*="bg-indigo-"]):not([class*="bg-orange-"]):not([class*="bg-amber-600"]):not(.virtual-tour-overlay):not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" text-white"]:not([class*="bg-rose-"]):not([class*="bg-red-"]):not([class*="bg-emerald-"]):not([class*="bg-teal-"]):not([class*="bg-blue-"]):not([class*="bg-indigo-"]):not([class*="bg-orange-"]):not([class*="bg-amber-600"]):not(.virtual-tour-overlay):not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class~="text-slate-100"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" text-slate-100"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class~="text-slate-200"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" text-slate-200"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  color: #0F172A !important;
+}
+
+/* Preserve white text inside solid high-saturation action buttons & accent badges */
 html.light button[class*="bg-rose-600"],
 html.light button[class*="bg-red-600"],
 html.light button[class*="bg-emerald-600"],
@@ -211,45 +301,96 @@ html.light button[class*="bg-blue-600"],
 html.light button[class*="bg-indigo-600"],
 html.light button[class*="bg-orange-600"],
 html.light button[class*="bg-[#ea580c]"],
+html.light button[class*="bg-slate-900"],
+html.light [class*="bg-amber-600"] [class*="text-white"],
+html.light [class*="bg-orange-600"] [class*="text-white"],
+html.light [class*="bg-emerald-600"] [class*="text-white"],
+html.light [class*="bg-blue-600"] [class*="text-white"],
+html.light [class*="bg-indigo-600"] [class*="text-white"],
+html.light [class*="bg-rose-600"] [class*="text-white"],
+html.light [class*="bg-red-600"] [class*="text-white"],
+html.light [class*="bg-teal-600"] [class*="text-white"],
 html.light .bg-red-600 .text-white,
 html.light .bg-emerald-600 .text-white,
 html.light .bg-red-600.text-white,
 html.light .bg-emerald-600.text-white {
-  color: #ffffff !important;
+  color: #FFFFFF !important;
 }
 
-/* Secondary body text, descriptions, and table cells -> #334155 (slate-700, font-medium) */
-html.light [class~="text-slate-300"],
-html.light [class*=" text-slate-300"],
-html.light [class~="text-slate-400"],
-html.light [class*=" text-slate-400"] {
+/* Secondary body text & descriptions: text-slate-300 -> #334155 (slate-700) */
+html.light [class~="text-slate-300"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" text-slate-300"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *) {
   color: #334155 !important;
 }
 
-/* Muted labels, uppercase column headers, and timestamps -> #475569 (slate-600, font-semibold). Never lighter than #475569 */
-html.light [class~="text-slate-500"],
-html.light [class*=" text-slate-500"],
-html.light [class~="text-slate-600"],
-html.light [class*=" text-slate-600"] {
+/* Body copy & descriptions: text-slate-400 -> #475569 (slate-600) */
+html.light [class~="text-slate-400"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" text-slate-400"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *) {
   color: #475569 !important;
 }
 
-/* Ensure amber/gold CTA buttons always have readable dark text */
-html.light [class~="bg-amber-500"],
-html.light [class~="bg-amber-400"],
-html.light [class*="from-amber-500"] {
-  color: #0f172a !important;
+/* Muted micro-labels, uppercase column headers, and timestamps -> #64748B (slate-500) */
+html.light [class~="text-slate-500"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" text-slate-500"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class~="text-slate-600"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" text-slate-600"]:not(.virtual-tour-overlay *):not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  color: #64748B !important;
 }
 
-/* 3. High-Contrast Status Badges, Pills & Buttons in Light Mode (Zero Neon Glare) */
-/* A. Emerald / Teal / Success (Present, Active, Approved, MATCH, Operational, GPS Verified) */
+/* Standalone Accent text in Light Mode:
+   amber-300/400/500 -> #B45309 / #92400E
+   emerald-400 -> #047857
+   blue-400 -> #1D4ED8 */
+html.light [class~="text-amber-300"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" text-amber-300"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class~="text-amber-400"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*=" text-amber-400"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class~="text-amber-500"]:not(.preserve-dark-surface):not(.preserve-dark-surface *):not(button):not(a),
+html.light [class*=" text-amber-500"]:not(.preserve-dark-surface):not(.preserve-dark-surface *):not(button):not(a),
+html.light [class*="text-orange-400"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*="text-orange-300"]:not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  color: #B45309 !important;
+}
+
+html.light [class*="text-emerald-400"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*="text-emerald-300"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*="text-emerald-200"]:not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  color: #047857 !important;
+}
+
+html.light [class*="text-blue-400"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*="text-blue-300"]:not(.preserve-dark-surface):not(.preserve-dark-surface *),
+html.light [class*="text-blue-200"]:not(.preserve-dark-surface):not(.preserve-dark-surface *) {
+  color: #1D4ED8 !important;
+}
+
+/* Ensure amber/gold solid CTA buttons always have readable dark text */
+html.light [class~="bg-amber-500"],
+html.light [class~="bg-amber-400"],
+html.light [class*="from-amber-400"],
+html.light [class*="from-amber-500"] {
+  color: #0F172A !important;
+  font-weight: 800 !important;
+}
+
+/* Ensure solid dark/slate buttons keep crisp white text */
+html.light button[class*="bg-slate-900"],
+html.light button[class~="bg-slate-900"],
+html.light [class*="bg-amber-600"] button,
+html.light button[class*="bg-amber-600"] {
+  color: #FFFFFF !important;
+  font-weight: 700 !important;
+}
+
+/* 3. High-Contrast Status Badges, Pills & Semantic Indicators in Light Mode */
+/* A. Emerald / Teal / Green / Success */
 html.light [class*="text-emerald-400"],
 html.light [class*="text-emerald-300"],
 html.light [class*="text-emerald-200"],
 html.light [class*="text-teal-400"],
 html.light [class*="text-teal-300"],
 html.light [class*="text-teal-200"] {
-  color: #065f46 !important;
+  color: #065F46 !important;
 }
 
 html.light [class*="bg-emerald-950"],
@@ -263,9 +404,9 @@ html.light [class*="bg-teal-900"],
 html.light [class*="bg-teal-500/10"],
 html.light [class*="bg-teal-500/15"],
 html.light [class*="bg-teal-500/20"] {
-  background-color: #d1fae5 !important;
-  border-color: #6ee7b7 !important;
-  color: #065f46 !important;
+  background-color: #D1FAE5 !important;
+  border-color: #10B981 !important;
+  color: #065F46 !important;
 }
 
 html.light [class*="border-emerald-500/"],
@@ -275,14 +416,16 @@ html.light [class*="border-emerald-800"],
 html.light [class*="border-teal-500/"],
 html.light [class*="border-teal-700"],
 html.light [class*="border-teal-800"] {
-  border-color: #6ee7b7 !important;
+  border-color: #10B981 !important;
 }
 
-/* B. Amber / Warning (Pending, Late / Undertime, For Repair, Advisory) */
+/* B. Amber / Orange / Warning */
 html.light [class*="text-amber-400"],
 html.light [class*="text-amber-300"],
-html.light [class*="text-amber-200"] {
-  color: #92400e !important;
+html.light [class*="text-amber-200"],
+html.light [class*="text-orange-400"],
+html.light [class*="text-orange-300"] {
+  color: #92400E !important;
 }
 
 html.light [class*="bg-amber-950"],
@@ -290,20 +433,25 @@ html.light [class*="bg-amber-900"],
 html.light [class*="bg-amber-500/10"],
 html.light [class*="bg-amber-500/15"],
 html.light [class*="bg-amber-500/20"],
-html.light [class*="bg-amber-500/25"] {
-  background-color: #fef3c7 !important;
-  border-color: #fcd34d !important;
-  color: #92400e !important;
+html.light [class*="bg-amber-500/25"],
+html.light [class*="bg-orange-950"],
+html.light [class*="bg-orange-500/10"],
+html.light [class*="bg-orange-500/15"],
+html.light [class*="bg-orange-500/20"] {
+  background-color: #FEF3C7 !important;
+  border-color: #F59E0B !important;
+  color: #92400E !important;
 }
 
 html.light [class*="border-amber-500/"],
 html.light [class*="border-amber-600/"],
 html.light [class*="border-amber-700"],
-html.light [class*="border-amber-800"] {
-  border-color: #fcd34d !important;
+html.light [class*="border-amber-800"],
+html.light [class*="border-orange-500/"] {
+  border-color: #F59E0B !important;
 }
 
-/* C. Blue / Cyan / Sky / Indigo / Info (In Progress, Scheduled, In-House, 0.0h OT) */
+/* C. Blue / Cyan / Sky / Indigo / Info */
 html.light [class*="text-blue-400"],
 html.light [class*="text-blue-300"],
 html.light [class*="text-blue-200"],
@@ -313,7 +461,7 @@ html.light [class*="text-sky-400"],
 html.light [class*="text-sky-300"],
 html.light [class*="text-indigo-400"],
 html.light [class*="text-indigo-300"] {
-  color: #1e40af !important;
+  color: #1E40AF !important;
 }
 
 html.light [class*="bg-blue-950"],
@@ -334,9 +482,9 @@ html.light [class*="bg-indigo-950"],
 html.light [class*="bg-indigo-500/10"],
 html.light [class*="bg-indigo-500/15"],
 html.light [class*="bg-indigo-500/20"] {
-  background-color: #dbeafe !important;
-  border-color: #93c5fd !important;
-  color: #1e40af !important;
+  background-color: #DBEAFE !important;
+  border-color: #3B82F6 !important;
+  color: #1E40AF !important;
 }
 
 html.light [class*="border-blue-500/"],
@@ -349,17 +497,17 @@ html.light [class*="border-indigo-500/"],
 html.light [class*="border-indigo-600/"],
 html.light [class*="border-indigo-700"],
 html.light [class*="border-indigo-800"] {
-  border-color: #93c5fd !important;
+  border-color: #3B82F6 !important;
 }
 
-/* D. Rose / Red / Danger (Absent, Deny, Delayed, Critical) */
+/* D. Rose / Red / Danger */
 html.light [class*="text-rose-400"],
 html.light [class*="text-rose-300"],
 html.light [class*="text-rose-200"],
 html.light [class*="text-red-400"],
 html.light [class*="text-red-300"],
 html.light [class*="text-red-200"] {
-  color: #991b1b !important;
+  color: #9F1239 !important;
 }
 
 html.light [class*="bg-rose-950"]:not(.h-\[22px\]),
@@ -372,9 +520,9 @@ html.light [class*="bg-rose-500/20"],
 html.light [class*="bg-red-500/10"],
 html.light [class*="bg-red-500/15"],
 html.light [class*="bg-red-500/20"] {
-  background-color: #ffe4e6 !important;
-  border-color: #fda4af !important;
-  color: #991b1b !important;
+  background-color: #FFE4E6 !important;
+  border-color: #F43F5E !important;
+  color: #9F1239 !important;
 }
 
 html.light [class*="border-rose-500/"],
@@ -383,21 +531,114 @@ html.light [class*="border-rose-700"],
 html.light [class*="border-rose-800"],
 html.light [class*="border-red-500/"],
 html.light [class*="border-red-700"] {
-  border-color: #fda4af !important;
+  border-color: #F43F5E !important;
 }
 
+/* E. Purple / Violet */
 html.light [class*="text-purple-400"],
-html.light [class*="text-purple-300"] {
-  color: #6b21a8 !important;
+html.light [class*="text-purple-300"],
+html.light [class*="text-violet-400"],
+html.light [class*="text-violet-300"] {
+  color: #5B21B6 !important;
 }
 
 html.light [class*="bg-purple-950"],
 html.light [class*="bg-purple-500/10"],
 html.light [class*="bg-purple-500/15"],
-html.light [class*="bg-purple-500/20"] {
-  background-color: #f3e8ff !important;
-  border-color: #d8b4fe !important;
-  color: #6b21a8 !important;
+html.light [class*="bg-purple-500/20"],
+html.light [class*="bg-violet-950"],
+html.light [class*="bg-violet-500/10"],
+html.light [class*="bg-violet-500/15"],
+html.light [class*="bg-violet-500/20"] {
+  background-color: #EDE9FE !important;
+  border-color: #8B5CF6 !important;
+  color: #5B21B6 !important;
+}
+
+html.light [class*="border-purple-500/"],
+html.light [class*="border-purple-700"],
+html.light [class*="border-violet-500/"],
+html.light [class*="border-violet-700"] {
+  border-color: #8B5CF6 !important;
+}
+
+/* 360° Virtual Tour Dark Glass Card - Always preserved across all themes */
+.virtual-tour-overlay,
+.virtual-tour-overlay h3,
+.virtual-tour-overlay p,
+.virtual-tour-overlay span {
+  color: #FFFFFF !important;
+}
+.virtual-tour-overlay p.tour-subtitle {
+  color: #E2E8F0 !important;
+}
+.virtual-tour-overlay p.tour-highlights {
+  color: #FCD34D !important;
+}
+
+/* ============================================================================
+   PRESERVE DARK SURFACE UTILITY (Enforced after light theme overrides)
+   Excludes dark photo overlays, 360° virtual tour stage, floating glass cards,
+   and dark footer from light mode background and text-color inversions.
+   ============================================================================ */
+.preserve-dark-surface,
+html.light .preserve-dark-surface,
+html.light-mode .preserve-dark-surface,
+html[data-theme="light"] .preserve-dark-surface {
+  background-color: #0B0F19 !important;
+  color: #F8FAFC !important;
+  border-color: #1E293B !important;
+}
+
+.preserve-dark-surface h1,
+.preserve-dark-surface h2,
+.preserve-dark-surface h3,
+.preserve-dark-surface h4,
+.preserve-dark-surface h5,
+.preserve-dark-surface h6,
+.preserve-dark-surface strong,
+.preserve-dark-surface b,
+html.light .preserve-dark-surface h1,
+html.light .preserve-dark-surface h2,
+html.light .preserve-dark-surface h3,
+html.light .preserve-dark-surface h4,
+html.light .preserve-dark-surface h5,
+html.light .preserve-dark-surface h6,
+html.light .preserve-dark-surface strong,
+html.light .preserve-dark-surface b,
+html.light .preserve-dark-surface .text-white,
+html.light .preserve-dark-surface [class*="text-white"],
+html.light .preserve-dark-surface [class*="text-slate-100"],
+html.light .preserve-dark-surface [class*="text-slate-200"] {
+  color: #FFFFFF !important;
+}
+
+.preserve-dark-surface p,
+.preserve-dark-surface span,
+.preserve-dark-surface li,
+.preserve-dark-surface a:not([class*="text-amber-"]):not([class*="text-emerald-"]),
+html.light .preserve-dark-surface p,
+html.light .preserve-dark-surface span:not([class*="text-amber-"]):not([class*="text-emerald-"]):not([class*="text-white"]):not([class*="text-slate-100"]):not([class*="text-slate-200"]):not(button *),
+html.light .preserve-dark-surface li,
+html.light .preserve-dark-surface a:not([class*="text-amber-"]):not([class*="text-emerald-"]) {
+  color: #CBD5E1 !important;
+}
+
+.preserve-dark-surface [class*="text-amber-"],
+html.light .preserve-dark-surface [class*="text-amber-"] {
+  color: #F59E0B !important;
+}
+
+.preserve-dark-surface [class*="text-emerald-"],
+html.light .preserve-dark-surface [class*="text-emerald-"] {
+  color: #10B981 !important;
+}
+
+.preserve-dark-surface [class*="border-slate-800"],
+.preserve-dark-surface [class*="border-slate-700"],
+html.light .preserve-dark-surface [class*="border-slate-800"],
+html.light .preserve-dark-surface [class*="border-slate-700"] {
+  border-color: #1E293B !important;
 }
 
 /* Subtle inner sub-bars and tracks */
@@ -405,63 +646,66 @@ html.light [class*="bg-slate-950/40"],
 html.light [class*="bg-slate-950/30"],
 html.light [class*="bg-slate-950/20"],
 html.light [class*="bg-slate-950/10"] {
-  background-color: #f8fafc !important;
+  background-color: #F7F9FC !important;
 }
 
 html.light .h-2.bg-slate-800,
 html.light .h-1\.5.bg-slate-800,
 html.light .h-1.bg-slate-800 {
-  background-color: #e2e8f0 !important;
+  background-color: #E2E8F0 !important;
 }
 
 /* Interactive Hovers */
 html.light [class*="hover:bg-slate-900"]:hover,
 html.light [class*="hover:bg-slate-800"]:hover {
-  background-color: #f1f5f9 !important;
+  background-color: #F0F2F5 !important;
 }
 
 html.light [class*="hover:bg-slate-700"]:hover {
-  background-color: #e2e8f0 !important;
+  background-color: #E2E8F0 !important;
 }
 
-html.light [class*="hover:text-white"]:hover {
-  color: #0f172a !important;
+html.light [class*="hover:text-white"]:hover:not(.virtual-tour-overlay *):not(button[class*="bg-amber-"]) {
+  color: #1F2328 !important;
 }
 
 html.light [class*="hover:border-slate-700"]:hover,
 html.light [class*="hover:border-slate-600"]:hover {
-  border-color: #94a3b8 !important;
+  border-color: #94A3B8 !important;
 }
 
 /* 4. Data Tables & Form Controls (All Modules) */
-/* All <input>, <select>, and <textarea> in Light Mode: #ffffff bg, #0f172a text, 1px solid #94a3b8 (slate-400) border */
-html.light input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+/* All <input>, <select>, and <textarea> in Light Mode: #FFFFFF bg, #1F2328 text, 1px solid #CBD5E1 border */
+html.light input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.virtual-tour-overlay *),
 html.light select,
 html.light textarea {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
-  border: 1px solid #94a3b8 !important;
+  background-color: #FFFFFF !important;
+  color: #1F2328 !important;
+  border: 1px solid #CBD5E1 !important;
 }
 
 html.light select option {
-  background-color: #ffffff !important;
-  color: #0f172a !important;
+  background-color: #FFFFFF !important;
+  color: #1F2328 !important;
 }
 
 html.light input::placeholder,
 html.light textarea::placeholder {
-  color: #64748b !important;
+  color: #676879 !important;
 }
 
-/* All table header rows (<thead>) in Light Mode: #f1f5f9 (slate-100) bg, #334155 (slate-700) bold uppercase text, 1px solid #cbd5e1 bottom border */
+/* All table header rows (<thead>) in Light Mode: #F7F9FC bg, #676879 uppercase micro-labels, 1px solid #E2E8F0 bottom border */
 html.light thead,
 html.light thead tr,
-html.light thead th {
-  background-color: #f1f5f9 !important;
-  color: #334155 !important;
+html.light thead th,
+html.light .erp-table th {
+  background-color: #F7F9FC !important;
+  color: #676879 !important;
   font-weight: 700 !important;
+  font-size: 0.6875rem !important;
   text-transform: uppercase !important;
-  border-bottom: 1px solid #cbd5e1 !important;
+  letter-spacing: 0.05em !important;
+  border-bottom: 1px solid #E2E8F0 !important;
 }
 
 /* Fullscreen Loading Transition Screen */
@@ -496,15 +740,191 @@ html.light .fixed [class*="bg-slate-900"] {
 
 /* Scrollbars in Light Mode */
 html.light ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: #F5F6F8;
 }
 
 html.light ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: #CBD5E1;
 }
 
 html.light ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: #94A3B8;
+}
+
+/* ============================================================================
+   2. DARK THEME (Carbon Slate Enterprise Surface Hierarchy)
+   ============================================================================ */
+html.dark:not(.night),
+html[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+html.dark:not(.night) body,
+html[data-theme="dark"] body {
+  background-color: #111625;
+  color: #F1F5F9;
+}
+
+/* Tier 1: App Canvas Background (#111625) */
+html.dark:not(.night) .min-h-screen,
+html.dark:not(.night) #landing-page-root,
+html.dark:not(.night) main,
+html.dark:not(.night) .workspace-canvas,
+html.dark:not(.night) .w-full.relative.bg-slate-950,
+html.dark:not(.night) [class*="h-screen"][class*="flex flex-col"] {
+  background-color: #111625 !important;
+  color: #F1F5F9 !important;
+}
+
+/* Tier 2: Sidebar & Header (#161C2E with #2A344E border) */
+html.dark:not(.night) header,
+html.dark:not(.night) aside {
+  background-color: #161C2E !important;
+  border-color: #2A344E !important;
+}
+
+/* Tier 3: Cards, Panels & Modals (#1C2338 with #2A344E border) */
+html.dark:not(.night) [class~="bg-slate-900"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.dark:not(.night) [class*=" bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.dark:not(.night) [class^="bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.dark:not(.night) [class~="bg-slate-950"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas):not(.flex-1.flex-col.min-h-0),
+html.dark:not(.night) .erp-card {
+  background-color: #1C2338 !important;
+  border-color: #2A344E !important;
+}
+
+/* Inset surfaces, sub-cards & table headers (#161C2E) */
+html.dark:not(.night) [class*=" bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.dark:not(.night) [class^="bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.dark:not(.night) [class~="bg-slate-800"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
+html.dark:not(.night) [class*=" bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
+html.dark:not(.night) [class^="bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]) {
+  background-color: #161C2E !important;
+}
+
+html.dark:not(.night) thead,
+html.dark:not(.night) thead tr,
+html.dark:not(.night) thead th,
+html.dark:not(.night) .erp-table th {
+  background-color: #161C2E !important;
+  color: #94A3B8 !important;
+  border-color: #2A344E !important;
+}
+
+html.dark:not(.night) .erp-table td {
+  border-color: #2A344E !important;
+  color: #E2E8F0 !important;
+}
+
+html.dark:not(.night) [class~="border-slate-800"],
+html.dark:not(.night) [class*=" border-slate-800/"],
+html.dark:not(.night) [class^="border-slate-800/"],
+html.dark:not(.night) [class~="border-slate-700"],
+html.dark:not(.night) [class*=" border-slate-700/"],
+html.dark:not(.night) [class^="border-slate-700/"],
+html.dark:not(.night) [class*="divide-slate-800"] > :not([hidden]) ~ :not([hidden]) {
+  border-color: #2A344E !important;
+}
+
+html.dark:not(.night) input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html.dark:not(.night) select,
+html.dark:not(.night) textarea {
+  background-color: #161C2E !important;
+  border-color: #2A344E !important;
+  color: #F1F5F9 !important;
+}
+
+/* ============================================================================
+   3. NIGHT THEME (True Obsidian Deep Surface Hierarchy)
+   ============================================================================ */
+html.night,
+html[data-theme="night"] {
+  color-scheme: dark;
+}
+
+html.night body,
+html[data-theme="night"] body {
+  background-color: #0A0A0C;
+  color: #FAFAFA;
+}
+
+/* Tier 1: App Canvas Background (#0A0A0C) */
+html.night .min-h-screen,
+html.night #landing-page-root,
+html.night main,
+html.night .workspace-canvas,
+html.night .w-full.relative.bg-slate-950,
+html.night [class*="h-screen"][class*="flex flex-col"] {
+  background-color: #0A0A0C !important;
+  color: #FAFAFA !important;
+}
+
+/* Tier 2: Sidebar & Header (#111114 with #27272A border) */
+html.night header,
+html.night aside {
+  background-color: #111114 !important;
+  border-color: #27272A !important;
+}
+
+/* Tier 3: Cards, Panels & Modals (#18181C with #27272A border) */
+html.night [class~="bg-slate-900"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.night [class*=" bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.night [class^="bg-slate-900/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.night [class~="bg-slate-950"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas):not(.flex-1.flex-col.min-h-0),
+html.night .erp-card {
+  background-color: #18181C !important;
+  border-color: #27272A !important;
+}
+
+/* Inset surfaces, sub-cards & table headers (#111114) */
+html.night [class*=" bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.night [class^="bg-slate-950/"]:not([class*="fixed inset-0"]):not(main):not(.workspace-canvas),
+html.night [class~="bg-slate-800"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
+html.night [class*=" bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]),
+html.night [class^="bg-slate-800/"]:not([class*="rounded-full"]):not([class*="fixed inset-0"]) {
+  background-color: #111114 !important;
+}
+
+html.night thead,
+html.night thead tr,
+html.night thead th,
+html.night .erp-table th {
+  background-color: #111114 !important;
+  color: #A1A1AA !important;
+  border-color: #27272A !important;
+}
+
+html.night .erp-table td {
+  border-color: #27272A !important;
+  color: #F4F4F5 !important;
+}
+
+html.night [class~="border-slate-800"],
+html.night [class*=" border-slate-800/"],
+html.night [class^="border-slate-800/"],
+html.night [class~="border-slate-700"],
+html.night [class*=" border-slate-700/"],
+html.night [class^="border-slate-700/"],
+html.night [class*="divide-slate-800"] > :not([hidden]) ~ :not([hidden]) {
+  border-color: #27272A !important;
+}
+
+html.night input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+html.night select,
+html.night textarea {
+  background-color: #111114 !important;
+  border-color: #27272A !important;
+  color: #FAFAFA !important;
+}
+
+/* Universal Smooth 150ms Multi-Theme Surface Transition */
+html,
+body,
+#root,
+[class*="bg-"],
+[class*="border-"],
+[class*="text-"] {
+  transition: background-color 150ms ease, border-color 150ms ease, color 150ms ease;
 }
 
 

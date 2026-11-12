@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { ChangeOrder, ProjectProfile } from '../types';
 import { exportToCsv, printRegisterTable } from '../utils/exportUtils';
+import { logAuditEvent } from '../utils/auditLogger';
 
 interface ChangeOrderManagerProps {
   changeOrders: ChangeOrder[];
@@ -39,7 +40,7 @@ export default function ChangeOrderManager({
   // Form State
   const [formTitle, setFormTitle] = useState('');
   const [formContractor, setFormContractor] = useState('SolidFoundations Engineering');
-  const [formProject, setFormProject] = useState(projects[0]?.name || 'NexBridge Software Hub');
+  const [formProject, setFormProject] = useState(projects[0]?.name || 'LDM Prime Residential Build');
   const [formAmount, setFormAmount] = useState<number>(150000);
   const [formJustification, setFormJustification] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -118,6 +119,16 @@ export default function ChangeOrderManager({
           approvalAction === 'APPROVED' ? Number(approvedAmountInput) : 0
         );
       }
+
+      logAuditEvent({
+        entityType: 'CIVIL_WORKS',
+        entityId: targetOrder.id,
+        action: approvalAction === 'APPROVED' ? 'CHANGE_ORDER_APPROVED' : 'CHANGE_ORDER_REJECTED',
+        actorName: 'Engr. Dan Ramos',
+        actorRole: 'Operations Manager',
+        details: `${approvalAction === 'APPROVED' ? 'Approved' : 'Rejected'} Change Order ${targetOrder.orderNumber} (${targetOrder.title}) for ${targetOrder.projectName || 'Site'}. Amount: ₱${Number(approvedAmountInput).toLocaleString()}`
+      });
+
       setShowApproveModal(false);
       setTargetOrder(null);
     } catch (err) {
@@ -143,7 +154,7 @@ export default function ChangeOrderManager({
       co.createdAt || '',
       co.justification || ''
     ]);
-    exportToCsv('CTVill_Change_Orders_Register', headers, rows);
+    exportToCsv('LDM_Change_Orders_Register', headers, rows);
   };
 
   const handlePrint = () => {

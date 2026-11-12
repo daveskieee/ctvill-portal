@@ -3,14 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShieldAlert, LogIn, Key, Mail, ArrowLeft,
   Sparkles, Layers, CheckSquare
 } from 'lucide-react';
 import { UserSession } from '../types';
-import logoJpg from '../assets/images/ctvill/logo.jpg';
+import { useTheme } from '../context/ThemeContext';
+import { LdmBrandLogo } from './OptimizedLdmImage';
 import { ThemeToggle } from './ThemeToggle';
+import { clearExpiredAuthSession } from '../utils/session';
 import {
   STRICT_EMAIL_REGEX,
   validateEmailPreFlight,
@@ -24,12 +26,38 @@ interface LoginPortalProps {
 }
 
 export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPortalProps) {
-  // Login State
-  const [email, setEmail] = useState<string>('');
+  const { isDark } = useTheme();
+  // Login State with default prefilled operational account
+  const [email, setEmail] = useState<string>('om@ldmconstruction.ph');
   const [password, setPassword] = useState<string>('');
   const [rememberMe, setRememberMe] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+
+  // Immediate mount cleanup: If opened on login with expired flag/param, wipe lingering keys and prevent auto-redirect
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const hash = window.location.hash.toLowerCase();
+    if (
+      params.get('expired') === 'true' ||
+      params.get('session') === 'expired' ||
+      hash.includes('login')
+    ) {
+      clearExpiredAuthSession();
+    }
+  }, []);
+
+  const handleBackToLanding = () => {
+    setIsSubmitting(false);
+    try {
+      if (typeof window !== 'undefined') {
+        window.history.pushState({}, '', '/');
+        window.dispatchEvent(new PopStateEvent('popstate'));
+      }
+    } catch { /* silent */ }
+    onBackToLanding();
+  };
 
   // --- LOGIN HANDLER (Strict Pre-Flight Validation & Payload Hardening) ---
   const handleLoginSubmit = async (e: React.FormEvent) => {
@@ -41,7 +69,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
       // Block network request completely if email is blank or missing valid domain (.com, .ph, etc.)
       setErrorMsg(
         emailCheck.error ||
-          'Invalid email format. Please enter a complete email address with domain (e.g., name@ctvill.com).'
+          'Invalid email format. Please enter a complete email address with domain (e.g., name@ldmconstruction.ph).'
       );
       return;
     }
@@ -53,6 +81,10 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
     }
 
     const cleanEmail = emailCheck.cleanEmail;
+    // Normalize @ldmconstruction.ph to @ctvill.com for existing backend database accounts
+    const backendEmail = cleanEmail.toLowerCase().endsWith('@ldmconstruction.ph')
+      ? cleanEmail.replace(/@ldmconstruction\.ph$/i, '@ctvill.com')
+      : cleanEmail;
 
     setIsSubmitting(true);
     try {
@@ -65,7 +97,8 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
           'X-Client-Auth-Transport': transportCreds.encoding,
         },
         body: JSON.stringify({
-          email: cleanEmail,
+          email: backendEmail,
+          originalEmail: cleanEmail,
           password: transportCreds.maskedPassword,
           encodedPayload: transportCreds.encodedPayload,
           transportDigest: transportCreds.transportDigest,
@@ -79,7 +112,12 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
       if (!res.ok) {
         setErrorMsg(data.error || 'Authentication failed. Please verify your credentials.');
       } else if (data.session) {
-        onLoginSuccess({ ...data.session, rememberMe });
+        const finalSession = {
+          ...data.session,
+          rememberMe,
+          email: cleanEmail.toLowerCase().endsWith('@ldmconstruction.ph') ? cleanEmail : data.session.email,
+        };
+        onLoginSuccess(finalSession);
       }
     } catch (err) {
       setErrorMsg('Connection error. Could not reach authentication server.');
@@ -93,20 +131,24 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
       
       {/* Clean ERP Subtle Grid Background */}
       <div className="absolute inset-0 z-0 opacity-20 pointer-events-none">
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)] bg-[size:36px_36px]"></div>
+        <div className={`absolute inset-0 ${isDark 
+          ? 'bg-[linear-gradient(to_right,#1e293b_1px,transparent_1px),linear-gradient(to_bottom,#1e293b_1px,transparent_1px)]'
+          : 'bg-[linear-gradient(to_right,rgba(15,23,42,0.035)_1px,transparent_1px),linear-gradient(to_bottom,rgba(15,23,42,0.035)_1px,transparent_1px)]'
+        } bg-[size:36px_36px]`}></div>
       </div>
 
       <div className="w-full max-w-5xl bg-slate-900 border border-slate-800 rounded-3xl shadow-2xl overflow-hidden relative z-10 grid grid-cols-1 lg:grid-cols-12 animate-slideUp">
         
         {/* Left Column: Brand Identity & PMS Overview */}
-        <div className="lg:col-span-7 bg-slate-950 p-6 sm:p-8 lg:p-10 border-b border-slate-800 lg:border-b-0 lg:border-r text-white flex flex-col justify-between">
+        <div className={`lg:col-span-7 ${isDark ? 'bg-slate-950 text-white' : 'bg-white text-slate-900'} p-6 sm:p-8 lg:p-10 border-b border-slate-800 lg:border-b-0 lg:border-r flex flex-col justify-between`}>
           <div className="space-y-6">
             
             {/* Top Bar */}
             <div className="flex items-center justify-between gap-3">
               <button
-                onClick={onBackToLanding}
-                className="text-xs text-slate-400 hover:text-amber-400 flex items-center gap-1.5 transition-colors cursor-pointer"
+                type="button"
+                onClick={handleBackToLanding}
+                className={`text-xs ${isDark ? 'text-slate-400 hover:text-amber-400' : 'text-slate-500 hover:text-amber-600'} flex items-center gap-1.5 transition-colors cursor-pointer`}
               >
                 <ArrowLeft className="w-4 h-4" />
                 <span>Return to Landing Page</span>
@@ -122,54 +164,48 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
 
             {/* Brand Header */}
             <div className="pt-2 flex items-center gap-3.5">
-              <div className="h-12 w-12 rounded-xl bg-black border border-slate-800 flex items-center justify-center shadow-xl overflow-hidden shrink-0">
-                <img 
-                  src={logoJpg} 
-                  alt="CTVill Logo" 
-                  className="w-full h-full object-cover"
-                />
-              </div>
+              <LdmBrandLogo size="lg" lightMode={!isDark} />
               <div>
-                <span className="font-sans font-black text-xl text-white tracking-tight block leading-tight">
-                  CTVILL
+                <span className={`font-sans font-black text-xl ${isDark ? 'text-white' : 'text-slate-900'} tracking-tight block leading-tight`}>
+                  LDM CONSTRUCTION
                 </span>
-                <span className="text-[10px] text-amber-400 font-mono tracking-widest block uppercase font-bold">
-                  Design & Construction Hub
+                <span className={`text-[10px] ${isDark ? 'text-amber-400' : 'text-amber-600'} font-mono tracking-widest block uppercase font-bold`}>
+                  ENGINEERS &bull; ARCHITECTS &bull; BUILDERS
                 </span>
               </div>
             </div>
 
             <div>
-              <h2 className="font-sans font-black text-2xl lg:text-3xl tracking-tight leading-tight text-white">
-                Turnkey Fit-Out Operations Portal
+              <h2 className={`font-sans font-black text-2xl lg:text-3xl tracking-tight leading-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                Design &amp; Build ERP Portal
               </h2>
-              <p className="text-xs text-slate-400 mt-2 font-medium leading-relaxed">
-                Centralized Project Management System for commercial fit-outs: Gantt timelines, Kanban tasks, daily site diaries, architectural blueprints, QA punch-list defect logs, and risk matrices.
+              <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} mt-2 font-medium leading-relaxed`}>
+                Giving Life to Your Dreams &mdash; Centralized Project Management System for architectural design, custom interior fit-outs, residential &amp; commercial builds, Gantt timelines, site diaries, QA punch-lists, and payroll.
               </p>
             </div>
 
             {/* 3 Pillars Flow Graphic Box */}
-            <div className="p-4 bg-slate-900/80 border border-slate-800 rounded-2xl space-y-3">
+            <div className={`p-4 ${isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-[#F8FAFC] border-[#CBD5E1] shadow-2xs'} border rounded-2xl space-y-3`}>
               <div className="flex items-center justify-between text-xs font-bold">
-                <div className="flex items-center gap-2 text-amber-400">
+                <div className={`flex items-center gap-2 ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>
                   <Sparkles className="w-4 h-4" />
-                  <span>Commercial Fit-Out PMS Lifecycle</span>
+                  <span>Turnkey Design &amp; Build Lifecycle</span>
                 </div>
-                <span className="text-[10px] font-mono text-slate-500">CABUYAO, LAGUNA</span>
+                <span className={`text-[10px] font-mono ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>ENGINEERS • ARCHITECTS • BUILDERS</span>
               </div>
 
               <div className="grid grid-cols-3 gap-2 text-center text-[10px]">
-                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                  <span className="text-amber-400 font-bold block">1. CREATE</span>
-                  <span className="text-slate-400">Gantt & Blueprint Specs</span>
+                <div className={`${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-[#CBD5E1] shadow-2xs'} p-2.5 rounded-xl border`}>
+                  <span className={`${isDark ? 'text-amber-400' : 'text-amber-700'} font-bold block`}>1. ARCHITECTURAL</span>
+                  <span className={`${isDark ? 'text-slate-400' : 'text-slate-600'}`}>3D Visualization &amp; Plans</span>
                 </div>
-                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                  <span className="text-blue-400 font-bold block">2. CONSTRUCT</span>
-                  <span className="text-slate-400">Site Diaries & Kanban</span>
+                <div className={`${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-[#CBD5E1] shadow-2xs'} p-2.5 rounded-xl border`}>
+                  <span className={`${isDark ? 'text-blue-400' : 'text-blue-700'} font-bold block`}>2. ENGINEERING</span>
+                  <span className={`${isDark ? 'text-slate-400' : 'text-slate-600'}`}>14-Phase WBS &amp; Structural</span>
                 </div>
-                <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
-                  <span className="text-emerald-400 font-bold block">3. AFTER CARE</span>
-                  <span className="text-slate-400">Defect Punch-Lists</span>
+                <div className={`${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-[#CBD5E1] shadow-2xs'} p-2.5 rounded-xl border`}>
+                  <span className={`${isDark ? 'text-emerald-400' : 'text-emerald-700'} font-bold block`}>3. CONSTRUCTION</span>
+                  <span className={`${isDark ? 'text-slate-400' : 'text-slate-600'}`}>Turnkey Build &amp; Interiors</span>
                 </div>
               </div>
             </div>
@@ -183,7 +219,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
                 <div>
                   <h5 className="font-bold text-xs text-amber-300">Operations Manager Command Center</h5>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Unified left-sidebar navigation with full control over fit-out milestones, contractor manpower allocations, and document approvals.
+                    Unified command center for residential &amp; commercial builds, 14-phase weighted WBS schedules, manpower payroll, and procurement.
                   </p>
                 </div>
               </div>
@@ -193,9 +229,9 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
                   <CheckSquare className="w-4 h-4" />
                 </div>
                 <div>
-                  <h5 className="font-bold text-xs text-emerald-300">QA Inspection & Punch-List Tracking</h5>
+                  <h5 className="font-bold text-xs text-emerald-300">QA Inspection &amp; Punch-List Tracking</h5>
                   <p className="text-[11px] text-slate-400 mt-0.5">
-                    Integrated quality defect logging, photo evidence verification, and contractor defect resolution workflows.
+                    Integrated architectural &amp; structural quality assurance, site diary photo logs, and turnkey handover verification.
                   </p>
                 </div>
               </div>
@@ -203,7 +239,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
           </div>
 
           <div className="pt-6 border-t border-slate-900 text-[10px] font-mono text-slate-500 flex justify-between items-center">
-            <span>CTVILL DESIGN & CONSTRUCTION PMS</span>
+            <span>LDM CONSTRUCTION &bull; DESIGN &amp; BUILD ERP</span>
             <span className="text-emerald-400 font-bold flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
               SYSTEM OPERATIONAL
@@ -215,12 +251,12 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
         <div className="lg:col-span-5 bg-slate-900 p-6 sm:p-8 flex flex-col justify-between space-y-6">
           <div>
             <div className="text-center py-2">
-              <div className="w-12 h-12 rounded-2xl bg-black border border-slate-800 flex items-center justify-center mx-auto shadow-lg overflow-hidden">
-                <img src={logoJpg} alt="CTVill Logo" className="w-full h-full object-cover" />
+              <div className="flex justify-center mx-auto">
+                <LdmBrandLogo size="lg" />
               </div>
               <h3 className="font-bold text-white text-lg mt-3">Operations Sign-In</h3>
               <p className="text-[11px] text-slate-400 font-mono mt-0.5">
-                Authorized Operations Managers & Project Staff
+                Authorized Engineers, Architects &amp; Project Staff
               </p>
             </div>
 
@@ -243,7 +279,7 @@ export default function LoginPortal({ onLoginSuccess, onBackToLanding }: LoginPo
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@ctvill.com"
+                    placeholder="name@ldmconstruction.ph"
                     autoComplete="off"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500"
                   />

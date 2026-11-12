@@ -29,8 +29,7 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
   onLogAuditClick,
   notify,
 }) => {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const { isDark } = useTheme();
   const [selectedSite, setSelectedSite] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const audits = manpowerAudits;
@@ -53,15 +52,15 @@ export const SubcontractorRollCallAudits: React.FC<SubcontractorRollCallAuditsPr
       const zone = a.assignedSectorOrLot?.trim();
       if (zone) {
         // If it starts with common project prefixes, normalize or add
-        if (zone.toLowerCase().includes('nexbridge')) set.add('NexBridge Software Hub');
+        if (zone.toLowerCase().includes('villa') || zone.toLowerCase().includes('ldm')) set.add('LDM Modern Villa Site');
         else if (zone.toLowerCase().includes('2-storey') || zone.toLowerCase().includes('residential')) set.add('2-Storey Residential House');
-        else if (zone.toLowerCase().includes('bgcomm')) set.add('BGComm 1200sqm BPO Center');
+        else if (zone.toLowerCase().includes('bgcomm')) set.add('Laguna Residential Turnkey Build');
         else set.add(zone);
       }
     });
 
     // Always ensure key active sites exist as options if not already present
-    if (!set.has('NexBridge Software Hub')) set.add('NexBridge Software Hub');
+    if (!set.has('LDM Modern Villa Site')) set.add('LDM Modern Villa Site');
     if (!set.has('2-Storey Residential House')) set.add('2-Storey Residential House');
 
     return Array.from(set).sort();

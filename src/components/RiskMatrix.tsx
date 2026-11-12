@@ -15,8 +15,7 @@ interface RiskMatrixProps {
 }
 
 export default function RiskMatrix({ risks, onAddRisk, onUpdateRiskStatus }: RiskMatrixProps) {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const { isDark } = useTheme();
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
 
   // Form state

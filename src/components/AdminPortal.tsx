@@ -40,7 +40,7 @@ import {
   UserRole, ROLE_HIERARCHY, hasRoleOrHigher,
   normalizeRole, canAccessModule, getAttendanceCapabilities
 } from '../utils/rbac';
-import logoJpg from '../assets/images/ctvill/logo.jpg';
+import { LdmBrandLogo } from './OptimizedLdmImage';
 import ProjectKanban from './ProjectKanban';
 import GanttTimeline from './GanttTimeline';
 import DocumentManager from './DocumentManager';
@@ -175,7 +175,7 @@ export const TAB_METADATA: Record<string, { title: string; subtitle: string; dep
     department: 'Design & Compliance'
   },
   'permits': {
-    title: 'PEZA & City Hall Permits',
+    title: 'Building & LGU Permits',
     subtitle: 'Statutory government clearances, building permits, and regulatory inspections',
     department: 'Design & Compliance'
   },
@@ -281,6 +281,7 @@ interface AdminPortalProps {
   onTriggerAiLaborScan?: () => Promise<any> | void;
   onLogManpowerAudit?: (auditData: any) => Promise<void> | void;
   onLogout: () => void;
+  onNavigateToLanding?: () => void;
   onUpdateSession?: (updated: any) => void;
   isInitialLoading?: boolean;
   onRefreshAllData?: () => Promise<void> | void;
@@ -307,10 +308,16 @@ export default function AdminPortal({
   onSubmitRfi, onAnswerRfi,
   onUpdateQuotationStatus, onConvertQuotationToProject,
   onTriggerAiLaborScan, onLogManpowerAudit,
-  onLogout, onUpdateSession, session,
+  onLogout, onNavigateToLanding, onUpdateSession, session,
   isInitialLoading = false,
   onRefreshAllData
 }: AdminPortalProps) {
+
+  // Track if data has ever loaded once so background refreshes never flash skeletons
+  const hasLoadedOnceRef = useRef<boolean>(false);
+  if (!hasLoadedOnceRef.current && ((projects && projects.length > 0) || (tasks && tasks.length > 0) || (contractors && contractors.length > 0))) {
+    hasLoadedOnceRef.current = true;
+  }
 
   // User Role Resolution via Centralized RBAC Hierarchy (OM -> PM -> TIMEKEEPER, FINANCE, CLIENT)
   const currentRole = normalizeRole(session?.role);
@@ -484,16 +491,15 @@ export default function AdminPortal({
   };
 
   // Interface Theme Hook (Light / Dark Mode)
-  const { theme, setTheme } = useTheme();
-  const isDark = theme === 'dark';
-  const isLight = theme === 'light';
+  const { theme, resolvedTheme, isDark, setTheme } = useTheme();
+  const isLight = !isDark;
 
   // Scoped datasets for Project Manager
   const pmAssignedProjects = projects.filter(p => {
     if (!isProjectManager) return true;
     if (session?.id && p.assignedProjectManagerId === session.id) return true;
     if (session?.name && p.assignedProjectManagerName && p.assignedProjectManagerName.toLowerCase().includes(session.name.toLowerCase())) return true;
-    if (p.name === 'NexBridge Software Hub') return true;
+    if (p.name === '2-Storey Residential House' || p.name === '2-storey residential unit' || p.name === 'LDM Prime Residential Build' || p.name.includes('Proyecto Bahia')) return true;
     return false;
   });
   const pmScopedProjects = pmAssignedProjects.length > 0 ? pmAssignedProjects : projects;
@@ -530,7 +536,7 @@ export default function AdminPortal({
           eventDate: dateStr,
           startTime: '09:00',
           endTime: '17:00',
-          location: p.issuingAgency || 'City Hall / PEZA Office',
+          location: p.issuingAgency || 'City Engineering Office / LGU',
           attendees: 'Compliance Officer, Site PM',
           notes: `Statutory Permit Expiration deadline for ${p.permitName} (${p.permitType}). Status: ${p.status}. Notes: ${p.notes || 'N/A'}`,
           status: p.status === 'EXPIRED' ? 'CANCELLED' : 'SCHEDULED'
@@ -1614,7 +1620,7 @@ export default function AdminPortal({
       name: contName.trim(),
       company: isOutsourced
         ? (contComp.trim() || contName.trim())
-        : (isTradeCrew ? 'CTVill In-House Trade Gang' : 'CTVill Builders Corporation'),
+        : (isTradeCrew ? 'LDM In-House Trade Gang' : 'LDM Construction Corporation'),
       specialty: isOutsourced ? contSpec : (isTradeCrew ? (contSpec || 'Skilled Craft') : contRoleTitle),
       activeManpower: effectiveManpower,
       milestoneProgress: 0,
@@ -1753,13 +1759,12 @@ export default function AdminPortal({
     { id: 'gantt', label: 'Gantt Schedule', icon: BarChart3, desc: 'Critical Path & Milestones' },
     { id: 'site-diary', label: 'Daily Diary & Weather', icon: CloudSun, desc: 'Field Observations & Weather' },
     { id: 'documents', label: 'Detailed Engineering & CAD', icon: FileCode, desc: `${documents.length} CAD & Spec Files` },
-    { id: 'risks', label: 'Risk Matrix (5x5)', icon: ShieldAlert, desc: `${risks.length} Tracked Hazards` },
     { id: 'contractors', label: 'Workforce & Manpower', icon: Users, desc: `${totalManpower} Workers On-Site` },
     { id: 'timekeeper-attendance', label: 'In-House Artisan Roll-Call', icon: ClipboardCheck, desc: 'Daily Attendance Ledger' },
     { id: 'finance-payroll', label: 'Weekly Payroll & Disbursal', icon: Banknote, desc: 'Disbursements & AP' },
     { id: 'payments', label: 'Progress Billings & Receipts', icon: DollarSign, desc: 'Client Billing Milestones' },
-    { id: 'quotation-leads', label: 'Fit-Out Estimates & Leads', icon: Briefcase, desc: `${quotations.length} Active Leads` },
-    { id: 'permits', label: 'PEZA & City Hall Permits', icon: FileCheck, desc: 'Statutory Clearances' },
+    { id: 'quotation-leads', label: 'Estimates & Leads', icon: Briefcase, desc: `${quotations.length} Active Leads` },
+    { id: 'permits', label: 'City Hall & LGU Permits', icon: FileCheck, desc: 'Statutory Clearances' },
     { id: 'audit-trail', label: 'Operational Audit Trail', icon: History, desc: 'System Audit Records' },
     { id: 'account-settings', label: 'My Account & Security', icon: UserCog, desc: 'Profile & Security' },
   ].filter(m => canAccessModule(currentRole, m.id));
@@ -1773,8 +1778,8 @@ export default function AdminPortal({
     if (c.employmentType === 'INTERNAL' || (c.employmentType as string) === 'IN_HOUSE') return false;
     const comp = (c.company || '').toLowerCase();
     const name = (c.name || '').toLowerCase();
-    if (comp.includes('ctvill') || name.includes('ctvill')) return false;
-    if (comp && !comp.includes('ctvill')) return true;
+    if (comp.includes('ctvill') || name.includes('ctvill') || comp.includes('ldm') || name.includes('ldm')) return false;
+    if (comp && !comp.includes('ctvill') && !comp.includes('ldm')) return true;
     return false;
   };
 
@@ -1851,7 +1856,7 @@ export default function AdminPortal({
   const [customShiftTag, setCustomShiftTag] = useState('');
   const [auditClaimed, setAuditClaimed] = useState<number>(14);
   const [auditVerified, setAuditVerified] = useState<number>(14);
-  const [auditSector, setAuditSector] = useState(projects[0]?.name || 'NexBridge Software Hub');
+  const [auditSector, setAuditSector] = useState(projects[0]?.name || 'LDM Prime Residential Build');
   const [auditSupervisor, setAuditSupervisor] = useState(session?.name || 'Engr. Ricardo Ramos');
   const [auditRemarks, setAuditRemarks] = useState('');
   const [isSubmittingAudit, setIsSubmittingAudit] = useState(false);
@@ -2044,7 +2049,7 @@ export default function AdminPortal({
   const inHouseCount = contractors.filter(c => isFieldLaborerOrArtisan(c) && c.employmentType !== 'OUTSOURCED').reduce((sum, c) => sum + (c.activeManpower || 1), 0);
   const outsourcedCount = contractors.filter(c => isFieldLaborerOrArtisan(c) && c.employmentType === 'OUTSOURCED').reduce((sum, c) => sum + (c.activeManpower || 1), 0);
   const employmentMixChartData = (inHouseCount > 0 || outsourcedCount > 0) ? [
-    { name: 'CTVill In-House Staff', value: inHouseCount, color: '#10b981' },
+    { name: 'LDM In-House Staff', value: inHouseCount, color: '#10b981' },
     { name: 'Outsourced Trade Partners', value: outsourcedCount, color: '#f59e0b' }
   ] : [];
 
@@ -2069,15 +2074,15 @@ export default function AdminPortal({
           </button>
 
           {/* Logo & Brand Identity */}
-          <div className="flex items-center gap-2.5 shrink-0">
-            <div className={`h-8 w-8 rounded-lg border flex items-center justify-center overflow-hidden shrink-0 ${
-              isDark ? 'bg-black border-slate-800' : 'bg-white border-slate-200 shadow-xs'
-            }`}>
-              <img src={logoJpg} alt="CTVill Logo" className="w-full h-full object-cover" />
-            </div>
+          <div 
+            onClick={onNavigateToLanding}
+            className={`flex items-center gap-2.5 shrink-0 ${onNavigateToLanding ? 'cursor-pointer group hover:opacity-90 transition-opacity' : ''}`}
+            title={onNavigateToLanding ? 'View Public Website / Landing Page' : 'LDM Construction Operations'}
+          >
+            <LdmBrandLogo size="sm" lightMode={!isDark} />
             <div className="shrink-0">
               <div className="flex items-center gap-2">
-                <span className={`text-sm font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>CTVILL</span>
+                <span className={`text-sm font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'} ${onNavigateToLanding ? 'group-hover:text-amber-400' : ''} transition-colors`}>LDM CONSTRUCTION</span>
                 <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded font-semibold border whitespace-nowrap ${isTimekeeper
                     ? isDark ? 'bg-teal-500/10 border-teal-500/30 text-teal-300' : 'bg-teal-50 border-teal-300 text-teal-700'
                     : isProjectManager
@@ -2616,7 +2621,7 @@ export default function AdminPortal({
               {/* ------------------------------------------------------------- */}
               {/* TAB 0.3: MASTER SCHEDULE & CALENDAR */}
               {/* ------------------------------------------------------------- */}
-              {!isTimekeeper && (visitedTabs.has('schedule') || activeTab === 'schedule') && (
+              {(visitedTabs.has('schedule') || activeTab === 'schedule') && (
                 <div className={`space-y-6 ${activeTab === 'schedule' ? 'block' : 'hidden'}`}>
                   <ProjectScheduleCalendar
                     events={calendarEventsWithPermits}
@@ -2742,9 +2747,9 @@ export default function AdminPortal({
                     const currentDefects = isProjectManager ? pmPunchListDefects : punchListDefects;
                     const currentTasks = isProjectManager ? tasks.filter(t => currentProjects.some(p => p.id === t.projectId)) : tasks;
 
-                    // Step 3: Guard the zero-state flash during initial data load
-                    const hasLoadedData = (projects && projects.length > 0) || (tasks && tasks.length > 0) || (contractors && contractors.length > 0);
-                    const isDashboardLoading = Boolean(isInitialLoading && !hasLoadedData);
+                    // Step 3: Guard the zero-state flash during initial data load (never flash once loaded)
+                    const hasLoadedData = hasLoadedOnceRef.current || (projects && projects.length > 0) || (tasks && tasks.length > 0) || (contractors && contractors.length > 0);
+                    const isDashboardLoading = Boolean(isInitialLoading && !hasLoadedOnceRef.current && !hasLoadedData);
 
                     // 5 Compact Summary Metrics (100% Real PostgreSQL Data)
                     const activeProjectsCount = currentProjects.length;
@@ -3767,7 +3772,7 @@ export default function AdminPortal({
                     changeOrders={changeOrders}
                     isAdmin={isAdmin && !isFinance}
                     userRole={rawRole}
-                    loading={isInitialLoading}
+                    loading={Boolean(isInitialLoading && !hasLoadedOnceRef.current)}
                     onCreateProject={!isFinance ? onCreateProject : undefined}
                     onUpdateProject={!isFinance ? onUpdateProject : undefined}
                     onDeleteProject={!isFinance ? onDeleteProject : undefined}
@@ -3838,6 +3843,23 @@ export default function AdminPortal({
                   <ProjectKanban
                     tasks={tasks}
                     projects={pmScopedProjects.length > 0 ? pmScopedProjects : (projects || [])}
+                    contractors={contractors}
+                    userRole={rawRole}
+                    isAdmin={isAdmin}
+                    onNavigateToGantt={(projectId, phaseName) => {
+                      if (projectId) {
+                        localStorage.setItem('ctvill_gantt_selected_project', projectId);
+                      }
+                      if (phaseName) {
+                        localStorage.setItem('ctvill_gantt_prefill_phase', phaseName);
+                      }
+                      window.dispatchEvent(
+                        new CustomEvent('ctvill-gantt-select-project', {
+                          detail: { projectId, phaseName },
+                        })
+                      );
+                      setActiveTab('gantt');
+                    }}
                     onAddTask={onAddTask || (() => { })}
                     onUpdateTaskStatus={onUpdateTaskStatus || (() => { })}
                     onDeleteTask={onDeleteTask}
@@ -3898,6 +3920,7 @@ export default function AdminPortal({
                   <QuotationLeadsManager
                     quotations={quotations}
                     isAdmin={isAdmin}
+                    projects={projects}
                     onUpdateStatus={onUpdateQuotationStatus}
                     onConvertToProject={onConvertQuotationToProject}
                     navigateToProject={(projId) => {
@@ -3910,7 +3933,7 @@ export default function AdminPortal({
               {/* ------------------------------------------------------------- */}
               {/* TAB 7: OPERATIONAL AUDIT TRAIL */}
               {/* ------------------------------------------------------------- */}
-              {!isTimekeeper && (visitedTabs.has('audit-trail') || activeTab === 'audit-trail') && (
+              {(visitedTabs.has('audit-trail') || activeTab === 'audit-trail') && (
                 <div className={activeTab === 'audit-trail' ? 'block' : 'hidden'}>
                   <AuditTrailQaLogs auditLogs={auditLogs} />
                 </div>
@@ -3925,6 +3948,8 @@ export default function AdminPortal({
                     contractors={contractors}
                     manpowerAudits={manpowerAudits}
                     projects={projects}
+                    userRole={rawRole}
+                    isAdmin={isAdmin}
                     aiRecommendations={aiRecommendations}
                     isAiScanning={isAiScanning}
                     aiScanMessage={aiScanMessage}
@@ -4035,7 +4060,7 @@ export default function AdminPortal({
                           </span>
                         </div>
                         <p className="text-xs text-slate-400 mt-1">
-                          CTVill Enterprise credentials, operational alert automation, workspace defaults, and staff provisioning.
+                          LDM Construction Enterprise credentials, operational alert automation, workspace defaults, and staff provisioning.
                         </p>
                       </div>
                     </div>
@@ -4057,23 +4082,23 @@ export default function AdminPortal({
                     {/* Left Column: Enterprise Profile & PMS Workspace Defaults */}
                     <div className="space-y-6">
 
-                      {/* CTVill Company Accreditation */}
+                      {/* LDM Construction Company Accreditation */}
                       <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 space-y-4">
                         <div className="flex items-center gap-2 text-white font-bold text-sm border-b border-slate-800 pb-3">
                           <Building className="w-4 h-4 text-amber-400" />
-                          <span>CTVill Enterprise Profile</span>
+                          <span>LDM Construction Enterprise Profile</span>
                         </div>
 
                         <div className="space-y-3 text-xs">
                           <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl">
                             <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold">Company Name</span>
-                            <span className="text-white font-bold block mt-0.5">CTVill Design & Construction</span>
+                            <span className="text-white font-bold block mt-0.5">LDM Construction &mdash; Engineers &bull; Architects &bull; Builders</span>
                           </div>
 
                           <div className="p-3 bg-slate-900/60 border border-slate-800 rounded-xl">
                             <span className="text-[10px] font-mono text-slate-400 block uppercase font-bold">Laguna Headquarters</span>
                             <span className="text-slate-300 block mt-0.5 text-[11px] leading-relaxed">
-                              Centennial Plaza Bldg., Brgy. Pulo, Cabuyao, Laguna 4025
+                              Brgy. Banlic, Cabuyao, Laguna
                             </span>
                           </div>
 
@@ -4084,10 +4109,10 @@ export default function AdminPortal({
                                 PCAB Category AAA (#94821)
                               </span>
                               <span className="inline-block bg-blue-500/10 border border-blue-500/30 text-blue-300 text-[10px] font-mono px-2 py-0.5 rounded font-bold mr-1 mb-1">
-                                PEZA Permitting Specialist
+                                LGU & Building Permits Specialist
                               </span>
                               <span className="inline-block bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono px-2 py-0.5 rounded font-bold">
-                                MACEA Protocol Qualified
+                                Subdivision Board Qualified
                               </span>
                             </div>
                           </div>
@@ -4499,7 +4524,7 @@ export default function AdminPortal({
                               <input
                                 type="email" required value={newStaffEmail}
                                 onChange={e => setNewStaffEmail(e.target.value)}
-                                placeholder="e.g. engineer@ctvill.com"
+                                placeholder="e.g. engineer@ldmconstruction.ph"
                                 className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-xs focus:outline-none focus:border-violet-500"
                               />
                             </div>
@@ -4853,13 +4878,13 @@ export default function AdminPortal({
             {/* Header */}
             <div className="shrink-0 flex justify-between items-start border-b border-slate-800 p-5 pb-4">
               <div>
-                <span className="text-[10px] font-mono text-emerald-400 font-bold uppercase tracking-wider">CTVILL WORKFORCE REGISTRY</span>
+                <span className="text-[10px] font-mono text-emerald-400 font-bold uppercase tracking-wider">LDM WORKFORCE REGISTRY</span>
                 <h3 className="text-base font-bold text-white flex items-center gap-2 mt-0.5">
                   <HardHat className="w-4 h-4 text-emerald-400" />
                   Register Worker / Staff
                 </h3>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Register internal CTVill staff across company departments, or optionally add outsourced contractor partners.
+                  Register internal LDM staff across company departments, or optionally add outsourced contractor partners.
                 </p>
               </div>
               <button
@@ -5006,7 +5031,7 @@ export default function AdminPortal({
                   <div className="bg-slate-900/90 border border-emerald-600/30 rounded-xl p-3.5 space-y-3">
                     <div>
                       <label className="block text-[10px] font-mono text-emerald-400 uppercase font-bold tracking-wider mb-1">
-                        🏢 CTVill Department *
+                        🏢 LDM Department *
                       </label>
                       <select
                         value={contDepartment}
@@ -5445,7 +5470,7 @@ export default function AdminPortal({
                 className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-bold text-xs shadow-md cursor-pointer flex items-center gap-1.5"
               >
                 <CheckCircle className="w-3.5 h-3.5" />
-                <span>Save to CTVill Database</span>
+                <span>Save to LDM Database</span>
               </button>
             </div>
           </div>
@@ -5659,7 +5684,7 @@ export default function AdminPortal({
                     required
                     value={auditSector}
                     onChange={(e) => setAuditSector(e.target.value)}
-                    placeholder="e.g. NexBridge Floor 4 Quadrant A"
+                    placeholder="e.g. Modern Villa Sector A / 2nd Floor Framing"
                     className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-blue-500"
                   />
                   <div className="mt-2 p-2 bg-slate-900/60 border border-slate-800/80 rounded-lg text-[10px] text-slate-400 font-mono flex items-center justify-between">
@@ -6129,7 +6154,7 @@ export default function AdminPortal({
                   required
                   value={parcelName}
                   onChange={(e) => setParcelName(e.target.value)}
-                  placeholder="e.g. NexBridge Software Hub Phase 2"
+                  placeholder="e.g. Modern Residential Villa Phase 2"
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white"
                 />
               </div>
@@ -6141,7 +6166,7 @@ export default function AdminPortal({
                   required
                   value={parcelLoc}
                   onChange={(e) => setParcelLoc(e.target.value)}
-                  placeholder="e.g. Cabuyao Technopark, Laguna"
+                  placeholder="e.g. Brgy. Banlic, Cabuyao, Laguna"
                   className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white"
                 />
               </div>

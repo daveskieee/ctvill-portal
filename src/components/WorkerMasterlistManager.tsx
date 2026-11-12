@@ -26,8 +26,7 @@ export default function WorkerMasterlistManager({
   session,
   onRefreshData
 }: WorkerMasterlistManagerProps) {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const { isDark } = useTheme();
   // Helper to convert contractors to SiteWorker model
   const mapContractorsToWorkers = (list: Contractor[]): SiteWorker[] => {
     return (list || []).map(c => {

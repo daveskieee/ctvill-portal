@@ -14,27 +14,21 @@ import {
 } from 'lucide-react';
 import { ProjectProfile, Contractor, DailySiteLog } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import {
+  STANDARD_CONSTRUCTION_PHASES as SHARED_STANDARD_CONSTRUCTION_PHASES,
+  computeUnifiedProjectProgress,
+  resolveTaskConstructionPhase,
+  loadProjectGanttTasksFromStorage,
+  saveProjectGanttTasks,
+  createDefaultWbsTasksForProject,
+  GANTT_SELECT_PROJECT_EVENT,
+} from '../utils/ganttProgress';
 
 // ==========================================
 // 1. Core Interfaces & Data Types
 // ==========================================
 
-export const STANDARD_CONSTRUCTION_PHASES: string[] = [
-  'Earthworks',
-  'Concreting Works',
-  'Reinforcing Bar',
-  'Formworks',
-  'Masonry Works',
-  'Roof Works',
-  'Finishing & Tiling Works',
-  'Ceiling Works',
-  'Finishing Carpentry',
-  'Doors and Windows',
-  'Cabinet Works',
-  'Painting Works',
-  'Electrical Works',
-  'Plumbing Works'
-];
+export const STANDARD_CONSTRUCTION_PHASES: string[] = SHARED_STANDARD_CONSTRUCTION_PHASES;
 
 export interface GanttTaskItem {
   id: string;
@@ -853,8 +847,7 @@ export default function GanttTimeline({
   onUpdateProject,
   onDeleteTask
 }: GanttTimelineProps) {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const { isDark } = useTheme();
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
     return projects.length > 0 ? projects[0].id : '';
@@ -873,8 +866,16 @@ export default function GanttTimeline({
     return true;
   }, []);
 
-  // Keep selectedProjectId synchronized with available projects
+  // Keep selectedProjectId synchronized with available projects & cross-tab navigation requests
   useEffect(() => {
+    const requestedProjId = localStorage.getItem('ctvill_gantt_selected_project');
+    if (requestedProjId && projects.some(p => p.id === requestedProjId)) {
+      localStorage.removeItem('ctvill_gantt_selected_project');
+      if (selectedProjectId !== requestedProjId) {
+        setSelectedProjectId(requestedProjId);
+      }
+      return;
+    }
     if (projects.length > 0) {
       if (!selectedProjectId || !projects.some(p => p.id === selectedProjectId)) {
         setSelectedProjectId(projects[0].id);
@@ -885,6 +886,20 @@ export default function GanttTimeline({
       setLinks([]);
     }
   }, [projects, selectedProjectId]);
+
+  useEffect(() => {
+    const onSelectProject = (e: Event) => {
+      const detail = (e as CustomEvent)?.detail;
+      if (detail?.projectId && projects.some(p => p.id === detail.projectId)) {
+        setSelectedProjectId(detail.projectId);
+      }
+      if (detail?.phaseName) {
+        localStorage.setItem('ctvill_gantt_prefill_phase', detail.phaseName);
+      }
+    };
+    window.addEventListener(GANTT_SELECT_PROJECT_EVENT, onSelectProject);
+    return () => window.removeEventListener(GANTT_SELECT_PROJECT_EVENT, onSelectProject);
+  }, [projects]);
 
   const [tasks, setTasks] = useState<GanttTaskItem[]>([]);
   const [links, setLinks] = useState<GanttLinkItem[]>([]);
@@ -968,22 +983,7 @@ export default function GanttTimeline({
 
   // Helper to compute weighted physical progress from subtasks & phases (100% total)
   const computeProjectProgress = useCallback((taskList: GanttTaskItem[]) => {
-    if (!taskList || taskList.length === 0) return 0;
-    const parentIds = new Set(taskList.map(t => t.parentTaskId).filter(Boolean));
-    // Leaf tasks (subtasks or standalone tasks) drive physical progress
-    const leafTasks = taskList.filter(t => !parentIds.has(t.id));
-    const targetList = leafTasks.length > 0 ? leafTasks : taskList;
-
-    const hasExplicitWeights = targetList.some(t => typeof t.weight === 'number' && t.weight > 0);
-    if (hasExplicitWeights) {
-      const totalWeight = targetList.reduce((acc, curr) => acc + Math.max(1, Number(curr.weight ?? curr.duration ?? 10)), 0);
-      const weightedSum = targetList.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, Number(curr.weight ?? curr.duration ?? 10)), 0);
-      return totalWeight > 0 ? Math.round((weightedSum / totalWeight) * 100) : 0;
-    }
-
-    const totalDuration = targetList.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
-    const weightedProgress = targetList.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, curr.duration || 1), 0);
-    return totalDuration > 0 ? Math.round((weightedProgress / totalDuration) * 100) : 0;
+    return computeUnifiedProjectProgress(taskList);
   }, []);
 
   // Roll up weighted subtask progress into parent Phase bars (100% total per phase)
@@ -1160,6 +1160,9 @@ export default function GanttTimeline({
         predMap.get(targetId)!.push(sourceId);
       });
 
+      const cachedTasks = loadProjectGanttTasksFromStorage(projectId) || [];
+      const cachedById = new Map(cachedTasks.map(ct => [String(ct.id), ct]));
+
       const parsedTasks: GanttTaskItem[] = rawTasks.map((t: any, idx: number) => {
         const sDate = parseDate(t.start_date || t.startDate);
         const eDate = parseDate(t.end_date || t.endDate);
@@ -1168,6 +1171,12 @@ export default function GanttTimeline({
         const duration = isMilestone ? 0 : Math.max(1, rawDuration);
         const startDateStr = formatDateISO(sDate);
         const endDateStr = isMilestone ? startDateStr : formatDateISO(eDate);
+        const cachedMatch = cachedById.get(String(t.id));
+        const resolvedPhase = resolveTaskConstructionPhase({
+          text: t.text || t.title,
+          milestonePhase: t.milestonePhase,
+          constructionPhase: t.constructionPhase || cachedMatch?.constructionPhase
+        });
 
         return {
           id: String(t.id),
@@ -1178,13 +1187,15 @@ export default function GanttTimeline({
           endDate: endDateStr,
           duration,
           progress: typeof t.progress === 'number' ? Math.max(0, Math.min(1, t.progress)) : 0,
+          weight: typeof t.weight === 'number' ? t.weight : (typeof cachedMatch?.weight === 'number' ? cachedMatch.weight : undefined),
+          constructionPhase: resolvedPhase,
           baselineStart: t.baselineStart ? formatDateISO(parseDate(t.baselineStart)) : null,
           baselineEnd: t.baselineEnd ? formatDateISO(parseDate(t.baselineEnd)) : null,
           type: isMilestone ? 'milestone' : (t.type || 'task'),
           parentTaskId: t.parent && t.parent !== 0 && t.parent !== '0' ? String(t.parent) : (t.parentTaskId || null),
           sortOrder: typeof t.sortOrder === 'number' ? t.sortOrder : idx,
           assignedContractorId: t.assignedContractorId || null,
-          contractorName: t.contractor || 'CTVill Construction Crew',
+          contractorName: t.contractor || 'LDM Construction Crew',
           predecessorIds: predMap.get(String(t.id)) || []
         };
       });
@@ -1204,22 +1215,66 @@ export default function GanttTimeline({
       if (validTasks.length > 0) {
         setTasks(validTasks);
         setLinks(validLinks);
+        saveProjectGanttTasks(projectId, validTasks);
       } else if (tasksProp && tasksProp.length > 0 && tasksProp.some(t => t.projectId === projectId)) {
-        setTasks(tasksProp.filter(t => t.projectId === projectId));
+        const mappedPropTasks: GanttTaskItem[] = tasksProp
+          .filter(t => t.projectId === projectId && !isTaskTombstoned(t.id))
+          .map((t: any, idx: number) => ({
+            id: String(t.id),
+            projectId,
+            wbsCode: t.wbsCode || `${idx + 1}.0`,
+            text: t.title || t.text || 'Construction Task',
+            startDate: formatDateISO(parseDate(t.startDate)),
+            endDate: formatDateISO(parseDate(t.dueDate || t.endDate || t.startDate)),
+            duration: Math.max(1, Number(t.duration || 1)),
+            progress: typeof t.progress === 'number' ? (t.progress > 1 ? t.progress / 100 : t.progress) : 0,
+            weight: typeof t.weight === 'number' ? t.weight : cachedById.get(String(t.id))?.weight,
+            constructionPhase: resolveTaskConstructionPhase(t),
+            type: 'task',
+            parentTaskId: null,
+            sortOrder: idx,
+            predecessorIds: []
+          }));
+        setTasks(mappedPropTasks);
         setLinks(validLinks);
+        saveProjectGanttTasks(projectId, mappedPropTasks);
       } else if (projectId === 'default') {
         // Fallback seed tasks strictly for default demo project
         setTasks(DEFAULT_EM_JAY_TASKS);
         setLinks(DEFAULT_EM_JAY_LINKS);
+        saveProjectGanttTasks(projectId, DEFAULT_EM_JAY_TASKS);
       } else {
-        // Newly created projects start empty at 0% progress
-        setTasks([]);
+        // Initialize 14-phase WBS tasks so Master Gantt and Progress Reports are 100% synced
+        const defaultWbs = createDefaultWbsTasksForProject(projectId);
+        setTasks(defaultWbs as GanttTaskItem[]);
         setLinks([]);
+        saveProjectGanttTasks(projectId, defaultWbs);
       }
     } catch (err) {
       console.error('Failed to load project gantt data:', err);
-      if (tasksProp && tasksProp.length > 0 && tasksProp.some(t => t.projectId === projectId)) {
-        setTasks(tasksProp.filter(t => t.projectId === projectId));
+      const cached = loadProjectGanttTasksFromStorage(projectId);
+      if (cached && cached.length > 0) {
+        setTasks(cached as GanttTaskItem[]);
+        setLinks([]);
+      } else if (tasksProp && tasksProp.length > 0 && tasksProp.some(t => t.projectId === projectId)) {
+        const mappedFallback: GanttTaskItem[] = tasksProp
+          .filter(t => t.projectId === projectId)
+          .map((t: any, idx: number) => ({
+            id: String(t.id),
+            projectId,
+            wbsCode: t.wbsCode || `${idx + 1}.0`,
+            text: t.title || t.text || 'Construction Task',
+            startDate: formatDateISO(parseDate(t.startDate)),
+            endDate: formatDateISO(parseDate(t.dueDate || t.endDate || t.startDate)),
+            duration: Math.max(1, Number(t.duration || 1)),
+            progress: typeof t.progress === 'number' ? (t.progress > 1 ? t.progress / 100 : t.progress) : 0,
+            constructionPhase: resolveTaskConstructionPhase(t),
+            type: 'task',
+            parentTaskId: null,
+            sortOrder: idx,
+            predecessorIds: []
+          }));
+        setTasks(mappedFallback);
         setLinks([]);
       } else if (projectId === 'default') {
         setTasks(DEFAULT_EM_JAY_TASKS);
@@ -1247,6 +1302,7 @@ export default function GanttTimeline({
   ) => {
     setIsSyncing(true);
     try {
+      const resolvedPhase = task.constructionPhase || resolveTaskConstructionPhase(task);
       const res = await fetch(`/api/projects/${selectedProjectId}/gantt/sync`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1260,6 +1316,9 @@ export default function GanttTimeline({
             endDate: task.endDate,
             duration: task.duration,
             progress: task.progress,
+            weight: task.weight,
+            constructionPhase: resolvedPhase,
+            milestonePhase: resolvedPhase,
             type: task.type,
             parentTaskId: task.parentTaskId,
             wbsCode: task.wbsCode,
@@ -1272,9 +1331,14 @@ export default function GanttTimeline({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const resData = await res.json().catch(() => null);
       if (resData?.result?.projectProgress !== undefined) {
+        const storedLatest = loadProjectGanttTasksFromStorage(selectedProjectId);
+        const unifiedProg = storedLatest
+          ? computeUnifiedProjectProgress(storedLatest)
+          : resData.result.projectProgress;
         onUpdateProject?.(selectedProjectId, {
-          progressPercentage: resData.result.projectProgress,
-          tasksCount: resData.result.tasksCount
+          progressPercentage: unifiedProg,
+          cpmProgress: unifiedProg,
+          tasksCount: storedLatest ? storedLatest.length : resData.result.tasksCount
         });
       }
       setSyncFeedback({ type: 'success', message: 'Schedule synchronized with database.' });
@@ -1745,6 +1809,7 @@ export default function GanttTimeline({
       setTasks(currentTasks => {
         const finalTask = currentTasks.find(t => t.id === dragState.taskId);
         if (finalTask) {
+          saveProjectGanttTasks(selectedProjectId, currentTasks);
           queueDebouncedSync('update', finalTask);
         }
         return currentTasks;
@@ -1832,7 +1897,7 @@ export default function GanttTimeline({
             parentTaskId: null,
             sortOrder: baseList.length + 1,
             assignedContractorId: editFormData.assignedContractorId || null,
-            contractorName: contractor?.name || 'CTVill Construction Crew',
+            contractorName: contractor?.name || 'LDM Construction Crew',
             predecessorIds: []
           };
           baseList.push(phaseParent);
@@ -1857,7 +1922,7 @@ export default function GanttTimeline({
             parentTaskId: phaseParent!.id,
             sortOrder: baseList.length + idx + 1,
             assignedContractorId: editFormData.assignedContractorId || null,
-            contractorName: contractor?.name || 'CTVill Construction Crew',
+            contractorName: contractor?.name || 'LDM Construction Crew',
             predecessorIds: [...editFormData.predecessorIds]
           };
           newBatchTasks.push(newTaskObj);
@@ -1867,8 +1932,10 @@ export default function GanttTimeline({
         const rolledUp = rollUpParentPhaseProgress(baseList);
         const scheduled = cascadeDownstreamSchedule(rolledUp, links, newBatchTasks[0].id);
         const newProg = computeProjectProgress(scheduled);
+        saveProjectGanttTasks(selectedProjectId, scheduled);
         onUpdateProject?.(selectedProjectId, {
           progressPercentage: newProg,
+          cpmProgress: newProg,
           tasksCount: scheduled.length
         });
         return scheduled;
@@ -1891,7 +1958,7 @@ export default function GanttTimeline({
       constructionPhase: selectedPhaseName,
       type: (dur === 0 || editFormData.type === 'milestone') ? 'milestone' : editFormData.type,
       assignedContractorId: editFormData.assignedContractorId || null,
-      contractorName: contractor?.name || editingTask.contractorName || 'CTVill Construction Crew',
+      contractorName: contractor?.name || editingTask.contractorName || 'LDM Construction Crew',
       predecessorIds: editFormData.predecessorIds
     };
 
@@ -1916,8 +1983,10 @@ export default function GanttTimeline({
         const next = rollUpParentPhaseProgress([...prev, updatedTask]);
         const scheduled = cascadeDownstreamSchedule(next, updatedLinks, updatedTask.id);
         const newProg = computeProjectProgress(scheduled);
+        saveProjectGanttTasks(selectedProjectId, scheduled);
         onUpdateProject?.(selectedProjectId, {
           progressPercentage: newProg,
+          cpmProgress: newProg,
           tasksCount: scheduled.length
         });
         return scheduled;
@@ -1931,8 +2000,10 @@ export default function GanttTimeline({
         const rolledUp = rollUpParentPhaseProgress(copy);
         const scheduled = cascadeDownstreamSchedule(rolledUp, updatedLinks, updatedTask.id);
         const newProg = computeProjectProgress(scheduled);
+        saveProjectGanttTasks(selectedProjectId, scheduled);
         onUpdateProject?.(selectedProjectId, {
           progressPercentage: newProg,
+          cpmProgress: newProg,
           tasksCount: scheduled.length
         });
         return scheduled;
@@ -1961,8 +2032,10 @@ export default function GanttTimeline({
         predecessorIds: t.predecessorIds.filter(id => id !== taskId)
       }));
       const newProg = computeProjectProgress(remaining);
+      saveProjectGanttTasks(selectedProjectId, remaining);
       onUpdateProject?.(selectedProjectId, {
         progressPercentage: newProg,
+        cpmProgress: newProg,
         tasksCount: remaining.length
       });
       return remaining;
@@ -2009,6 +2082,8 @@ export default function GanttTimeline({
       endDate: formatDateISO(newEnd),
       duration: 3,
       progress: 0,
+      weight: 25,
+      constructionPhase: parentTask.constructionPhase || resolveTaskConstructionPhase(parentTask),
       type: 'task',
       parentTaskId: parentTask.id,
       sortOrder: parentTask.sortOrder + 1,
@@ -2027,7 +2102,9 @@ export default function GanttTimeline({
       // Find parent index and insert immediately below it (or after existing children of that parent)
       const parentIdx = prev.findIndex(t => t.id === parentTask.id);
       if (parentIdx === -1) {
-        return [...prev, newSubtask];
+        const nextList = [...prev, newSubtask];
+        saveProjectGanttTasks(selectedProjectId, nextList);
+        return nextList;
       }
       let insertIdx = parentIdx + 1;
       while (insertIdx < prev.length && prev[insertIdx].parentTaskId === parentTask.id) {
@@ -2037,8 +2114,10 @@ export default function GanttTimeline({
       next.splice(insertIdx, 0, newSubtask);
       const reindexed = next.map((t, idx) => ({ ...t, sortOrder: idx + 1 }));
       const newProg = computeProjectProgress(reindexed);
+      saveProjectGanttTasks(selectedProjectId, reindexed);
       onUpdateProject?.(selectedProjectId, {
         progressPercentage: newProg,
+        cpmProgress: newProg,
         tasksCount: reindexed.length
       });
       return reindexed;
@@ -2046,13 +2125,14 @@ export default function GanttTimeline({
     syncBackend('create', newSubtask);
   };
 
-  const handleAddNewTask = () => {
+  const handleAddNewTask = useCallback((prefillPhase?: string) => {
     if (!selectedProjectId) return;
     const now = new Date();
     if (isSunday(now)) now.setDate(now.getDate() + 1);
     const newId = `task-${Date.now()}`;
     const startStr = formatDateISO(now);
     const endStr = formatDateISO(addWorkingDays(now, 5));
+    const phaseToUse = prefillPhase || constructionPhases[0] || STANDARD_CONSTRUCTION_PHASES[0];
 
     const draftTask: GanttTaskItem = {
       id: newId,
@@ -2063,11 +2143,12 @@ export default function GanttTimeline({
       endDate: endStr,
       duration: 5,
       progress: 0,
+      constructionPhase: phaseToUse,
       type: 'task',
       parentTaskId: null,
       sortOrder: tasks.length + 1,
       assignedContractorId: contractors[0]?.id || null,
-      contractorName: contractors[0]?.name || 'CTVill Construction Crew',
+      contractorName: contractors[0]?.name || 'LDM Construction Crew',
       predecessorIds: []
     };
 
@@ -2080,12 +2161,22 @@ export default function GanttTimeline({
       duration: draftTask.duration,
       progress: 0,
       weight: 25,
-      constructionPhase: constructionPhases[0] || STANDARD_CONSTRUCTION_PHASES[0],
+      constructionPhase: phaseToUse,
       type: draftTask.type,
       assignedContractorId: draftTask.assignedContractorId || '',
       predecessorIds: []
     });
-  };
+  }, [selectedProjectId, tasks.length, contractors, constructionPhases]);
+
+  // If navigated from Progress Report "+ Schedule Tasks", pre-open task modal for that phase
+  useEffect(() => {
+    if (!selectedProjectId || isLoading) return;
+    const prefillPhase = localStorage.getItem('ctvill_gantt_prefill_phase');
+    if (prefillPhase) {
+      localStorage.removeItem('ctvill_gantt_prefill_phase');
+      handleAddNewTask(prefillPhase);
+    }
+  }, [selectedProjectId, isLoading, handleAddNewTask]);
 
   const handleAddNewMilestone = () => {
     if (!selectedProjectId) return;
@@ -2107,7 +2198,7 @@ export default function GanttTimeline({
       parentTaskId: null,
       sortOrder: tasks.length + 1,
       assignedContractorId: null,
-      contractorName: 'CTVill Lead PM',
+      contractorName: 'LDM Lead PM',
       predecessorIds: []
     };
 
@@ -2159,6 +2250,7 @@ export default function GanttTimeline({
 
       setTasks(templateTasks);
       setLinks(templateLinks);
+      saveProjectGanttTasks(selectedProjectId, templateTasks);
 
       // Persist template tasks to backend
       for (const t of templateTasks) {
@@ -2472,7 +2564,7 @@ export default function GanttTimeline({
             <button
               type="button"
               disabled={!selectedProjectId}
-              onClick={handleAddNewTask}
+              onClick={() => handleAddNewTask()}
               className={`flex items-center gap-1.5 px-3.5 py-1.5 font-bold rounded-lg text-xs transition cursor-pointer ${
                 !selectedProjectId
                   ? isDark 
@@ -2667,6 +2759,7 @@ export default function GanttTimeline({
                 const { updatedTasks, shiftedCount } = autoScheduleProject(tasks, links);
                 setTasks(updatedTasks);
                 if (selectedProjectId) {
+                  saveProjectGanttTasks(selectedProjectId, updatedTasks);
                   updatedTasks.forEach(t => {
                     const orig = tasks.find(ot => ot.id === t.id);
                     if (orig && (orig.startDate !== t.startDate || orig.endDate !== t.endDate)) {
@@ -2698,6 +2791,7 @@ export default function GanttTimeline({
                   baselineEnd: t.endDate
                 }));
                 setTasks(rebaselined);
+                saveProjectGanttTasks(selectedProjectId, rebaselined);
                 rebaselined.forEach(t => syncBackend('update', t));
                 setSyncFeedback({
                   type: 'success',
@@ -2735,7 +2829,7 @@ export default function GanttTimeline({
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = `Gantt_Schedule_${activeProject?.name?.replace(/\s+/g, '_') || 'CTVill'}.csv`;
+                a.download = `Gantt_Schedule_${activeProject?.name?.replace(/\s+/g, '_') || 'LDM'}.csv`;
                 a.click();
                 URL.revokeObjectURL(url);
               }}
@@ -3033,7 +3127,7 @@ export default function GanttTimeline({
                 <div className="flex flex-wrap items-center justify-center gap-2">
                   <button
                     type="button"
-                    onClick={handleAddNewTask}
+                    onClick={() => handleAddNewTask()}
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition cursor-pointer shadow-xs"
                   >
                     <Plus className="w-3.5 h-3.5" />
@@ -3686,7 +3780,7 @@ export default function GanttTimeline({
                     isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
                   }`}
                 >
-                  <option value="">CTVill In-House Crew</option>
+                  <option value="">LDM In-House Crew</option>
                   {contractors.map(c => (
                     <option key={c.id} value={c.id}>
                       {c.name} ({c.company || c.specialty || 'Subcontractor'})

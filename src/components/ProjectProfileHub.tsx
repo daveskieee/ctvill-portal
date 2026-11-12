@@ -22,6 +22,14 @@ import {
   searchLocationsNationwide,
   LocationSuggestion
 } from '../utils/geocoding';
+import {
+  computeUnifiedProjectProgress,
+  loadProjectGanttTasksFromStorage,
+  GANTT_TASKS_UPDATED_EVENT,
+} from '../utils/ganttProgress';
+import { ldmArchitecturalAssets } from '../utils/ldmAssets';
+import { OptimizedLdmImage } from './OptimizedLdmImage';
+import { useTheme } from '../context/ThemeContext';
 
 export const AVAILABLE_PMS = [
   { id: 'usr-pm-ricardo', name: 'Engr. Ricardo Ramos (Senior Project Manager)' },
@@ -35,23 +43,15 @@ export function calculateProjectProgress(
   tasks: ProjectTask[] = [],
   fallbackProgress: number = 0
 ): number {
+  const storedGantt = loadProjectGanttTasksFromStorage(projectId);
+  if (storedGantt !== null) {
+    return computeUnifiedProjectProgress(storedGantt);
+  }
   const projectTasks = tasks.filter(t => t.projectId === projectId);
   if (!projectTasks || projectTasks.length === 0) {
     return Math.round(fallbackProgress);
   }
-  // Standard CPM Duration-Weighted Physical Progress
-  const totalDuration = projectTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
-  const weightedProgress = projectTasks.reduce((acc, curr) => {
-    let p = 0;
-    if (curr.status === 'COMPLETED' || (typeof curr.progress === 'number' && curr.progress >= 1.0)) {
-      p = 100;
-    } else {
-      const raw = typeof curr.progress === 'number' ? curr.progress : 0;
-      p = raw > 1.0 ? raw : raw * 100;
-    }
-    return acc + (p * Math.max(1, curr.duration || 1));
-  }, 0);
-  return totalDuration > 0 ? Math.round(weightedProgress / totalDuration) : 0;
+  return computeUnifiedProjectProgress(projectTasks);
 }
 
 export function getEffectiveProjectStatus(
@@ -100,12 +100,24 @@ export default function ProjectProfileHub({
 
   // Local state initialized strictly from live database projects
   const [localProjects, setLocalProjects] = useState<ProjectProfile[]>(projects || []);
+  const [ganttSyncTick, setGanttSyncTick] = useState<number>(0);
 
   // Sync when parent projects prop updates from database
   React.useEffect(() => {
     setLocalProjects(projects || []);
   }, [projects]);
 
+  React.useEffect(() => {
+    const onGanttUpdated = () => setGanttSyncTick(t => t + 1);
+    window.addEventListener(GANTT_TASKS_UPDATED_EVENT, onGanttUpdated);
+    window.addEventListener('storage', onGanttUpdated);
+    return () => {
+      window.removeEventListener(GANTT_TASKS_UPDATED_EVENT, onGanttUpdated);
+      window.removeEventListener('storage', onGanttUpdated);
+    };
+  }, []);
+
+  const { isDark } = useTheme();
   const [selectedProject, setSelectedProject] = useState<ProjectProfile | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -489,7 +501,7 @@ export default function ProjectProfileHub({
           const scopeMentions = dt.matchTerms.some(t => scopeText.includes(t));
           matchedTradeReason = scopeMentions
             ? `Trade (${w.tradeType || w.specialty || dt.keyword}) directly matches project scope`
-            : `Core ${w.tradeType || w.specialty || dt.keyword} trade matches commercial fit-out scope`;
+            : `Core ${w.tradeType || w.specialty || dt.keyword} trade matches construction & fit-out scope`;
           break;
         }
       }
@@ -659,7 +671,7 @@ export default function ProjectProfileHub({
         status: computedStatus
       };
     });
-  }, [localProjects, tasks]);
+  }, [localProjects, tasks, ganttSyncTick]);
 
   const filteredProjects = synchronizedProjects.filter(p => {
     const matchesStatus = filterStatus === 'ALL' || p.status === filterStatus;
@@ -711,7 +723,7 @@ export default function ProjectProfileHub({
         pendingCOs
       ];
     });
-    exportToCsv('CTVill_Commercial_Sites_Portfolio', headers, rows);
+    exportToCsv('LDM_Construction_Sites_Portfolio', headers, rows);
   };
 
   const openNewModal = () => {
@@ -1736,17 +1748,43 @@ export default function ProjectProfileHub({
                 ? 'IN_PROGRESS'
                 : project.status || 'PLANNING';
 
+            // Resolve an architectural cover thumbnail for the project
+            const coverAsset =
+              (project as any).coverImageUrl ||
+              ldmArchitecturalAssets[Math.abs(project.id.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0)) % ldmArchitecturalAssets.length]?.url ||
+              '';
+
             return (
               <div
                 key={project.id}
-                className="group bg-slate-900/70 border border-slate-800 hover:border-amber-500/50 rounded-xl p-5 transition-all duration-200 hover:shadow-lg relative overflow-hidden flex flex-col justify-between"
+                className="group bg-slate-900/70 border border-slate-800 hover:border-amber-500/50 rounded-xl overflow-hidden transition-all duration-200 hover:shadow-lg relative flex flex-col justify-between"
               >
-                <div>
+                {/* LDM Architectural Project Cover Header */}
+                {coverAsset && (
+                  <div
+                    onClick={() => setSelectedProject(project)}
+                    className="h-32 w-full overflow-hidden relative border-b border-slate-800/80 bg-slate-950 cursor-pointer"
+                  >
+                    <OptimizedLdmImage
+                      src={coverAsset}
+                      alt={project.name}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900 via-transparent to-slate-950/40" />
+                    <div className="absolute top-2.5 left-2.5 bg-slate-950/90 border border-amber-500/40 text-amber-300 text-[10px] font-mono px-2 py-0.5 rounded font-bold">
+                      {project.id}
+                    </div>
+                  </div>
+                )}
+
+                <div className="p-5">
                   <div className="flex items-center justify-between gap-2 mb-2.5">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold">
-                        {project.id}
-                      </span>
+                      {!coverAsset && (
+                        <span className="text-xs font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-semibold">
+                          {project.id}
+                        </span>
+                      )}
                       <span className={`text-xs px-2.5 py-0.5 rounded-full font-semibold border ${displayStatus === 'COMPLETED' ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800' :
                           displayStatus === 'PUNCHLIST_QA' ? 'bg-purple-950/80 text-purple-300 border-purple-800' :
                             displayStatus === 'IN_PROGRESS' || displayStatus === 'EXECUTION' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30' :
@@ -1902,7 +1940,7 @@ export default function ProjectProfileHub({
                     <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20 font-bold">
                       {selectedProject.id}
                     </span>
-                    <span className="text-xs text-slate-400">Commercial Fit-Out Profile</span>
+                    <span className="text-xs text-slate-400">Design &amp; Build Profile</span>
                   </div>
                   <h2 className="text-xl sm:text-2xl font-bold text-white tracking-tight">{selectedProject.name}</h2>
                   <p className="text-xs sm:text-sm text-amber-400 font-medium">{selectedProject.clientName}</p>
@@ -2456,21 +2494,21 @@ export default function ProjectProfileHub({
 
       {/* New Project Modal with Tabs */}
       {showNewModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] flex flex-col shadow-2xl overflow-hidden my-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
+          <div className={`${isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-2xl'} border rounded-2xl w-full max-w-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] flex flex-col overflow-hidden my-auto`}>
             {/* Modal Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-800 relative bg-slate-900">
+            <div className={`p-4 sm:p-5 border-b ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'} relative`}>
               <button
                 type="button"
                 onClick={() => setShowNewModal(false)}
-                className="absolute top-4 right-4 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer z-10"
+                className={`absolute top-4 right-4 ${isDark ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'} p-1.5 rounded-lg transition cursor-pointer z-10`}
               >
                 <X className="w-5 h-5" />
               </button>
 
               <div className="flex items-center gap-2">
-                <Building2 className="w-5 h-5 text-amber-400" />
-                <h3 className="text-base sm:text-lg font-bold text-white">Create Commercial Project Profile</h3>
+                <Building2 className="w-5 h-5 text-amber-500" />
+                <h3 className={`text-base sm:text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Create Commercial Project Profile</h3>
               </div>
 
               {/* Form Tabs */}
@@ -2519,7 +2557,7 @@ export default function ProjectProfileHub({
                       <input
                         type="text"
                         required
-                        placeholder="e.g., NexBridge Software Hub Phase 2"
+                        placeholder="e.g., Modern Residential Villa Phase 2"
                         value={formName}
                         onChange={(e) => setFormName(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
@@ -2798,21 +2836,21 @@ export default function ProjectProfileHub({
 
       {/* Edit Project Modal with Tabs */}
       {showEditModal && selectedProject && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-slate-950/80 backdrop-blur-md overflow-y-auto">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] flex flex-col shadow-2xl overflow-hidden my-auto">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-md overflow-y-auto">
+          <div className={`${isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-2xl'} border rounded-2xl w-full max-w-2xl max-h-[calc(100dvh-1rem)] sm:max-h-[90dvh] flex flex-col overflow-hidden my-auto`}>
             {/* Modal Header */}
-            <div className="p-4 sm:p-5 border-b border-slate-800 relative bg-slate-900">
+            <div className={`p-4 sm:p-5 border-b ${isDark ? 'border-slate-800 bg-slate-900' : 'border-slate-200 bg-slate-50'} relative`}>
               <button
                 type="button"
                 onClick={() => setShowEditModal(false)}
-                className="absolute top-4 right-4 text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition cursor-pointer z-10"
+                className={`absolute top-4 right-4 ${isDark ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-900 hover:bg-slate-200'} p-1.5 rounded-lg transition cursor-pointer z-10`}
               >
                 <X className="w-5 h-5" />
               </button>
 
               <div className="flex items-center gap-2">
-                <Edit3 className="w-5 h-5 text-amber-400" />
-                <h3 className="text-base sm:text-lg font-bold text-white">Edit Profile: {selectedProject.name}</h3>
+                <Edit3 className="w-5 h-5 text-amber-500" />
+                <h3 className={`text-base sm:text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>Edit Profile: {selectedProject.name}</h3>
               </div>
 
               {/* Form Tabs */}
@@ -2861,7 +2899,7 @@ export default function ProjectProfileHub({
                       <input
                         type="text"
                         required
-                        placeholder="e.g., NexBridge Software Hub Phase 2"
+                        placeholder="e.g., Modern Residential Villa Phase 2"
                         value={formName}
                         onChange={(e) => setFormName(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"

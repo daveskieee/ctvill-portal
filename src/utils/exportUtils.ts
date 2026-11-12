@@ -41,7 +41,7 @@ export function exportToCsv(
 }
 
 /**
- * Opens a clean printable window formatted with CTVill corporate branding
+ * Opens a clean printable window formatted with LDM Construction corporate branding
  * and triggers window.print() for instant printing or Save to PDF.
  */
 export function printRegisterTable(

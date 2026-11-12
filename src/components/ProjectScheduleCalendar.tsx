@@ -11,6 +11,7 @@ import {
   Edit3, Trash2, Check, RefreshCw, Layers
 } from 'lucide-react';
 import { ScheduleEvent, ScheduleEventType, ProjectProfile } from '../types';
+import { useTheme } from '../context/ThemeContext';
 
 interface ProjectScheduleCalendarProps {
   events?: ScheduleEvent[];
@@ -27,6 +28,7 @@ export default function ProjectScheduleCalendar({
   onUpdateEvent,
   onDeleteEvent
 }: ProjectScheduleCalendarProps) {
+  const { isDark } = useTheme();
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   const [selectedDateStr, setSelectedDateStr] = useState<string>(new Date().toISOString().split('T')[0]);
   const [filterType, setFilterType] = useState<string>('ALL');
@@ -419,30 +421,30 @@ export default function ProjectScheduleCalendar({
       {/* Main Grid: Calendar on Left, Selected Date Agenda on Right */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         {/* Monthly Calendar View (Span 2) */}
-        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xs flex flex-col justify-between">
+        <div className={`lg:col-span-2 ${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200'} border rounded-xl p-5 shadow-xs flex flex-col justify-between`}>
           <div>
             {/* Month Header Navigation */}
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <CalendarIcon className="w-5 h-5 text-blue-400" />
+              <h2 className={`text-lg font-bold ${isDark ? 'text-white' : 'text-slate-900'} flex items-center gap-2`}>
+                <CalendarIcon className={`w-5 h-5 ${isDark ? 'text-blue-400' : 'text-blue-600'}`} />
                 {monthName} {year}
               </h2>
               <div className="flex items-center gap-1">
                 <button
                   onClick={prevMonth}
-                  className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                  className={`p-2 rounded-lg ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900'} transition cursor-pointer`}
                 >
                   <ChevronLeft className="w-4 h-4" />
                 </button>
                 <button
                   onClick={() => setCurrentDate(new Date())}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 hover:text-white font-mono transition cursor-pointer"
+                  className={`px-3 py-1.5 rounded-lg ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900'} text-xs font-mono transition cursor-pointer`}
                 >
                   Today
                 </button>
                 <button
                   onClick={nextMonth}
-                  className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition cursor-pointer"
+                  className={`p-2 rounded-lg ${isDark ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white' : 'bg-slate-100 hover:bg-slate-200 text-slate-700 hover:text-slate-900'} transition cursor-pointer`}
                 >
                   <ChevronRight className="w-4 h-4" />
                 </button>
@@ -450,7 +452,7 @@ export default function ProjectScheduleCalendar({
             </div>
 
             {/* Days of week */}
-            <div className="grid grid-cols-7 gap-1 text-center font-mono text-[11px] text-slate-400 uppercase pb-2 border-b border-slate-800">
+            <div className={`grid grid-cols-7 gap-1 text-center font-mono text-[11px] uppercase pb-2 border-b ${isDark ? 'text-slate-400 border-slate-800' : 'text-slate-600 border-slate-200'}`}>
               <span>Sun</span>
               <span>Mon</span>
               <span>Tue</span>
@@ -464,7 +466,7 @@ export default function ProjectScheduleCalendar({
             <div className="grid grid-cols-7 gap-1.5 pt-2">
               {/* Empty leading tiles */}
               {Array.from({ length: firstDayIndex }).map((_, i) => (
-                <div key={`empty-${i}`} className="min-h-[76px] rounded-xl bg-slate-950/20 border border-transparent" />
+                <div key={`empty-${i}`} className={`min-h-[76px] rounded-xl border border-dashed ${isDark ? 'bg-slate-950/20 border-slate-900/40' : 'bg-[#F1F5F9]/60 border-[#E2E8F0]'}`} />
               ))}
 
               {/* Month days */}
@@ -484,15 +486,27 @@ export default function ProjectScheduleCalendar({
                     onClick={() => setSelectedDateStr(dateKey)}
                     className={`min-h-[76px] p-2 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
                       isSelected
-                        ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-500/10 ring-1 ring-blue-500/50'
+                        ? isDark
+                          ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-500/10 ring-1 ring-blue-500/50'
+                          : 'bg-blue-50 border-blue-500 shadow-md shadow-blue-500/10 ring-1 ring-blue-500/50'
                         : isToday
-                        ? 'bg-slate-900 border-amber-500/50'
-                        : 'bg-slate-950/50 border-slate-800/80 hover:border-slate-700'
+                        ? isDark
+                          ? 'bg-slate-900 border-amber-500/50'
+                          : 'bg-amber-50/70 border-amber-500/70'
+                        : isDark
+                        ? 'bg-slate-950/50 border-slate-800/80 hover:border-slate-700'
+                        : dayEvents.length > 0
+                        ? 'bg-[#FFFFFF] border-[#CBD5E1] shadow-2xs hover:border-slate-400'
+                        : 'bg-[#F8FAFC] border-[#E2E8F0] hover:border-slate-300'
                     }`}
                   >
                     <div className="flex justify-between items-center">
                       <span className={`text-xs font-mono font-bold ${
-                        isSelected ? 'text-blue-300' : isToday ? 'text-amber-400' : 'text-slate-300'
+                        isSelected 
+                          ? isDark ? 'text-blue-300' : 'text-blue-700'
+                          : isToday 
+                            ? isDark ? 'text-amber-400' : 'text-amber-800'
+                            : isDark ? 'text-slate-300' : 'text-slate-800'
                       }`}>
                         {day}
                       </span>

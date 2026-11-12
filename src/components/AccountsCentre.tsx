@@ -8,9 +8,10 @@ import { createPortal } from 'react-dom';
 import {
   Shield, KeyRound, Mail, Sliders, Laptop, ChevronRight, ChevronLeft,
   X, CheckCircle2, AlertTriangle, Eye, EyeOff, Camera, Upload, Trash2,
-  Save, ShieldCheck, Lock, Sparkles, Smartphone, Check
+  Save, ShieldCheck, Lock, Sparkles, Smartphone, Check, Sun, Moon
 } from 'lucide-react';
 import { updateStoredSession } from '../utils/session';
+import { ThemeMode } from '../context/ThemeContext';
 
 interface AccountsCentreProps {
   session: any;
@@ -26,8 +27,8 @@ interface AccountsCentreProps {
   setProfileDivision: (division: string) => void;
   avatarUrl: string | null;
   setAvatarUrl: (url: string | null) => void;
-  theme: 'dark' | 'light';
-  setTheme: (theme: 'dark' | 'light') => void;
+  theme: ThemeMode;
+  setTheme: (theme: ThemeMode) => void;
   onLogout: () => void;
   notify: (msg: string) => void;
   onUpdateSession?: (updates: any) => void;
@@ -53,7 +54,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
   notify,
   onUpdateSession,
 }) => {
-  const isDark = theme === 'dark';
+  const isDark = theme !== 'light';
   // Navigation Sub-Tabs
   const [activeSubTab, setActiveSubTab] = useState<'security' | 'profile' | 'preferences' | 'sessions'>('security');
 
@@ -313,13 +314,13 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
             {/* Header Brand */}
             <div>
               <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-400">
-                <span className={`font-black ${isDark ? 'text-amber-400' : 'text-amber-600'} tracking-wider`}>CTVILL</span>
+                <span className={`font-black ${isDark ? 'text-amber-400' : 'text-amber-600'} tracking-wider`}>LDM</span>
                 <span className="text-slate-600">•</span>
                 <span>Security & Identity</span>
               </div>
               <h2 className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-slate-900'} tracking-tight mt-1`}>Accounts Centre</h2>
               <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'} mt-2 leading-relaxed`}>
-                Manage your connected credentials, security protocols and profile settings across CTVill technologies.
+                Manage your connected credentials, security protocols and profile settings across LDM Construction technologies.
               </p>
             </div>
 
@@ -715,22 +716,6 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <button
                       type="button"
-                      onClick={() => setTheme('dark')}
-                      className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
-                        theme === 'dark'
-                          ? 'bg-amber-500/10 border-amber-500 text-white shadow-md'
-                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
-                      }`}
-                    >
-                      <div className="text-sm font-bold flex items-center justify-between">
-                        <span>🌙 Dark Executive</span>
-                        {theme === 'dark' && <span className="w-2 h-2 rounded-full bg-amber-400" />}
-                      </div>
-                      <p className="text-[11px] text-slate-400 mt-1">Sleek obsidian slate palette tailored for executive clarity.</p>
-                    </button>
-
-                    <button
-                      type="button"
                       onClick={() => setTheme('light')}
                       className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
                         theme === 'light'
@@ -739,10 +724,58 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                       }`}
                     >
                       <div className="text-sm font-bold flex items-center justify-between">
-                        <span>☀️ Light Corporate</span>
+                        <span className="flex items-center gap-1.5"><Sun className="w-4 h-4 text-amber-500" /> Light</span>
                         {theme === 'light' && <span className="w-2 h-2 rounded-full bg-amber-400" />}
                       </div>
-                      <p className="text-[11px] text-slate-400 mt-1">High-contrast daytime clarity for construction field laptops.</p>
+                      <p className="text-[11px] text-slate-400 mt-1">Daylight surface (#F5F6F8) with crisp high-contrast cards &amp; borders.</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setTheme('dark')}
+                      className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                        theme === 'dark'
+                          ? 'bg-amber-500/10 border-amber-500 text-white shadow-md'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="text-sm font-bold flex items-center justify-between">
+                        <span className="flex items-center gap-1.5"><Moon className="w-4 h-4 text-blue-400" /> Dark</span>
+                        {theme === 'dark' && <span className="w-2 h-2 rounded-full bg-amber-400" />}
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">Carbon slate palette (#111625) tailored for executive clarity.</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setTheme('night')}
+                      className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                        theme === 'night'
+                          ? 'bg-amber-500/10 border-amber-500 text-white shadow-md'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="text-sm font-bold flex items-center justify-between">
+                        <span className="flex items-center gap-1.5"><Sparkles className="w-4 h-4 text-purple-400" /> Night (Obsidian)</span>
+                        {theme === 'night' && <span className="w-2 h-2 rounded-full bg-amber-400" />}
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">True obsidian palette (#0A0A0C) for ultra deep contrast.</p>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setTheme('system')}
+                      className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
+                        theme === 'system'
+                          ? 'bg-amber-500/10 border-amber-500 text-white shadow-md'
+                          : 'bg-slate-950 border-slate-800 text-slate-400 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="text-sm font-bold flex items-center justify-between">
+                        <span className="flex items-center gap-1.5"><Laptop className="w-4 h-4 text-slate-400" /> System default</span>
+                        {theme === 'system' && <span className="w-2 h-2 rounded-full bg-amber-400" />}
+                      </div>
+                      <p className="text-[11px] text-slate-400 mt-1">Automatically matches your operating system appearance.</p>
                     </button>
                   </div>
                 </div>
@@ -846,7 +879,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
             {/* Header matching Meta Screenshot */}
             <div>
               <div className="text-[11px] text-slate-400 font-medium">
-                {profileName} · CTVill Enterprise
+                {profileName} · LDM Construction Enterprise
               </div>
               <h3 className="text-xl font-bold text-white tracking-tight mt-0.5">Change password</h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
@@ -951,7 +984,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
             <div className="space-y-3 pt-1">
               <button
                 type="button"
-                onClick={() => notify('ℹ️ To reset your initial passkey, contact CTVill Operations Support or your System Administrator.')}
+                onClick={() => notify('ℹ️ To reset your initial passkey, contact LDM Operations Support or your System Administrator.')}
                 className="text-xs text-blue-400 hover:underline cursor-pointer font-medium block"
               >
                 Forgotten your password?
@@ -1019,7 +1052,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
             {/* Header */}
             <div>
               <div className="text-[11px] text-slate-400 font-medium">
-                {profileName} · CTVill Enterprise
+                {profileName} · LDM Construction Enterprise
               </div>
               <h3 className="text-xl font-bold text-white tracking-tight mt-0.5">Update official login email</h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
@@ -1065,7 +1098,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                   spellCheck={false}
                   data-lpignore="true"
                   data-1p-ignore="true"
-                  placeholder="new.email@ctvill.com"
+                  placeholder="new.email@ldmconstruction.ph"
                   value={newEmailInput}
                   onChange={(e) => { setNewEmailInput(e.target.value); setEmailChangeError(null); }}
                   className="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl px-3.5 py-3 text-xs text-white focus:outline-none focus:border-blue-500 font-mono placeholder:text-slate-500"

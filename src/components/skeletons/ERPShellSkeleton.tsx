@@ -7,7 +7,7 @@ import KanbanSkeleton from './KanbanSkeleton';
 import GanttSkeleton from './GanttSkeleton';
 import SiteDiarySkeleton from './SiteDiarySkeleton';
 import Sidebar from '../Sidebar';
-import logoJpg from '../../assets/images/ctvill/logo.jpg';
+import { LdmBrandLogo } from '../OptimizedLdmImage';
 
 export const ERPShellSkeleton: React.FC = () => {
   // Determine requested module from URL hash or sessionStorage to pre-align content skeleton
@@ -80,12 +80,12 @@ export const ERPShellSkeleton: React.FC = () => {
           </div>
 
           <div className="flex items-center gap-2.5 shrink-0">
-            <div className="h-8 w-8 rounded-lg bg-black border border-slate-800 flex items-center justify-center overflow-hidden shrink-0">
-              <img src={logoJpg} alt="CTVILL Logo" className="w-full h-full object-cover" />
-            </div>
+            <LdmBrandLogo size="sm" />
             <div className="flex items-center gap-2">
-              <span className="text-sm font-bold text-white tracking-tight">CTVILL</span>
-              <Skeleton className="h-4 w-20 rounded" />
+              <span className="text-sm font-bold text-white tracking-tight">LDM CONSTRUCTION</span>
+              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded font-semibold border whitespace-nowrap bg-amber-500/10 border-amber-500/30 text-amber-300">
+                OPERATIONS
+              </span>
             </div>
           </div>
 

@@ -7,6 +7,22 @@ import {
 } from 'lucide-react';
 import { Contractor, DailyManpowerAudit, ProjectProfile, isOfficeOrExecutive, isIndividualStaffOrEngineer } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { normalizeRole, UserRole } from '../utils/rbac';
+
+export interface WorkerReallocationRequest {
+  id: string;
+  workerId: string;
+  workerName: string;
+  trade: string;
+  currentSite: string;
+  targetSite: string;
+  targetRole: string;
+  targetZone?: string;
+  reason: string;
+  requestedBy: string;
+  requestedAt: string;
+  status: 'PENDING' | 'APPROVED' | 'DENIED';
+}
 
 // Curated high-resolution professional avatars for construction/fit-out personnel
 const DEFAULT_AVATARS: Record<string, string> = {
@@ -22,6 +38,8 @@ interface WorkforceMessengerRosterProps {
   contractors: Contractor[];
   manpowerAudits?: DailyManpowerAudit[];
   projects?: ProjectProfile[];
+  userRole?: string;
+  isAdmin?: boolean;
   onRegisterClick: () => void;
   onVerifyRollCall: (contractorId: string) => void;
   onDeleteContractor?: (contractorId: string) => void;
@@ -36,6 +54,8 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
   contractors,
   manpowerAudits = [],
   projects = [],
+  userRole,
+  isAdmin = false,
   onRegisterClick,
   onVerifyRollCall,
   onDeleteContractor,
@@ -45,8 +65,12 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
   onSwitchToAllocationTab,
   notify = console.log
 }) => {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const { isDark } = useTheme();
+
+  const currentRole = normalizeRole(userRole);
+  const isOM = currentRole === UserRole.OM || isAdmin;
+  const isPM = currentRole === UserRole.PM;
+
   const [selectedId, setSelectedId] = useState<string>(() => contractors[0]?.id || '');
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'ONLINE' | 'BREAK' | 'OFFLINE'>('ALL');
@@ -54,6 +78,106 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
   const [siteFilter, setSiteFilter] = useState<string>('ALL');
   const [viewMode, setViewMode] = useState<'MESSENGER' | 'GRID'>('MESSENGER');
   const [dossierTab, setDossierTab] = useState<'DEPLOYMENT' | 'PERFORMANCE' | 'CREDENTIALS'>('DEPLOYMENT');
+
+  // Reallocation Requests State (Synced between PM Submission & OM Approvals)
+  const [reallocations, setReallocations] = useState<WorkerReallocationRequest[]>(() => {
+    try {
+      const raw = localStorage.getItem('ldm_pending_reallocations');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return [
+      {
+        id: 'REAL-01',
+        workerId: 'CONT-001',
+        workerName: 'Eduardo Santos',
+        trade: 'Master Mason / Lead Concreter',
+        currentSite: '2-Storey Modern Farmhouse',
+        targetSite: '68 SQM Seafront Condominium',
+        targetRole: 'Lead Finishing Mason',
+        targetZone: 'Living & Dining Area',
+        reason: 'Urgent tile flooring installation required for client turnover inspection.',
+        requestedBy: 'Site Engineer (PM)',
+        requestedAt: 'Today, 08:30 AM',
+        status: 'PENDING'
+      }
+    ];
+  });
+
+  const pendingReallocations = useMemo(
+    () => reallocations.filter(r => r.status === 'PENDING'),
+    [reallocations]
+  );
+
+  // PM Reallocation Request Modal State
+  const [isReallocModalOpen, setIsReallocModalOpen] = useState(false);
+  const [reallocWorker, setReallocWorker] = useState<Contractor | null>(null);
+  const [reallocTargetSite, setReallocTargetSite] = useState('');
+  const [reallocTargetRole, setReallocTargetRole] = useState('');
+  const [reallocTargetZone, setReallocTargetZone] = useState('General');
+  const [reallocReason, setReallocReason] = useState('Critical path milestone coverage');
+
+  const handleOpenReallocModal = (c: Contractor) => {
+    setReallocWorker(c);
+    setReallocTargetSite(projects[0]?.name || '2-Storey Modern Farmhouse');
+    setReallocTargetRole(c.roleTitle || c.specialty || 'Lead Artisan');
+    setReallocTargetZone(c.assignedZone || 'General');
+    setReallocReason('Critical path milestone coverage & trade scheduling');
+    setIsReallocModalOpen(true);
+  };
+
+  const handleSubmitReallocRequest = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reallocWorker) return;
+
+    const newReq: WorkerReallocationRequest = {
+      id: `REAL-${Date.now().toString().slice(-4)}`,
+      workerId: reallocWorker.id,
+      workerName: reallocWorker.name,
+      trade: reallocWorker.roleTitle || reallocWorker.specialty || 'General Trade',
+      currentSite: reallocWorker.activeProjectSite || 'General Standby Pool',
+      targetSite: reallocTargetSite,
+      targetRole: reallocTargetRole,
+      targetZone: reallocTargetZone,
+      reason: reallocReason.trim() || 'Workforce site reallocation request',
+      requestedBy: 'Project Manager / Site Engineer',
+      requestedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      status: 'PENDING'
+    };
+
+    const next = [newReq, ...reallocations];
+    setReallocations(next);
+    localStorage.setItem('ldm_pending_reallocations', JSON.stringify(next));
+    notify(`Worker reallocation request for ${reallocWorker.name} submitted to Operations Manager.`);
+    setIsReallocModalOpen(false);
+  };
+
+  const handleApproveReallocation = (req: WorkerReallocationRequest) => {
+    const target = contractors.find(c => c.id === req.workerId);
+    if (target && onUpdateContractor) {
+      const updatedContractor: Contractor = {
+        ...target,
+        activeProjectSite: req.targetSite,
+        roleTitle: req.targetRole,
+        assignedZone: req.targetZone || target.assignedZone
+      };
+      onUpdateContractor(updatedContractor);
+    }
+
+    const next = reallocations.map(r => r.id === req.id ? { ...r, status: 'APPROVED' as const } : r);
+    setReallocations(next);
+    localStorage.setItem('ldm_pending_reallocations', JSON.stringify(next));
+    notify(`Approved reallocation: ${req.workerName} moved to ${req.targetSite}.`);
+  };
+
+  const handleDenyReallocation = (reqId: string) => {
+    const next = reallocations.map(r => r.id === reqId ? { ...r, status: 'DENIED' as const } : r);
+    setReallocations(next);
+    localStorage.setItem('ldm_pending_reallocations', JSON.stringify(next));
+    notify('Worker reallocation request denied.');
+  };
 
   // Inline Transfer Station State
   const [transferSite, setTransferSite] = useState<string>('');
@@ -285,6 +409,71 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
 
   return (
     <div className="space-y-4 font-sans">
+      {/* OM PENDING REALLOCATION APPROVALS INBOX */}
+      {isOM && pendingReallocations.length > 0 && (
+        <div className="bg-amber-950/40 border border-amber-600/50 rounded-2xl p-4 space-y-3 shadow-md animate-fadeIn">
+          <div className="flex items-center justify-between border-b border-amber-600/30 pb-2.5">
+            <div className="flex items-center gap-2">
+              <ArrowRightLeft className="w-4 h-4 text-amber-400" />
+              <h3 className="text-sm font-bold text-white">
+                Pending Worker Reallocation Approvals ({pendingReallocations.length})
+              </h3>
+            </div>
+            <span className="text-[10px] font-mono px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold">
+              OPERATIONS MANAGER APPROVAL REQUIRED
+            </span>
+          </div>
+
+          <div className="space-y-2.5">
+            {pendingReallocations.map(req => (
+              <div
+                key={req.id}
+                className="bg-slate-900/90 border border-slate-800 rounded-xl p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+              >
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs font-mono font-bold text-amber-400">{req.id}</span>
+                    <strong className="text-white font-bold">{req.workerName}</strong>
+                    <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                      {req.trade}
+                    </span>
+                    <span className="text-slate-500 font-mono text-[10px]">Requested {req.requestedAt}</span>
+                  </div>
+                  <div className="text-slate-300 font-mono text-[11px] flex items-center gap-2 flex-wrap">
+                    <span className="text-slate-400">Current: {req.currentSite}</span>
+                    <span className="text-amber-400 font-bold">➔</span>
+                    <span className="text-emerald-400 font-bold">Target Site: {req.targetSite}</span>
+                    <span className="text-slate-400">({req.targetRole})</span>
+                  </div>
+                  <p className="text-slate-400 italic text-[11px]">
+                    Reason: &ldquo;{req.reason}&rdquo; • By {req.requestedBy}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleApproveReallocation(req)}
+                    className="px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 cursor-pointer shadow-md shadow-emerald-500/10"
+                  >
+                    <Check className="w-4 h-4" />
+                    <span>Approve Reallocation</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleDenyReallocation(req.id)}
+                    className="px-3.5 py-2 rounded-xl bg-rose-950 hover:bg-rose-900 text-rose-300 border border-rose-800 font-bold text-xs flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                    <span>Deny</span>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* MINIMALIST TOP HEADER & TOOLBAR */}
       <div className="bg-slate-950 border border-slate-800 rounded-2xl p-4 shadow-sm space-y-3">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -731,32 +920,15 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                             </span>
                           </div>
 
-                          {/* Action Button: Jump to Live Allocation & Analytics Tab */}
-                          {onSwitchToAllocationTab ? (
-                            <button
-                              type="button"
-                              onClick={() => onSwitchToAllocationTab(selectedContractor.id)}
-                              className="px-3.5 py-2 bg-teal-600/20 hover:bg-teal-600 border border-teal-500/40 text-teal-300 hover:text-white rounded-xl text-xs font-mono font-bold transition-all flex items-center gap-2 cursor-pointer shadow-xs shrink-0 group self-start sm:self-center"
-                            >
-                              <ArrowRightLeft className="w-3.5 h-3.5 text-teal-400 group-hover:rotate-180 transition-transform duration-300" />
-                              <span>Reallocate Site in Analytics →</span>
-                            </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setAllocContractor(selectedContractor);
-                                setAllocSite(selectedContractor.activeProjectSite || '');
-                                setAllocZone(selectedContractor.assignedZone || 'General Area');
-                                setAllocHeadcount(selectedContractor.activeManpower || 1);
-                                setIsAllocModalOpen(true);
-                              }}
-                              className="px-3.5 py-2 bg-teal-600/20 hover:bg-teal-600 border border-teal-500/40 text-teal-300 hover:text-white rounded-xl text-xs font-mono font-bold transition-all flex items-center gap-2 cursor-pointer shadow-xs shrink-0 self-start sm:self-center"
-                            >
-                              <ArrowRightLeft className="w-3.5 h-3.5" />
-                              <span>Transfer Site</span>
-                            </button>
-                          )}
+                          {/* Action Button: Reallocate Site & Assign Role */}
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReallocModal(selectedContractor)}
+                            className="px-3.5 py-2 bg-amber-500/20 hover:bg-amber-500 border border-amber-500/40 text-amber-300 hover:text-slate-950 rounded-xl text-xs font-mono font-bold transition-all flex items-center gap-2 cursor-pointer shadow-xs shrink-0 self-start sm:self-center"
+                          >
+                            <ArrowRightLeft className="w-3.5 h-3.5" />
+                            <span>Reallocate Site &amp; Assign Role</span>
+                          </button>
                         </div>
 
                         {/* Visual Project Status if mapped to an active project */}
@@ -857,7 +1029,7 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                           <div className="bg-slate-950 p-2.5 rounded-lg border border-slate-800 col-span-2 sm:col-span-1">
                             <span className="text-[10px] text-slate-500 block">Contract Scope</span>
                             <strong className="text-teal-300 text-xs truncate block">
-                              {selectedContractor.contractAmount ? `₱${selectedContractor.contractAmount.toLocaleString()}` : 'CTVill In-House'}
+                              {selectedContractor.contractAmount ? `₱${selectedContractor.contractAmount.toLocaleString()}` : 'LDM In-House'}
                             </strong>
                           </div>
                         </div>
@@ -1080,6 +1252,118 @@ export const WorkforceMessengerRoster: React.FC<WorkforceMessengerRosterProps> =
                   className="px-4 py-1.5 bg-teal-600 hover:bg-teal-500 text-white rounded-lg font-bold"
                 >
                   Save Allocation
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* REALLOCATE SITE & ASSIGN ROLE MODAL */}
+      {isReallocModalOpen && reallocWorker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <ArrowRightLeft className="w-4 h-4 text-amber-400" />
+                  Reallocate Site &amp; Assign Role
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Route jobsite workforce transfer request to Operations Manager
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsReallocModalOpen(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitReallocRequest} className="space-y-3.5">
+              <div className="p-3 bg-slate-950 rounded-xl border border-slate-800 text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <strong className="text-white font-bold">{reallocWorker.name}</strong>
+                  <span className="text-slate-400 font-mono text-[11px]">{reallocWorker.id}</span>
+                </div>
+                <div className="text-slate-400">
+                  Current Deployment: <span className="text-amber-400 font-semibold">{reallocWorker.activeProjectSite || 'General Standby Pool'}</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
+                  Target Commercial Site *
+                </label>
+                <select
+                  value={reallocTargetSite}
+                  onChange={(e) => setReallocTargetSite(e.target.value)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                >
+                  {projects.map(p => (
+                    <option key={p.id} value={p.name}>{p.name}</option>
+                  ))}
+                  <option value="General Standby Pool">General Standby Pool</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
+                    Assigned Role / Trade *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={reallocTargetRole}
+                    onChange={(e) => setReallocTargetRole(e.target.value)}
+                    placeholder="e.g. Lead Finishing Mason"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
+                    Assigned Zone / Area
+                  </label>
+                  <input
+                    type="text"
+                    value={reallocTargetZone}
+                    onChange={(e) => setReallocTargetZone(e.target.value)}
+                    placeholder="e.g. 2nd Floor Master BR"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
+                  Reallocation Justification / Notes *
+                </label>
+                <textarea
+                  rows={2}
+                  required
+                  value={reallocReason}
+                  onChange={(e) => setReallocReason(e.target.value)}
+                  placeholder="e.g. Urgent tile masonry needed to beat rainy forecast"
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsReallocModalOpen(false)}
+                  className="px-4 py-2 text-slate-400 hover:text-white text-xs font-semibold cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold cursor-pointer shadow-md shadow-amber-500/10"
+                >
+                  Submit for OM Approval
                 </button>
               </div>
             </form>

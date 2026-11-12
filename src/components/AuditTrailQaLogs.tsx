@@ -7,14 +7,15 @@ import React from 'react';
 import { History, Shield, CheckCircle2 } from 'lucide-react';
 import { ProcessAuditLog } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { getStoredAuditLogs } from '../utils/auditLogger';
 
 export interface AuditTrailQaLogsProps {
   auditLogs: ProcessAuditLog[];
 }
 
 export const AuditTrailQaLogs: React.FC<AuditTrailQaLogsProps> = ({ auditLogs = [] }) => {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const { theme, isDark } = useTheme();
+  const displayLogs = auditLogs && auditLogs.length > 0 ? auditLogs : getStoredAuditLogs();
 
   const getActionBadgeClass = (action: string) => {
     switch (action) {
@@ -58,13 +59,13 @@ export const AuditTrailQaLogs: React.FC<AuditTrailQaLogsProps> = ({ auditLogs = 
 
       {/* Logs Table Container */}
       <div className={`${isDark ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200/80 shadow-xs'} border rounded-xl overflow-hidden`}>
-        {auditLogs.length === 0 ? (
+        {displayLogs.length === 0 ? (
           <div className="p-8 text-center text-slate-500">
             <p className="text-xs">No audit logs recorded yet.</p>
           </div>
         ) : (
           <div className={`divide-y ${isDark ? 'divide-slate-800' : 'divide-slate-200'}`}>
-            {auditLogs.map((log) => {
+            {displayLogs.map((log) => {
               const ip = extractIpAddress(log.details);
 
               return (

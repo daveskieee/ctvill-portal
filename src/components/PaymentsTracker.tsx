@@ -50,8 +50,7 @@ export default function PaymentsTracker({
   isPrivateAccounting = false,
   onRecordPayment
 }: PaymentsTrackerProps) {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const { isDark } = useTheme();
   const isFinance = (userRole || '').toUpperCase() === 'FINANCE';
   const isAdmin = isFinance || (userRole || '').toUpperCase() === 'ADMIN' || (userRole || '').toUpperCase() === 'OPERATIONS_DIRECTOR';
   // Local list of installment records initialized from clients
@@ -205,7 +204,7 @@ export default function PaymentsTracker({
   // New Invoice Form state
   const initialProj = availableProjectNames[0] || 'Commercial Fit-Out Site 1';
   const [invoiceProjectName, setInvoiceProjectName] = useState<string>(initialProj);
-  const [invoiceClientName, setInvoiceClientName] = useState<string>(() => resolveClientForProject(initialProj) || 'NexBridge Corp');
+  const [invoiceClientName, setInvoiceClientName] = useState<string>(() => resolveClientForProject(initialProj) || 'LDM Client');
   const [invoiceDueDate, setInvoiceDueDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [invoiceAmount, setInvoiceAmount] = useState<number>(350000);
   const [invoiceMethod, setInvoiceMethod] = useState<string>('Progress Billing Installment');
@@ -908,7 +907,7 @@ export default function PaymentsTracker({
               <div className="flex items-center justify-center gap-2 mb-1">
                 <Building2 className="w-5 h-5 text-amber-400" />
                 <span className="font-bold text-white tracking-wider uppercase text-sm">
-                  CTVill Design & Construction
+                  LDM Construction
                 </span>
               </div>
               <p className="text-[10px] text-slate-400 font-mono">
@@ -1017,7 +1016,7 @@ export default function PaymentsTracker({
                 <input
                   type="text"
                   required
-                  placeholder="e.g. NexBridge Software Corp"
+                  placeholder="e.g. Private Client / Homeowner"
                   value={invoiceClientName}
                   onChange={(e) => setInvoiceClientName(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
@@ -1169,7 +1168,7 @@ export default function PaymentsTracker({
                   <option value="Bank Wire (Metrobank Corporate)">Bank Wire (Metrobank Corporate)</option>
                   <option value="BDO Corporate Direct Debit">BDO Corporate Direct Debit</option>
                   <option value="Managers Check (Over-the-Counter)">Manager's Check (Over-the-Counter)</option>
-                  <option value="PEZA Escrow Disbursement">PEZA Escrow Disbursement</option>
+                  <option value="Construction Escrow Disbursement">Construction Escrow Disbursement</option>
                 </select>
               </div>
 

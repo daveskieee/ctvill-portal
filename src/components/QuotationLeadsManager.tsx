@@ -22,17 +22,12 @@ import {
   resetEstimatorConfig,
   ESTIMATOR_CONFIG_EVENT,
 } from '../utils/estimatorConfig';
-import {
-  ClientReviewItem,
-  getClientReviews,
-  moderateClientReview,
-  deleteClientReview,
-  CLIENT_REVIEWS_EVENT,
-} from '../utils/clientReviews';
+import BillOfMaterialsManager from './BillOfMaterialsManager';
 
 interface QuotationLeadsManagerProps {
   quotations: FitoutQuotationItem[];
   isAdmin?: boolean;
+  projects?: any[];
   onUpdateStatus?: (id: string, status: FitoutQuotationItem['status']) => Promise<void> | void;
   onConvertToProject?: (quotation: FitoutQuotationItem) => Promise<void> | void;
   navigateToProject?: (projectId?: string) => void;
@@ -41,12 +36,12 @@ interface QuotationLeadsManagerProps {
 export default function QuotationLeadsManager({
   quotations = [],
   isAdmin = true,
+  projects = [],
   onUpdateStatus,
   onConvertToProject,
   navigateToProject: propNavigateToProject
 }: QuotationLeadsManagerProps) {
-  const { theme } = useTheme();
-  const isDark = theme === 'dark';
+  const { isDark } = useTheme();
   const navigateToProject = (projectId?: string) => {
     if (propNavigateToProject) {
       propNavigateToProject(projectId);
@@ -58,28 +53,19 @@ export default function QuotationLeadsManager({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedQuote, setSelectedQuote] = useState<FitoutQuotationItem | null>(null);
   const [isConvertingId, setIsConvertingId] = useState<string | null>(null);
-  const [activeSubTab, setActiveSubTab] = useState<'all' | 'leads' | 'reviews' | 'estimator'>('all');
+  const [activeSubTab, setActiveSubTab] = useState<'bom' | 'leads' | 'estimator' | 'all'>('bom');
 
   // Estimator Configuration State
   const [estimatorConfig, setEstimatorConfig] = useState<EstimatorConfig>(() => getEstimatorConfig());
   const [estimatorSavedMsg, setEstimatorSavedMsg] = useState<string | null>(null);
 
-  // Client Reviews Moderation State
-  const [clientReviews, setClientReviews] = useState<ClientReviewItem[]>(() => getClientReviews());
-  const [reviewFilter, setReviewFilter] = useState<'ALL' | 'Pending' | 'Approved' | 'Rejected'>('ALL');
-
   useEffect(() => {
     const syncEstimator = () => setEstimatorConfig(getEstimatorConfig());
-    const syncReviews = () => setClientReviews(getClientReviews());
     window.addEventListener(ESTIMATOR_CONFIG_EVENT, syncEstimator);
-    window.addEventListener(CLIENT_REVIEWS_EVENT, syncReviews);
     window.addEventListener('storage', syncEstimator);
-    window.addEventListener('storage', syncReviews);
     return () => {
       window.removeEventListener(ESTIMATOR_CONFIG_EVENT, syncEstimator);
-      window.removeEventListener(CLIENT_REVIEWS_EVENT, syncReviews);
       window.removeEventListener('storage', syncEstimator);
-      window.removeEventListener('storage', syncReviews);
     };
   }, []);
 
@@ -136,22 +122,6 @@ export default function QuotationLeadsManager({
     setTimeout(() => setEstimatorSavedMsg(null), 4000);
   };
 
-  const handleModerateReview = (reviewId: string, newStatus: 'Approved' | 'Rejected') => {
-    const updated = moderateClientReview(reviewId, newStatus, 'Admin Portal Moderator');
-    setClientReviews(updated);
-  };
-
-  const handleDeleteReview = (reviewId: string) => {
-    const updated = deleteClientReview(reviewId);
-    setClientReviews(updated);
-  };
-
-  const pendingReviewsCount = clientReviews.filter((r) => r.status === 'Pending').length;
-  const approvedReviewsCount = clientReviews.filter((r) => r.status === 'Approved').length;
-  const filteredReviews = clientReviews.filter((r) =>
-    reviewFilter === 'ALL' ? true : r.status === reviewFilter
-  );
-
   const filteredQuotes = quotations.filter(q => {
     if (statusFilter !== 'ALL' && q.status !== statusFilter) return false;
     if (searchQuery) {
@@ -205,7 +175,7 @@ export default function QuotationLeadsManager({
       q.createdAt || '',
       q.projectNotes || ''
     ]);
-    exportToCsv('CTVill_Quotation_Leads', headers, rows);
+    exportToCsv('LDM_Construction_Quotation_Leads', headers, rows);
   };
 
   const handlePrint = () => {
@@ -223,7 +193,7 @@ export default function QuotationLeadsManager({
       `${q.estimatedWeeks} wks`,
       q.status
     ]);
-    printRegisterTable('Commercial Fit-Out Quotation Leads Register', 'Prospective Commercial Projects & Web Estimator Submissions', headers, rows);
+    printRegisterTable('LDM Construction Quotation Leads Register', 'Prospective Residential & Turnkey Fit-Out Inquiries', headers, rows);
   };
 
   return (
@@ -249,10 +219,10 @@ export default function QuotationLeadsManager({
         <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto shrink-0">
           <div className="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-1 gap-1">
             {[
-              { id: 'all', label: 'All CRM & Config' },
+              { id: 'bom', label: 'BOM & Quotation Builder' },
               { id: 'leads', label: `Quotation Leads (${totalQuotes})` },
-              { id: 'reviews', label: `Client Reviews (${pendingReviewsCount} Pending)` },
               { id: 'estimator', label: 'Estimator Rates Config' },
+              { id: 'all', label: 'All CRM & BOM' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -274,6 +244,16 @@ export default function QuotationLeadsManager({
           </div>
         </div>
       </div>
+
+      {/* Bill of Materials & Quotation Builder Module */}
+      {(activeSubTab === 'bom' || activeSubTab === 'all') && (
+        <div className="space-y-4">
+          <BillOfMaterialsManager
+            projects={projects}
+            onNavigateToGantt={(projectId) => navigateToProject(projectId)}
+          />
+        </div>
+      )}
 
       {/* KPI Cards */}
       {(activeSubTab === 'all' || activeSubTab === 'leads') && (
@@ -303,7 +283,7 @@ export default function QuotationLeadsManager({
             <CheckCircle2 className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-xl font-bold font-mono text-white">{convertedCount}</div>
-          <span className="text-[10px] text-slate-400 block font-mono">Signed CTVill Commercial Sites</span>
+          <span className="text-[10px] text-slate-400 block font-mono">Signed LDM Design &amp; Build Projects</span>
         </div>
 
         <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1 shadow-xs">
@@ -516,135 +496,6 @@ export default function QuotationLeadsManager({
         </div>
       </div>
         </>
-      )}
-
-      {/* Client Reviews & Inquiries Moderation Panel */}
-      {(activeSubTab === 'all' || activeSubTab === 'reviews') && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-800 pb-4">
-            <div>
-              <div className="flex items-center gap-2 mb-1">
-                <MessageSquare className="w-4 h-4 text-amber-400" />
-                <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider">
-                  PUBLIC TESTIMONIAL APPROVAL QUEUE
-                </span>
-              </div>
-              <h4 className="text-base font-bold text-white flex items-center gap-2">
-                Client Reviews & Inquiries Moderation
-                {pendingReviewsCount > 0 && (
-                  <span className="px-2 py-0.5 rounded-md bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[11px] font-mono font-bold">
-                    {pendingReviewsCount} Pending Review{pendingReviewsCount > 1 ? 's' : ''}
-                  </span>
-                )}
-              </h4>
-              <p className="text-xs text-slate-400 mt-0.5">
-                Moderate public reviews submitted on the Landing Page before they appear live under Verified Client Testimonials ({approvedReviewsCount} currently published).
-              </p>
-            </div>
-
-            <div className="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-lg p-1 self-start sm:self-auto">
-              {(['ALL', 'Pending', 'Approved', 'Rejected'] as const).map((status) => (
-                <button
-                  key={status}
-                  type="button"
-                  onClick={() => setReviewFilter(status)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-mono font-bold transition-colors cursor-pointer ${
-                    reviewFilter === status
-                      ? 'bg-amber-500 text-slate-950'
-                      : 'text-slate-400 hover:text-white'
-                  }`}
-                >
-                  {status === 'ALL' ? `All (${clientReviews.length})` : status}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="space-y-3">
-            {filteredReviews.length === 0 ? (
-              <div className="bg-slate-950 border border-slate-800 rounded-xl p-8 text-center text-slate-500 text-xs">
-                No client reviews matching filter "{reviewFilter}".
-              </div>
-            ) : (
-              filteredReviews.map((rev) => (
-                <div
-                  key={rev.id}
-                  className="bg-slate-950 border border-slate-800 rounded-xl p-4 flex flex-col lg:flex-row lg:items-center justify-between gap-4"
-                >
-                  <div className="space-y-1.5 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-bold text-white">{rev.clientName}</span>
-                      <span className="text-xs text-cyan-400 font-semibold">• {rev.companyOrProject}</span>
-                      {rev.roleOrLocation && (
-                        <span className="text-[11px] text-slate-400 font-mono">({rev.roleOrLocation})</span>
-                      )}
-                      <span
-                        className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border ${
-                          rev.status === 'Approved'
-                            ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
-                            : rev.status === 'Rejected'
-                            ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
-                            : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                        }`}
-                      >
-                        {rev.status.toUpperCase()}
-                      </span>
-                      <div className="flex items-center gap-0.5 ml-1">
-                        {[1, 2, 3, 4, 5].map((s) => (
-                          <Star
-                            key={s}
-                            className={`w-3.5 h-3.5 ${
-                              s <= rev.rating ? 'text-amber-400 fill-amber-400' : 'text-slate-700'
-                            }`}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                    <p className="text-xs text-slate-300 leading-relaxed italic">"{rev.message}"</p>
-                    <div className="flex flex-wrap items-center gap-3 text-[10px] font-mono text-slate-500">
-                      <span>ID: {rev.id}</span>
-                      <span>Submitted: {new Date(rev.createdAt).toLocaleDateString()}</span>
-                      {rev.email && <span>Email: {rev.email}</span>}
-                      {rev.moderatedBy && <span>Moderated by: {rev.moderatedBy}</span>}
-                    </div>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    {rev.status !== 'Approved' && (
-                      <button
-                        type="button"
-                        onClick={() => handleModerateReview(rev.id, 'Approved')}
-                        className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        Approve & Publish
-                      </button>
-                    )}
-                    {rev.status !== 'Rejected' && (
-                      <button
-                        type="button"
-                        onClick={() => handleModerateReview(rev.id, 'Rejected')}
-                        className="px-3 py-1.5 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <X className="w-3.5 h-3.5" />
-                        Reject
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteReview(rev.id)}
-                      className="px-2.5 py-1.5 rounded-lg bg-rose-600/15 hover:bg-rose-600/25 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1 transition-colors cursor-pointer"
-                      title="Permanently Delete Review"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
       )}
 
       {/* Admin Estimator Pricing & Tier Configuration Panel */}
