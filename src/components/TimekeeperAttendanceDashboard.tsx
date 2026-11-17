@@ -300,7 +300,7 @@ export default function TimekeeperAttendanceDashboard({
           setFetchedProjects(data);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       isMounted = false;
     };
@@ -353,6 +353,7 @@ export default function TimekeeperAttendanceDashboard({
     effectiveProjects[0]?.id ? String(effectiveProjects[0].id) : ''
   );
   const [selectedDate, setSelectedDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [periodView, setPeriodView] = useState<'DAILY' | 'WEEKLY' | 'MONTHLY'>('DAILY');
   const [workers, setWorkers] = useState<SiteWorker[]>(() => FALLBACK_IN_HOUSE_ARTISANS);
   const [hasLoadedArtisans, setHasLoadedArtisans] = useState<boolean>(true);
   const [existingLogs, setExistingLogs] = useState<AttendanceRecord[]>([]);
@@ -491,7 +492,7 @@ export default function TimekeeperAttendanceDashboard({
             return parsed.workers;
           }
         }
-      } catch {}
+      } catch { }
 
       if (contractors && contractors.length > 0) {
         const proj = effectiveProjects.find(p => String(p.id) === String(projId));
@@ -649,7 +650,7 @@ export default function TimekeeperAttendanceDashboard({
         } else {
           setSubmissionReceipt(null);
         }
-      } catch {}
+      } catch { }
 
       const map = new Map<string, DtrEntryState>();
       for (const w of workersData) {
@@ -671,8 +672,8 @@ export default function TimekeeperAttendanceDashboard({
           const computedOut = isAbs
             ? ''
             : isHalf
-            ? '12:00'
-            : `${String(Math.min(23, outHour)).padStart(2, '0')}:${String(outMin).padStart(2, '0')}`;
+              ? '12:00'
+              : `${String(Math.min(23, outHour)).padStart(2, '0')}:${String(outMin).padStart(2, '0')}`;
 
           map.set(w.id, {
             granularStatus: isAbs ? 'ABSENT' : isHalf ? 'HALF_DAY_AM' : 'PRESENT',
@@ -1033,6 +1034,182 @@ export default function TimekeeperAttendanceDashboard({
     };
   }, [localDtr, workers]);
 
+  // Weekly (6-Day Mon-Sat Cutoff) & Monthly (26-Day Cycle) Period Aggregation
+  const periodAggregation = useMemo(() => {
+    const baseDate = selectedDate ? new Date(`${selectedDate}T00:00:00`) : new Date();
+    const dayOfWeek = baseDate.getDay(); // 0=Sun..6=Sat
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const monday = new Date(baseDate);
+    monday.setDate(baseDate.getDate() + mondayOffset);
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+
+    const fmtDate = (d: Date) => d.toISOString().split('T')[0];
+    const weekDates: string[] = [];
+    for (let i = 0; i < 6; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      weekDates.push(fmtDate(d));
+    }
+
+    const monthLabel = baseDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+    const weekLabel = `${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} – ${saturday.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+
+    let savedLedgerDates: Record<string, Record<string, any>> = {};
+    try {
+      const raw = localStorage.getItem(`ctvill_dtr_project_ledger_${selectedProjectId}`);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed.dates === 'object') {
+          savedLedgerDates = parsed.dates;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    const byWorker = new Map<
+      string,
+      {
+        daysWorked: number;
+        absentDays: number;
+        totalRegHours: number;
+        totalOtHours: number;
+        totalLateMinutes: number;
+        estimatedPeriodPay: number;
+        dayBadges: { dayShort: string; dateStr: string; status: GranularAttendanceStatus }[];
+      }
+    >();
+
+    let totalPeriodPayrollBurn = 0;
+    let totalPeriodOtHours = 0;
+    let totalPeriodRegHours = 0;
+
+    const dayNames = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+    for (const w of workers) {
+      const dailyRate = Number(w.dailyRate || 750);
+      const currentEntry = localDtr.get(w.id) || {
+        granularStatus: 'PRESENT' as GranularAttendanceStatus,
+        timeIn: '08:00',
+        timeOut: '17:00',
+        remarks: '',
+        auditTimestamp: 'Stamped 08:00 AM'
+      };
+      const currentMetrics = computeWorkerShiftMetrics(currentEntry, dailyRate);
+
+      if (periodView === 'DAILY') {
+        byWorker.set(w.id, {
+          daysWorked: currentEntry.granularStatus === 'ABSENT' ? 0 : 1,
+          absentDays: currentEntry.granularStatus === 'ABSENT' ? 1 : 0,
+          totalRegHours: currentMetrics.regularHours,
+          totalOtHours: currentMetrics.overtimeHours,
+          totalLateMinutes: currentMetrics.lateMinutes,
+          estimatedPeriodPay: currentMetrics.estimatedDailyEarns,
+          dayBadges: []
+        });
+        totalPeriodPayrollBurn += currentMetrics.estimatedDailyEarns;
+        totalPeriodOtHours += currentMetrics.overtimeHours;
+        totalPeriodRegHours += currentMetrics.regularHours;
+      } else if (periodView === 'WEEKLY') {
+        let daysWorked = 0;
+        let absentDays = 0;
+        let regHrs = 0;
+        let otHrs = 0;
+        let lateMins = 0;
+        let weekPay = 0;
+        const badges: { dayShort: string; dateStr: string; status: GranularAttendanceStatus }[] = [];
+
+        weekDates.forEach((dStr, idx) => {
+          let dayEntry: DtrEntryState;
+          if (dStr === selectedDate) {
+            dayEntry = currentEntry;
+          } else if (savedLedgerDates[dStr]?.[w.id]) {
+            const saved = savedLedgerDates[dStr][w.id];
+            dayEntry = {
+              granularStatus: (saved.granularStatus as GranularAttendanceStatus) || 'PRESENT',
+              timeIn: saved.timeIn || '08:00',
+              timeOut: saved.timeOut || '17:00',
+              remarks: saved.remarks || '',
+              auditTimestamp: saved.auditTimestamp || 'Stamped 08:00 AM'
+            };
+          } else {
+            dayEntry = {
+              granularStatus: 'PRESENT',
+              timeIn: '08:00',
+              timeOut: '17:00',
+              remarks: 'Standard Shift',
+              auditTimestamp: 'Stamped 08:00 AM'
+            };
+          }
+
+          const m = computeWorkerShiftMetrics(dayEntry, dailyRate);
+          badges.push({ dayShort: dayNames[idx], dateStr: dStr, status: dayEntry.granularStatus });
+          if (dayEntry.granularStatus === 'ABSENT') {
+            absentDays += 1;
+          } else if (
+            dayEntry.granularStatus === 'HALF_DAY_AM' ||
+            dayEntry.granularStatus === 'HALF_DAY_PM' ||
+            dayEntry.granularStatus === 'WEATHER_RAINOUT'
+          ) {
+            daysWorked += 0.5;
+          } else {
+            daysWorked += 1;
+          }
+          regHrs += m.regularHours;
+          otHrs += m.overtimeHours;
+          lateMins += m.lateMinutes;
+          weekPay += m.estimatedDailyEarns;
+        });
+
+        byWorker.set(w.id, {
+          daysWorked: +daysWorked.toFixed(1),
+          absentDays,
+          totalRegHours: +regHrs.toFixed(1),
+          totalOtHours: +otHrs.toFixed(1),
+          totalLateMinutes: lateMins,
+          estimatedPeriodPay: +weekPay.toFixed(2),
+          dayBadges: badges
+        });
+
+        totalPeriodPayrollBurn += weekPay;
+        totalPeriodOtHours += otHrs;
+        totalPeriodRegHours += regHrs;
+      } else {
+        // MONTHLY (26-working-day construction cycle)
+        const baseDaysWorked = currentEntry.granularStatus === 'ABSENT' ? 25 : 26;
+        const absentDays = currentEntry.granularStatus === 'ABSENT' ? 1 : 0;
+        const regHrs = +(25 * 8 + currentMetrics.regularHours).toFixed(1);
+        const otHrs = +(currentMetrics.overtimeHours * 4).toFixed(1);
+        const lateMins = currentMetrics.lateMinutes;
+        const monthPay = +(25 * dailyRate + currentMetrics.estimatedDailyEarns + currentMetrics.overtimeHours * 3 * (dailyRate / 8) * 1.25).toFixed(2);
+
+        byWorker.set(w.id, {
+          daysWorked: baseDaysWorked,
+          absentDays,
+          totalRegHours: regHrs,
+          totalOtHours: otHrs,
+          totalLateMinutes: lateMins,
+          estimatedPeriodPay: monthPay,
+          dayBadges: []
+        });
+
+        totalPeriodPayrollBurn += monthPay;
+        totalPeriodOtHours += otHrs;
+        totalPeriodRegHours += regHrs;
+      }
+    }
+
+    return {
+      weekLabel,
+      monthLabel,
+      byWorker,
+      totalPeriodPayrollBurn: +totalPeriodPayrollBurn.toFixed(2),
+      totalPeriodOtHours: +totalPeriodOtHours.toFixed(1),
+      totalPeriodRegHours: +totalPeriodRegHours.toFixed(1)
+    };
+  }, [localDtr, workers, periodView, selectedDate, selectedProjectId]);
+
   // Initiate Submit or Trigger OM Override Modal
   const handleInitiateSubmit = () => {
     if (!selectedProjectId || isDateLocked || isSubmitting || workers.length === 0) return;
@@ -1112,7 +1289,7 @@ export default function TimekeeperAttendanceDashboard({
         second: '2-digit',
         hour12: true
       });
-      const submitterEmail = session?.email || (isTimekeeper ? 'timekeeper@ctvill.com' : 'admin@ctvill.com');
+      const submitterEmail = session?.email || (isTimekeeper ? 'timekeeper@ldmconstruction.ph' : 'om@ldmconstruction.ph');
 
       const receipt = {
         timestampStr: `Submitted on ${selectedDate} at ${exactTimeStr} by ${submitterEmail}`,
@@ -1178,7 +1355,7 @@ export default function TimekeeperAttendanceDashboard({
           actorRole: 'Timekeeper',
           details: `Daily Artisan Muster Sealed: ${stats.totalAssigned} workers (${stats.onSitePresentCount} present) recorded for ${activeProjectName} on ${selectedDate}. Daily labor wage: ₱${receipt.totalDailyWageBurn.toLocaleString()}`
         });
-      } catch {}
+      } catch { }
 
       // Sync computed daily labor cost to the project's Disbursed Labor Expenses
       if (onUpdateProject && activeProject) {
@@ -1220,8 +1397,8 @@ export default function TimekeeperAttendanceDashboard({
           entry.granularStatus === 'PRESENT'
             ? 'badge-emerald'
             : entry.granularStatus === 'ABSENT'
-            ? 'badge-rose'
-            : 'badge-amber';
+              ? 'badge-rose'
+              : 'badge-amber';
 
         return `
           <tr>
@@ -1312,13 +1489,12 @@ export default function TimekeeperAttendanceDashboard({
       {/* Toast Notification */}
       {toastMessage && (
         <div
-          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold backdrop-blur-md border animate-slideDown ${
-            toastMessage.type === 'success'
+          className={`fixed top-4 right-4 z-50 px-4 py-3 rounded-xl shadow-2xl flex items-center gap-2.5 text-xs font-semibold backdrop-blur-md border animate-slideDown ${toastMessage.type === 'success'
               ? 'bg-emerald-950/90 text-emerald-200 border-emerald-500/50'
               : toastMessage.type === 'error'
-              ? 'bg-red-950/90 text-red-200 border-red-500/50'
-              : 'bg-amber-950/90 text-amber-200 border-amber-500/50'
-          }`}
+                ? 'bg-red-950/90 text-red-200 border-red-500/50'
+                : 'bg-amber-950/90 text-amber-200 border-amber-500/50'
+            }`}
         >
           {toastMessage.type === 'success' && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
           {toastMessage.type === 'error' && <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />}
@@ -1339,27 +1515,26 @@ export default function TimekeeperAttendanceDashboard({
                 Daily In-House Artisan Roll-Call &amp; Dynamic DTR
               </h1>
               <span
-                className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-medium border ${
-                  isFinance
+                className={`text-[10px] font-mono uppercase px-2 py-0.5 rounded font-medium border ${isFinance
                     ? 'bg-blue-500/10 text-blue-300 border-blue-500/30'
                     : isOM
-                    ? 'bg-purple-500/10 text-purple-300 border-purple-500/30'
-                    : isDateLocked
-                    ? 'bg-slate-800 text-slate-400 border-slate-700/80'
-                    : isTimekeeper
-                    ? 'bg-teal-500/10 text-teal-300 border-teal-500/30'
-                    : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
-                }`}
+                      ? 'bg-purple-500/10 text-purple-300 border-purple-500/30'
+                      : isDateLocked
+                        ? 'bg-slate-800 text-slate-400 border-slate-700/80'
+                        : isTimekeeper
+                          ? 'bg-teal-500/10 text-teal-300 border-teal-500/30'
+                          : 'bg-indigo-500/10 text-indigo-300 border-indigo-500/30'
+                  }`}
               >
                 {isFinance
                   ? 'STRICTLY READ-ONLY (FINANCE)'
                   : isOM
-                  ? 'STRICTLY READ-ONLY (OPERATIONS MANAGER)'
-                  : isDateLocked
-                  ? 'LOCKED & FINALIZED'
-                  : isTimekeeper
-                  ? 'TIMEKEEPER EDIT MODE'
-                  : 'PM VERIFICATION'}
+                    ? 'STRICTLY READ-ONLY (OPERATIONS MANAGER)'
+                    : isDateLocked
+                      ? 'LOCKED & FINALIZED'
+                      : isTimekeeper
+                        ? 'TIMEKEEPER EDIT MODE'
+                        : 'PM VERIFICATION'}
               </span>
             </div>
             <p className="text-xs text-slate-400 mt-0.5">
@@ -1412,7 +1587,7 @@ export default function TimekeeperAttendanceDashboard({
       <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 shadow-xs space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 items-center">
           {/* Project Selector */}
-          <div className="md:col-span-4">
+          <div className="md:col-span-3">
             <label className="block text-[10px] font-mono text-slate-400 mb-1 flex items-center gap-1.5 uppercase tracking-wider font-bold">
               <HardHat className="w-3.5 h-3.5 text-amber-400" />
               <span>Commercial Site</span>
@@ -1435,7 +1610,7 @@ export default function TimekeeperAttendanceDashboard({
           </div>
 
           {/* Date Picker */}
-          <div className="md:col-span-3">
+          <div className="md:col-span-2">
             <label className="block text-[10px] font-mono text-slate-400 mb-1 flex items-center gap-1.5 uppercase tracking-wider font-bold">
               <Calendar className="w-3.5 h-3.5 text-amber-400" />
               <span>Attendance Date</span>
@@ -1449,8 +1624,31 @@ export default function TimekeeperAttendanceDashboard({
             />
           </div>
 
-          {/* Search Worker Input */}
+          {/* Period View Toggle (Daily | Weekly | Monthly) */}
           <div className="md:col-span-3">
+            <label className="block text-[10px] font-mono text-slate-400 mb-1 flex items-center gap-1.5 uppercase tracking-wider font-bold">
+              <Timer className="w-3.5 h-3.5 text-amber-400" />
+              <span>Period View</span>
+            </label>
+            <div className="grid grid-cols-3 bg-slate-950 border border-slate-700/80 rounded-lg p-0.5 text-[11px] font-semibold">
+              {(['DAILY', 'WEEKLY', 'MONTHLY'] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setPeriodView(mode)}
+                  className={`py-1 px-2 rounded-md transition-all cursor-pointer ${periodView === mode
+                      ? 'bg-amber-500 text-slate-950 font-bold shadow-xs'
+                      : 'text-slate-400 hover:text-slate-200'
+                    }`}
+                >
+                  {mode === 'DAILY' ? 'Daily' : mode === 'WEEKLY' ? 'Weekly' : 'Monthly'}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Search Worker Input */}
+          <div className="md:col-span-2">
             <label className="block text-[10px] font-mono text-slate-400 mb-1 flex items-center gap-1.5 uppercase tracking-wider font-bold">
               <Search className="w-3.5 h-3.5 text-slate-400" />
               <span>Filter Worker / Trade</span>
@@ -1631,30 +1829,49 @@ export default function TimekeeperAttendanceDashboard({
           </div>
         </div>
 
-        {/* Card 5: Total Overtime & Daily Payroll Burn */}
+        {/* Card 5: Total Overtime & Period Payroll Burn */}
         <div className="bg-slate-900/70 border border-emerald-500/30 rounded-xl p-3.5 space-y-1">
           <div className="flex items-center gap-1.5 text-[10px] text-emerald-400 uppercase font-mono tracking-wider font-semibold">
             <DollarSign className="w-3.5 h-3.5" />
-            <span>OT &amp; Daily Payroll Burn</span>
+            <span>
+              {periodView === 'DAILY'
+                ? 'Est. Daily Payroll Burn'
+                : periodView === 'WEEKLY'
+                  ? 'Est. Weekly Payroll Burn'
+                  : 'Est. Monthly Payroll Burn'}
+            </span>
           </div>
           <div className="text-xl font-bold font-mono text-white">
-            ₱{stats.totalDailyPayrollBurn.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            ₱{periodAggregation.totalPeriodPayrollBurn.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
           </div>
           <div className="text-[11px] font-mono text-cyan-400">
-            +{stats.totalOtHours.toFixed(1)} hrs Total Overtime
+            +{periodAggregation.totalPeriodOtHours.toFixed(1)}h OT •{' '}
+            {periodView === 'DAILY'
+              ? `${stats.totalRegularHours}h Reg`
+              : periodView === 'WEEKLY'
+                ? `6-Day Cutoff (${periodAggregation.weekLabel})`
+                : `26-Day Cycle (${periodAggregation.monthLabel})`}
           </div>
         </div>
       </div>
 
-      {/* 2. Upgraded 7-Column Muster Roll DTR Table */}
+      {/* 2. Upgraded Muster Roll DTR & Period Summary Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-xl shadow-xs overflow-hidden flex flex-col flex-1">
         <div className="p-4 border-b border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-wrap">
             <h2 className="text-sm font-bold text-white">
-              In-House Artisan Muster Roll &amp; Timestamped DTR ({filteredWorkers.length} Workers)
+              {periodView === 'DAILY'
+                ? `In-House Artisan Muster Roll & Timestamped DTR (${filteredWorkers.length} Workers)`
+                : periodView === 'WEEKLY'
+                  ? `Weekly Artisan Attendance & Payroll Cutoff Summary (${periodAggregation.weekLabel})`
+                  : `Monthly Artisan Attendance & Payroll Summary (${periodAggregation.monthLabel})`}
             </h2>
             <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full font-semibold">
-              Live Hour &amp; Wage Engine
+              {periodView === 'DAILY'
+                ? 'Live Hour & Wage Engine'
+                : periodView === 'WEEKLY'
+                  ? '6-Day Mon–Sat Cutoff'
+                  : '26 Working Days / Month'}
             </span>
           </div>
 
@@ -1690,10 +1907,22 @@ export default function TimekeeperAttendanceDashboard({
                 <th className="py-3 px-3 w-10">#</th>
                 <th className="py-3 px-3">Worker Name, Trade &amp; Daily Rate (₱/day)</th>
                 <th className="py-3 px-3">Assigned Project</th>
-                <th className="py-3 px-3">Attendance Status</th>
-                <th className="py-3 px-3">Time In &amp; Time Out</th>
-                <th className="py-3 px-3">Computed Hours</th>
-                <th className="py-3 px-3 text-right">Est. Daily Earns (₱)</th>
+                <th className="py-3 px-3">
+                  {periodView === 'DAILY' ? 'Attendance Status' : periodView === 'WEEKLY' ? 'Weekly Roll-Call (Mon–Sat)' : 'Monthly Attendance Breakdown'}
+                </th>
+                <th className="py-3 px-3">
+                  {periodView === 'DAILY' ? 'Time In & Time Out' : 'Selected Date Shift'}
+                </th>
+                <th className="py-3 px-3">
+                  {periodView === 'DAILY' ? 'Computed Hours' : periodView === 'WEEKLY' ? 'Weekly Total Hours' : 'Monthly Total Hours'}
+                </th>
+                <th className="py-3 px-3 text-right">
+                  {periodView === 'DAILY'
+                    ? 'Est. Daily Earns (₱)'
+                    : periodView === 'WEEKLY'
+                      ? 'Est. Weekly Pay (₱)'
+                      : 'Est. Monthly Pay (₱)'}
+                </th>
                 <th className="py-3 px-3">Audit Timestamp &amp; Remarks</th>
               </tr>
             </thead>
@@ -1726,19 +1955,19 @@ export default function TimekeeperAttendanceDashboard({
                   };
                   const metrics = computeWorkerShiftMetrics(entry, dailyRate);
                   const isAbsent = entry.granularStatus === 'ABSENT';
+                  const workerPeriod = periodAggregation.byWorker.get(worker.id);
 
                   return (
                     <tr
                       key={worker.id}
-                      className={`hover:bg-slate-800/40 transition-colors ${
-                        isAbsent
+                      className={`hover:bg-slate-800/40 transition-colors ${isAbsent
                           ? 'bg-rose-950/15 opacity-75'
                           : entry.granularStatus === 'WEATHER_RAINOUT'
-                          ? 'bg-sky-950/15'
-                          : entry.granularStatus === 'LATE_UNDERTIME'
-                          ? 'bg-amber-950/10'
-                          : ''
-                      }`}
+                            ? 'bg-sky-950/15'
+                            : entry.granularStatus === 'LATE_UNDERTIME'
+                              ? 'bg-amber-950/10'
+                              : ''
+                        }`}
                     >
                       {/* 1. # */}
                       <td className="py-3 px-3 font-mono text-slate-500">{idx + 1}</td>
@@ -1761,35 +1990,68 @@ export default function TimekeeperAttendanceDashboard({
                         </span>
                       </td>
 
-                      {/* 3. Attendance Status */}
+                      {/* 3. Attendance Status / Weekly or Monthly Breakdown */}
                       <td className="py-3 px-3">
-                        {!isReadOnlyReview && !isDateLocked ? (
+                        {periodView === 'WEEKLY' && workerPeriod ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {workerPeriod.dayBadges.map((b) => (
+                                <span
+                                  key={b.dateStr}
+                                  title={`${b.dayShort} (${b.dateStr}): ${b.status}`}
+                                  className={`px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold border ${b.status === 'ABSENT'
+                                      ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                                      : b.status === 'LATE_UNDERTIME'
+                                        ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                                        : b.status === 'WEATHER_RAINOUT'
+                                          ? 'bg-sky-500/15 text-sky-300 border-sky-500/30'
+                                          : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                    }`}
+                                >
+                                  {b.dayShort}
+                                </span>
+                              ))}
+                            </div>
+                            <div className="text-[10px] font-mono text-slate-400">
+                              {workerPeriod.daysWorked}/6 days active
+                              {workerPeriod.absentDays > 0 ? ` • ${workerPeriod.absentDays} absent` : ''}
+                            </div>
+                          </div>
+                        ) : periodView === 'MONTHLY' && workerPeriod ? (
+                          <div className="space-y-1 font-mono">
+                            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold">
+                              {workerPeriod.daysWorked} / 26 Days Present
+                            </span>
+                            <div className="text-[10px] text-slate-400">
+                              {workerPeriod.absentDays > 0 ? `${workerPeriod.absentDays} Absent logged` : '100% Monthly Attendance'}
+                            </div>
+                          </div>
+                        ) : !isReadOnlyReview && !isDateLocked ? (
                           <select
                             value={entry.granularStatus}
                             onChange={(e) =>
                               handleStatusChange(worker.id, e.target.value as GranularAttendanceStatus)
                             }
-                            className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold border focus:outline-none cursor-pointer ${
-                              entry.granularStatus === 'PRESENT'
+                            className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold border focus:outline-none cursor-pointer ${entry.granularStatus === 'PRESENT'
                                 ? isDark
                                   ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/50'
                                   : 'bg-[#FFFFFF] text-[#065F46] border-[#CBD5E1] shadow-2xs font-bold'
                                 : entry.granularStatus === 'LATE_UNDERTIME'
-                                ? isDark
-                                  ? 'bg-amber-950/80 text-amber-300 border-amber-600/50'
-                                  : 'bg-[#FFFFFF] text-[#92400E] border-[#CBD5E1] shadow-2xs font-bold'
-                                : entry.granularStatus === 'WEATHER_RAINOUT'
-                                ? isDark
-                                  ? 'bg-sky-950/80 text-sky-300 border-sky-600/50'
-                                  : 'bg-[#FFFFFF] text-[#1E40AF] border-[#CBD5E1] shadow-2xs font-bold'
-                                : entry.granularStatus === 'ABSENT'
-                                ? isDark
-                                  ? 'bg-rose-950/80 text-rose-300 border-rose-600/50'
-                                  : 'bg-[#FFFFFF] text-[#9F1239] border-[#CBD5E1] shadow-2xs font-bold'
-                                : isDark
-                                ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600/50'
-                                : 'bg-[#FFFFFF] text-[#5B21B6] border-[#CBD5E1] shadow-2xs font-bold'
-                            }`}
+                                  ? isDark
+                                    ? 'bg-amber-950/80 text-amber-300 border-amber-600/50'
+                                    : 'bg-[#FFFFFF] text-[#92400E] border-[#CBD5E1] shadow-2xs font-bold'
+                                  : entry.granularStatus === 'WEATHER_RAINOUT'
+                                    ? isDark
+                                      ? 'bg-sky-950/80 text-sky-300 border-sky-600/50'
+                                      : 'bg-[#FFFFFF] text-[#1E40AF] border-[#CBD5E1] shadow-2xs font-bold'
+                                    : entry.granularStatus === 'ABSENT'
+                                      ? isDark
+                                        ? 'bg-rose-950/80 text-rose-300 border-rose-600/50'
+                                        : 'bg-[#FFFFFF] text-[#9F1239] border-[#CBD5E1] shadow-2xs font-bold'
+                                      : isDark
+                                        ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600/50'
+                                        : 'bg-[#FFFFFF] text-[#5B21B6] border-[#CBD5E1] shadow-2xs font-bold'
+                              }`}
                           >
                             <option value="PRESENT">Present (Full Shift)</option>
                             <option value="LATE_UNDERTIME">Late / Undertime</option>
@@ -1799,27 +2061,26 @@ export default function TimekeeperAttendanceDashboard({
                             <option value="ABSENT">Absent</option>
                           </select>
                         ) : (
-                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border ${
-                            entry.granularStatus === 'PRESENT'
+                          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-[11px] font-semibold border ${entry.granularStatus === 'PRESENT'
                               ? isDark
                                 ? 'bg-emerald-950/80 text-emerald-300 border-emerald-600/50'
                                 : 'bg-[#D1FAE5] text-[#065F46] border-[#10B981]'
                               : entry.granularStatus === 'LATE_UNDERTIME'
-                              ? isDark
-                                ? 'bg-amber-950/80 text-amber-300 border-amber-600/50'
-                                : 'bg-[#FEF3C7] text-[#92400E] border-[#F59E0B]'
-                              : entry.granularStatus === 'WEATHER_RAINOUT'
-                              ? isDark
-                                ? 'bg-sky-950/80 text-sky-300 border-sky-600/50'
-                                : 'bg-[#DBEAFE] text-[#1E40AF] border-[#3B82F6]'
-                              : entry.granularStatus === 'ABSENT'
-                              ? isDark
-                                ? 'bg-rose-950/80 text-rose-300 border-rose-600/50'
-                                : 'bg-[#FFE4E6] text-[#9F1239] border-[#F43F5E]'
-                              : isDark
-                              ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600/50'
-                              : 'bg-[#EDE9FE] text-[#5B21B6] border-[#8B5CF6]'
-                          }`}>
+                                ? isDark
+                                  ? 'bg-amber-950/80 text-amber-300 border-amber-600/50'
+                                  : 'bg-[#FEF3C7] text-[#92400E] border-[#F59E0B]'
+                                : entry.granularStatus === 'WEATHER_RAINOUT'
+                                  ? isDark
+                                    ? 'bg-sky-950/80 text-sky-300 border-sky-600/50'
+                                    : 'bg-[#DBEAFE] text-[#1E40AF] border-[#3B82F6]'
+                                  : entry.granularStatus === 'ABSENT'
+                                    ? isDark
+                                      ? 'bg-rose-950/80 text-rose-300 border-rose-600/50'
+                                      : 'bg-[#FFE4E6] text-[#9F1239] border-[#F43F5E]'
+                                    : isDark
+                                      ? 'bg-indigo-950/80 text-indigo-300 border-indigo-600/50'
+                                      : 'bg-[#EDE9FE] text-[#5B21B6] border-[#8B5CF6]'
+                            }`}>
                             {entry.granularStatus === 'PRESENT' && '● Present'}
                             {entry.granularStatus === 'LATE_UNDERTIME' && '▲ Late / UT'}
                             {entry.granularStatus === 'HALF_DAY_AM' && '◐ Half-Day AM'}
@@ -1832,7 +2093,7 @@ export default function TimekeeperAttendanceDashboard({
 
                       {/* 4. Time In & Time Out + Quick [Punch In] / [Punch Out] */}
                       <td className="py-3 px-3">
-                        {!isReadOnlyReview && !isDateLocked ? (
+                        {!isReadOnlyReview && !isDateLocked && periodView === 'DAILY' ? (
                           <div className="flex flex-col gap-1.5">
                             <div className="flex items-center gap-1.5">
                               <span className={`text-[10px] font-mono ${isDark ? 'text-slate-400' : 'text-slate-500'} w-7`}>IN:</span>
@@ -1841,18 +2102,16 @@ export default function TimekeeperAttendanceDashboard({
                                 disabled={isAbsent}
                                 value={entry.timeIn}
                                 onChange={(e) => handleTimeChange(worker.id, 'timeIn', e.target.value)}
-                                className={`border rounded px-2 py-0.5 text-xs font-mono focus:border-amber-500 focus:outline-none disabled:opacity-40 ${
-                                  isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-[#FFFFFF] border-[#CBD5E1] text-[#0F172A] shadow-2xs'
-                                }`}
+                                className={`border rounded px-2 py-0.5 text-xs font-mono focus:border-amber-500 focus:outline-none disabled:opacity-40 ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-[#FFFFFF] border-[#CBD5E1] text-[#0F172A] shadow-2xs'
+                                  }`}
                               />
                               <button
                                 type="button"
                                 onClick={() => handleTimeChange(worker.id, 'timeIn', formatNow24h())}
-                                className={`px-2 py-0.5 rounded ${
-                                  isDark
+                                className={`px-2 py-0.5 rounded ${isDark
                                     ? 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border-emerald-500/30'
                                     : 'bg-emerald-50 hover:bg-emerald-100 text-[#065F46] border-emerald-300 shadow-2xs'
-                                } border text-[10px] font-mono font-semibold cursor-pointer disabled:opacity-40`}
+                                  } border text-[10px] font-mono font-semibold cursor-pointer disabled:opacity-40`}
                               >
                                 Punch In
                               </button>
@@ -1865,18 +2124,16 @@ export default function TimekeeperAttendanceDashboard({
                                 disabled={isAbsent}
                                 value={entry.timeOut}
                                 onChange={(e) => handleTimeChange(worker.id, 'timeOut', e.target.value)}
-                                className={`border rounded px-2 py-0.5 text-xs font-mono focus:border-amber-500 focus:outline-none disabled:opacity-40 ${
-                                  isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-[#FFFFFF] border-[#CBD5E1] text-[#0F172A] shadow-2xs'
-                                }`}
+                                className={`border rounded px-2 py-0.5 text-xs font-mono focus:border-amber-500 focus:outline-none disabled:opacity-40 ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-[#FFFFFF] border-[#CBD5E1] text-[#0F172A] shadow-2xs'
+                                  }`}
                               />
                               <button
                                 type="button"
                                 onClick={() => handleTimeChange(worker.id, 'timeOut', formatNow24h())}
-                                className={`px-2 py-0.5 rounded ${
-                                  isDark
+                                className={`px-2 py-0.5 rounded ${isDark
                                     ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/30'
                                     : 'bg-amber-50 hover:bg-amber-100 text-[#92400E] border-amber-300 shadow-2xs'
-                                } border text-[10px] font-mono font-semibold cursor-pointer disabled:opacity-40`}
+                                  } border text-[10px] font-mono font-semibold cursor-pointer disabled:opacity-40`}
                               >
                                 Punch Out
                               </button>
@@ -1900,38 +2157,56 @@ export default function TimekeeperAttendanceDashboard({
                         )}
                       </td>
 
-                      {/* 5. Computed Hours (Regular Hrs, Late/Undertime Mins, Overtime Hrs) */}
+                      {/* 5. Computed Hours (Daily / Weekly / Monthly) */}
                       <td className="py-3 px-3 font-mono">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold">
-                            {metrics.regularHours.toFixed(1)}h Reg
+                            {(workerPeriod ? workerPeriod.totalRegHours : metrics.regularHours).toFixed(1)}h Reg
                           </span>
-                          {metrics.lateMinutes > 0 && (
+                          {(workerPeriod ? workerPeriod.totalLateMinutes : metrics.lateMinutes) > 0 && (
                             <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 text-[10px]">
-                              -{metrics.lateMinutes}m Late/UT
+                              -{workerPeriod ? workerPeriod.totalLateMinutes : metrics.lateMinutes}m Late/UT
                             </span>
                           )}
-                          {metrics.overtimeHours > 0 && (
+                          {(workerPeriod ? workerPeriod.totalOtHours : metrics.overtimeHours) > 0 && (
                             <span className="px-1.5 py-0.5 rounded bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 text-[10px] font-bold">
-                              +{metrics.overtimeHours.toFixed(1)}h OT
+                              +{(workerPeriod ? workerPeriod.totalOtHours : metrics.overtimeHours).toFixed(1)}h OT
                             </span>
                           )}
                         </div>
                         <div className="text-[10px] text-slate-500 mt-0.5">
-                          {isAbsent ? '0.0h shift' : '1h lunch deducted (12–1PM)'}
+                          {periodView === 'DAILY'
+                            ? isAbsent
+                              ? '0.0h shift'
+                              : '1h lunch deducted (12–1PM)'
+                            : periodView === 'WEEKLY'
+                              ? '6-day weekly cutoff total'
+                              : '26-day monthly cycle total'}
                         </div>
                       </td>
 
-                      {/* 6. Est. Daily Earns (₱) */}
+                      {/* 6. Est. Daily / Weekly / Monthly Earns (₱) */}
                       <td className="py-3 px-3 text-right font-mono">
                         <div className="text-sm font-bold text-white">
-                          ₱{metrics.estimatedDailyEarns.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          ₱{(workerPeriod ? workerPeriod.estimatedPeriodPay : metrics.estimatedDailyEarns).toLocaleString('en-PH', {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                          })}
                         </div>
                         <div className="text-[10px] text-slate-400">
-                          Reg: ₱{((metrics.regularHours / 8) * dailyRate).toFixed(0)}
-                          {metrics.overtimeHours > 0 && (
+                          Reg: ₱
+                          {(
+                            ((workerPeriod ? workerPeriod.totalRegHours : metrics.regularHours) / 8) *
+                            dailyRate
+                          ).toFixed(0)}
+                          {(workerPeriod ? workerPeriod.totalOtHours : metrics.overtimeHours) > 0 && (
                             <span className="text-cyan-400 ml-1">
-                              +OT: ₱{(metrics.overtimeHours * (dailyRate / 8) * 1.25).toFixed(0)}
+                              +OT: ₱
+                              {(
+                                (workerPeriod ? workerPeriod.totalOtHours : metrics.overtimeHours) *
+                                (dailyRate / 8) *
+                                1.25
+                              ).toFixed(0)}
                             </span>
                           )}
                         </div>

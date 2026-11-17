@@ -685,8 +685,8 @@ export default function AdminPortal({
   const [profileTitle, setProfileTitle] = useState<string>(
     sessionObj?.title || savedSettings?.profileTitle || ''
   );
-  const [profileEmail, setProfileEmail] = useState<string>(
-    sessionObj?.email || savedSettings?.profileEmail || ''
+  const [profileEmail, setProfileEmail] = useState<string>(() =>
+    String(sessionObj?.email || savedSettings?.profileEmail || '').replace(/@[^@]+$/, '@ldmconstruction.ph')
   );
   const [profilePhone, setProfilePhone] = useState<string>(
     sessionObj?.phone || savedSettings?.profilePhone || ''
@@ -728,7 +728,7 @@ export default function AdminPortal({
   // Sync authenticated session profile into settings state
   useEffect(() => {
     if (session && typeof session === 'object') {
-      if (session.email) setProfileEmail(session.email);
+      if (session.email) setProfileEmail(String(session.email).replace(/@[^@]+$/, '@ldmconstruction.ph'));
       if (session.name) setProfileName(session.name);
       if (session.avatarUrl !== undefined && session.avatarUrl !== null) setAvatarUrl(session.avatarUrl);
       if (session.title) setProfileTitle(session.title);
@@ -765,7 +765,7 @@ export default function AdminPortal({
           if (data?.profile && !isCancelled) {
             const p = data.profile;
             if (p.name) setProfileName(p.name);
-            if (p.email) setProfileEmail(p.email);
+            if (p.email) setProfileEmail(String(p.email).replace(/@[^@]+$/, '@ldmconstruction.ph'));
             if (p.contact) setProfilePhone(p.contact);
             if (p.title) setProfileTitle(p.title);
             if (p.division) setProfileDivision(p.division);
@@ -1288,73 +1288,6 @@ export default function AdminPortal({
   const [defectFilter, setDefectFilter] = useState<string>('ALL');
   const [searchClientQuery, setSearchClientQuery] = useState<string>('');
   const [clientKycSearchQuery, setClientKycSearchQuery] = useState<string>('');
-
-  // Global ERP Quick Search State & Command Palette
-  const [globalSearch, setGlobalSearch] = useState<string>('');
-  const [isSearchFocused, setIsSearchFocused] = useState<boolean>(false);
-  const searchContainerRef = useRef<HTMLDivElement>(null);
-
-  // Global Keyboard Shortcut: Ctrl+K or Cmd+K
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-        e.preventDefault();
-        const inputEl = document.getElementById('global-erp-search');
-        inputEl?.focus();
-        setIsSearchFocused(true);
-      }
-      if (e.key === 'Escape') {
-        setIsSearchFocused(false);
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
-
-  // Close search popover on outside click
-  useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
-      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target as Node)) {
-        setIsSearchFocused(false);
-      }
-    };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, []);
-
-  // Filtered Quick Search Results for Header Command Palette (Strict Role RBAC)
-  const filteredQuickModules = useMemo(() => {
-    if (!globalSearch.trim()) return [];
-    const q = globalSearch.toLowerCase();
-    return Object.entries(TAB_METADATA).filter(([id, meta]) =>
-      canAccessModule(currentRole, id) && (
-        meta.title.toLowerCase().includes(q) ||
-        meta.subtitle.toLowerCase().includes(q) ||
-        meta.department.toLowerCase().includes(q) ||
-        id.toLowerCase().includes(q)
-      )
-    ).slice(0, 5);
-  }, [globalSearch, currentRole]);
-
-  const filteredQuickProjects = useMemo(() => {
-    if (!globalSearch.trim()) return [];
-    const q = globalSearch.toLowerCase();
-    return projects.filter(p =>
-      (p.name && p.name.toLowerCase().includes(q)) ||
-      (p.location && p.location.toLowerCase().includes(q)) ||
-      (p.clientName && p.clientName.toLowerCase().includes(q))
-    ).slice(0, 4);
-  }, [globalSearch, projects]);
-
-  const filteredQuickContractors = useMemo(() => {
-    if (!globalSearch.trim()) return [];
-    const q = globalSearch.toLowerCase();
-    return contractors.filter(c =>
-      (c.name && c.name.toLowerCase().includes(q)) ||
-      (c.specialty && c.specialty.toLowerCase().includes(q)) ||
-      (c.company && c.company.toLowerCase().includes(q))
-    ).slice(0, 3);
-  }, [globalSearch, contractors]);
 
   // Selected Lot modal state for lifecycle advancement
   const [transitioningSlot, setTransitioningSlot] = useState<Slot | null>(null);
@@ -2099,148 +2032,10 @@ export default function AdminPortal({
             </div>
           </div>
 
-          {/* Clean Department & Page Breadcrumb */}
-          <div className={`hidden lg:flex items-center gap-2 pl-3 border-l text-xs ${isDark ? 'border-slate-800 text-slate-400' : 'border-slate-200 text-slate-600'}`}>
-            <span className={isDark ? "text-slate-500 font-medium" : "text-slate-400 font-medium"}>{TAB_METADATA[activeTab]?.department || 'Portal'}</span>
-            <ChevronRight className={`w-3.5 h-3.5 ${isDark ? 'text-slate-600' : 'text-slate-400'}`} />
-            <span className={`${isDark ? 'text-slate-200' : 'text-slate-900'} font-semibold`}>{TAB_METADATA[activeTab]?.title || activeTab}</span>
+          {/* Active Module Title */}
+          <div className={`hidden lg:flex items-center pl-3 border-l text-xs ${isDark ? 'border-slate-800' : 'border-slate-200'}`}>
+            <span className={`${isDark ? 'text-slate-100' : 'text-slate-900'} font-bold`}>{TAB_METADATA[activeTab]?.title || activeTab}</span>
           </div>
-        </div>
-
-        {/* Center: Global ERP Quick Search (`⌘K`) */}
-        <div className="flex-1 max-w-sm sm:max-w-md relative mx-2" ref={searchContainerRef}>
-          <div className="relative flex items-center">
-            <Search className={`w-3.5 h-3.5 absolute left-3 pointer-events-none ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
-            <input
-              id="global-erp-search"
-              type="text"
-              value={globalSearch}
-              onChange={(e) => setGlobalSearch(e.target.value)}
-              onFocus={() => setIsSearchFocused(true)}
-              placeholder="Search modules, sites, trade partners..."
-              className={`w-full rounded-lg pl-8 pr-12 py-1.5 text-xs focus:outline-none transition-all border ${
-                isDark
-                  ? 'bg-slate-900/90 hover:bg-slate-900 focus:bg-slate-900 border-slate-800 focus:border-amber-500/50 text-slate-200 placeholder-slate-500'
-                  : 'bg-slate-100/80 border border-slate-300/80 focus:bg-white focus:ring-2 focus:ring-amber-500/20 text-slate-900 placeholder:text-slate-400'
-              }`}
-            />
-            <div className="absolute right-2 flex items-center pointer-events-none">
-              <kbd className={`hidden sm:inline-block px-1.5 py-0.5 text-[10px] font-mono rounded border ${
-                isDark ? 'text-slate-500 bg-slate-800 border-slate-700' : 'text-slate-400 bg-slate-200/60 border-slate-200'
-              }`}>⌘K</kbd>
-            </div>
-          </div>
-
-          {/* Quick Search Dropdown Palette */}
-          {isSearchFocused && (
-            <div className={`absolute top-full left-0 right-0 mt-1.5 ${
-              isDark ? 'bg-slate-950 border-slate-800 text-slate-300' : 'bg-white border-slate-200 text-slate-700 shadow-xl'
-            } border rounded-lg shadow-2xl overflow-hidden z-50 text-xs max-h-96 overflow-y-auto`}>
-              {!globalSearch.trim() ? (
-                <div className="p-2 space-y-1">
-                  <div className="px-2 py-1 text-[10px] font-mono uppercase text-slate-500 tracking-wider font-semibold">Quick Jump</div>
-                  {quickJumpModules.slice(0, 5).map((mod) => (
-                    <button
-                      key={mod.id}
-                      type="button"
-                      onClick={() => {
-                        setActiveTab(mod.id);
-                        setIsSearchFocused(false);
-                      }}
-                      className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded ${
-                        isDark ? 'hover:bg-slate-900 text-slate-300 hover:text-white' : 'hover:bg-slate-100 text-slate-700 hover:text-slate-900'
-                      } transition-colors cursor-pointer text-left`}
-                    >
-                      <span className="font-medium">{mod.label}</span>
-                      <span className="text-[10px] text-slate-500">{mod.desc}</span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-2 space-y-2">
-                  {filteredQuickModules.length > 0 && (
-                    <div>
-                      <div className="px-2 py-0.5 text-[10px] font-mono uppercase text-slate-500 tracking-wider font-semibold">Modules</div>
-                      {filteredQuickModules.map(([id, meta]) => (
-                        <button
-                          key={id}
-                          type="button"
-                          onClick={() => {
-                            setActiveTab(id);
-                            setIsSearchFocused(false);
-                            setGlobalSearch('');
-                          }}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded ${
-                            isDark ? 'hover:bg-slate-900 text-slate-300 hover:text-white' : 'hover:bg-slate-100 text-slate-700 hover:text-slate-900'
-                          } transition-colors cursor-pointer text-left`}
-                        >
-                          <div>
-                            <span className="font-medium text-amber-500 dark:text-amber-400">{meta.title}</span>
-                            <span className="text-slate-500 text-[11px] block">{meta.subtitle}</span>
-                          </div>
-                          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
-                            isDark ? 'text-slate-400 bg-slate-900 border-slate-800' : 'text-slate-600 bg-slate-100 border-slate-200'
-                          }`}>{meta.department}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {filteredQuickProjects.length > 0 && (
-                    <div>
-                      <div className="px-2 py-0.5 text-[10px] font-mono uppercase text-slate-500 tracking-wider font-semibold">Commercial Sites</div>
-                      {filteredQuickProjects.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => {
-                            setActiveTab('projects');
-                            setIsSearchFocused(false);
-                            setGlobalSearch('');
-                          }}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded ${
-                            isDark ? 'hover:bg-slate-900 text-slate-300 hover:text-white' : 'hover:bg-slate-100 text-slate-700 hover:text-slate-900'
-                          } transition-colors cursor-pointer text-left`}
-                        >
-                          <span className="font-medium">{p.name}</span>
-                          <span className="text-[10px] text-slate-500">{p.location || p.status}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {filteredQuickContractors.length > 0 && (
-                    <div>
-                      <div className="px-2 py-0.5 text-[10px] font-mono uppercase text-slate-500 tracking-wider font-semibold">Workforce & Trades</div>
-                      {filteredQuickContractors.map((c) => (
-                        <button
-                          key={c.id}
-                          type="button"
-                          onClick={() => {
-                            setActiveTab('contractors');
-                            setIsSearchFocused(false);
-                            setGlobalSearch('');
-                          }}
-                          className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded ${
-                            isDark ? 'hover:bg-slate-900 text-slate-300 hover:text-white' : 'hover:bg-slate-100 text-slate-700 hover:text-slate-900'
-                          } transition-colors cursor-pointer text-left`}
-                        >
-                          <span className="font-medium">{c.name}</span>
-                          <span className="text-[10px] text-slate-500">{c.specialty || c.company}</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-
-                  {filteredQuickModules.length === 0 && filteredQuickProjects.length === 0 && filteredQuickContractors.length === 0 && (
-                    <div className="py-4 text-center text-slate-500 text-xs">
-                      No matching modules, projects, or personnel found.
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Global Action Bar */}
@@ -2948,7 +2743,7 @@ export default function AdminPortal({
                           <div className="flex items-center flex-wrap gap-2">
                             <button
                               onClick={() => setActiveTab('site-diary')}
-                              title="Open Site Diary & Weather Telemetry"
+                              title="Open Site Diary & Weather Telemetry (Cabuyao HQ / Active Sites)"
                               className={`rounded-lg text-xs font-medium border transition-colors cursor-pointer flex items-center gap-1.5 px-3 py-1.5 ${
                                 isDark
                                   ? 'bg-sky-500/10 hover:bg-sky-500/20 text-sky-300 border-sky-500/30'
@@ -2956,7 +2751,7 @@ export default function AdminPortal({
                               }`}
                             >
                               <CloudSun className="w-3.5 h-3.5 text-amber-400" />
-                              <span>{siteLogs?.[0]?.weather || 'Sunny • 31°C'} — Site Weather</span>
+                              <span>📍 Cabuyao HQ / Active Sites • {siteLogs?.[0]?.temperature || '30.8°C'}</span>
                             </button>
                             <button
                               onClick={() => setActiveTab('projects')}
@@ -3116,10 +2911,10 @@ export default function AdminPortal({
                             </div>
                           </div>
 
-                          {/* Project Budgets — Hover Breakdown per project + Clickable to Finance/Budget view */}
+                          {/* Project Budgets — Hover Breakdown per project + RBAC-gated Clickable to Finance/Budget view */}
                           <div
-                            onClick={() => setActiveTab('payments')}
-                            className={`group relative cursor-pointer ${
+                            onClick={canAccessModule(currentRole, 'payments') ? () => setActiveTab('payments') : undefined}
+                            className={`group relative ${canAccessModule(currentRole, 'payments') ? 'cursor-pointer' : 'cursor-default'} ${
                               isDark
                                 ? 'bg-slate-900/70 border-slate-800/80 hover:border-emerald-500/50'
                                 : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-emerald-400'
@@ -3168,17 +2963,19 @@ export default function AdminPortal({
                                   </div>
                                 ))}
                               </div>
-                              <div className="mt-2 pt-1.5 border-t border-slate-800/60 text-[10px] text-emerald-400 flex items-center justify-between font-medium">
-                                <span>Click to open Finance & Billings View</span>
-                                <ChevronRight className="w-3 h-3" />
-                              </div>
+                              {canAccessModule(currentRole, 'payments') && (
+                                <div className="mt-2 pt-1.5 border-t border-slate-800/60 text-[10px] text-emerald-400 flex items-center justify-between font-medium">
+                                  <span>Click to open Finance & Billings View</span>
+                                  <ChevronRight className="w-3 h-3" />
+                                </div>
+                              )}
                             </div>
                           </div>
 
                           {/* Disbursed Expenses — Clickable/Expandable per-project + 4-Category Cost Breakdown */}
                           <div
-                            onClick={() => setActiveTab('finance-payroll')}
-                            className={`group relative cursor-pointer ${
+                            onClick={canAccessModule(currentRole, 'finance-payroll') ? () => setActiveTab('finance-payroll') : undefined}
+                            className={`group relative ${canAccessModule(currentRole, 'finance-payroll') ? 'cursor-pointer' : 'cursor-default'} ${
                               isDark
                                 ? 'bg-slate-900/70 border-slate-800/80 hover:border-indigo-500/50'
                                 : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-indigo-400'
@@ -3186,7 +2983,7 @@ export default function AdminPortal({
                           >
                             <div className={`flex items-center justify-between ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                               <span className="text-[11px] font-mono uppercase tracking-wider font-semibold flex items-center gap-1">
-                                Disbursed Expenses
+                                Disbursed (Current Mth)
                                 <ChevronDown className="w-3 h-3 opacity-60 group-hover:translate-y-0.5 transition-transform" />
                               </span>
                               <div className={`p-1.5 rounded-lg border ${isDark ? 'bg-indigo-500/10 border-indigo-500/20' : 'bg-indigo-100/70 border-indigo-200/80'}`}>
@@ -3201,11 +2998,22 @@ export default function AdminPortal({
                                 </>
                               ) : (
                                 <>
-                                  <div className={`text-xl font-bold font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                                    ₱{totalCompanyDisbursed.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  <div className="flex items-baseline justify-between gap-1.5">
+                                    <div className={`text-xl font-bold font-mono ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                                      ₱{totalCompanyDisbursed.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                    </div>
+                                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border font-bold shrink-0 ${
+                                      portfolioBurnRate > 100
+                                        ? (isDark ? 'bg-rose-950/60 text-rose-300 border-rose-800/60' : 'bg-rose-50 text-rose-700 border-rose-200')
+                                        : portfolioBurnRate >= 80
+                                        ? (isDark ? 'bg-amber-950/60 text-amber-300 border-amber-800/60' : 'bg-amber-50 text-amber-700 border-amber-200')
+                                        : (isDark ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60' : 'bg-emerald-50 text-emerald-700 border-emerald-200')
+                                    }`}>
+                                      {portfolioBurnRate > 0 && portfolioBurnRate < 0.1 ? '<0.1%' : `${portfolioBurnRate.toFixed(1)}%`} Burn Rate
+                                    </span>
                                   </div>
                                   <div className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'} mt-0.5 truncate`}>
-                                    4 Cost Categories • Hover for breakdown
+                                    Nov 2026 • Paid to Date (Payroll + Subcon AP)
                                   </div>
                                 </>
                               )}
@@ -3215,8 +3023,9 @@ export default function AdminPortal({
                             <div className={`hidden group-hover:block absolute right-0 top-full mt-1.5 w-80 z-50 rounded-xl border p-3.5 shadow-xl ${
                               isDark ? 'bg-slate-900 border-slate-700 text-slate-200' : 'bg-white border-slate-200 text-slate-800'
                             }`}>
-                              <div className="text-[10px] font-mono uppercase tracking-wider text-indigo-400 font-semibold pb-1.5 mb-2 border-b border-slate-700/50">
-                                4-Category Cost Breakdown
+                              <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-indigo-400 font-semibold pb-1.5 mb-2 border-b border-slate-700/50">
+                                <span>Nov 2026 Cost Breakdown</span>
+                                <span>{portfolioBurnRate.toFixed(1)}% Burn</span>
                               </div>
                               <div className="grid grid-cols-2 gap-1.5 mb-2.5 text-[11px]">
                                 <div className="p-1.5 rounded bg-slate-800/60 border border-slate-700/60">
@@ -3260,17 +3069,17 @@ export default function AdminPortal({
                             } border rounded-xl p-3.5 flex flex-col justify-between transition-all duration-200`}
                           >
                             <div className={`flex items-center justify-between ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold">Site Weather</span>
+                              <span className="text-[11px] font-mono uppercase tracking-wider font-semibold">Cabuyao HQ / Site Weather</span>
                               <div className={`p-1.5 rounded-lg border ${isDark ? 'bg-sky-500/10 border-sky-500/20' : 'bg-sky-100/70 border-sky-200/80'}`}>
                                 <CloudSun className={`w-3.5 h-3.5 ${isDark ? 'text-sky-400' : 'text-sky-700'}`} />
                               </div>
                             </div>
                             <div className="mt-2">
                               <div className={`text-base font-bold font-mono truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                                {siteLogs?.[0]?.weather || 'Sunny • 31°C'}
+                                {currentProjects[0]?.location?.split(',')[0] || 'Cabuyao, Laguna'} • {siteLogs?.[0]?.temperature || '30.8°C'}
                               </div>
                               <div className={`text-[11px] ${isDark ? 'text-sky-400' : 'text-sky-600'} mt-0.5 flex items-center gap-1 font-medium`}>
-                                <span>Open Site Diary & Logs</span>
+                                <span>Open Site Diary &amp; Telemetry</span>
                                 <ChevronRight className="w-3 h-3" />
                               </div>
                             </div>
@@ -3291,13 +3100,15 @@ export default function AdminPortal({
                                 <h3 className={`text-xs font-semibold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Project Progress Overview</h3>
                                 <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Milestone completion percentage across active commercial fit-outs</p>
                               </div>
-                              <button
-                                onClick={() => setActiveTab('gantt')}
-                                className="text-[11px] text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300 font-medium flex items-center gap-1 cursor-pointer"
-                              >
-                                <span>Full Schedule</span>
-                                <ChevronRight className="w-3 h-3" />
-                              </button>
+                              {canAccessModule(currentRole, 'schedule') && (
+                                <button
+                                  type="button"
+                                  onClick={() => setActiveTab('schedule')}
+                                  className="text-[11px] text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300 font-medium flex items-center gap-1 cursor-pointer"
+                                >
+                                  <span>Full Schedule ↗</span>
+                                </button>
+                              )}
                             </div>
 
                             {isDashboardLoading ? (
@@ -3350,13 +3161,21 @@ export default function AdminPortal({
                                 <h3 className={`text-xs font-semibold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>Budget Utilization &amp; Spend</h3>
                                 <p className={`text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Capital allocated vs. consumed disbursals per site</p>
                               </div>
-                              <button
-                                onClick={() => setActiveTab('payments')}
-                                className="text-[11px] text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300 font-medium flex items-center gap-1 cursor-pointer"
-                              >
-                                <span>Billings Hub</span>
-                                <ChevronRight className="w-3 h-3" />
-                              </button>
+                              {(canAccessModule(currentRole, 'subcontractor-payables') || canAccessModule(currentRole, 'payments')) && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setActiveTab(
+                                      canAccessModule(currentRole, 'subcontractor-payables')
+                                        ? 'subcontractor-payables'
+                                        : 'payments'
+                                    )
+                                  }
+                                  className="text-[11px] text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300 font-medium flex items-center gap-1 cursor-pointer"
+                                >
+                                  <span>Billings Hub ↗</span>
+                                </button>
+                              )}
                             </div>
 
                             {isDashboardLoading ? (
@@ -3452,38 +3271,6 @@ export default function AdminPortal({
                                 })}
                               </div>
                             )}
-
-                            {/* Portfolio Budget Summary Footer */}
-                            <div className={`border-t pt-2.5 mt-2 flex items-center justify-between ${isDark ? 'border-slate-800/80' : 'border-slate-200/80'}`}>
-                              <div className="flex items-center gap-3 text-xs font-mono">
-                                <div>
-                                  <span className={`text-[10px] uppercase tracking-wider block ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Portfolio Budget</span>
-                                  <span className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>{formatCompactPeso(totalPortfolioBudget)}</span>
-                                </div>
-                                <div className={`h-6 w-px ${isDark ? 'bg-slate-800' : 'bg-slate-200'}`} />
-                                <div>
-                                  <span className={`text-[10px] uppercase tracking-wider block ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Total Disbursed</span>
-                                  <span
-                                    className={`font-semibold ${isDark ? 'text-slate-200' : 'text-slate-800'}`}
-                                    title={`₱${totalPortfolioDisbursed.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
-                                  >
-                                    {formatCompactPeso(totalPortfolioDisbursed)}
-                                  </span>
-                                </div>
-                              </div>
-                              <div className="flex flex-col items-end">
-                                <span className={`text-[10px] uppercase tracking-wider block ${isDark ? 'text-slate-500' : 'text-slate-400'}`}>Burn Rate</span>
-                                <span className={`text-[11px] font-mono px-2 py-0.5 rounded border font-semibold ${
-                                  portfolioBurnRate > 100 
-                                    ? (isDark ? 'bg-rose-950/60 text-rose-300 border-rose-800/60' : 'bg-rose-50 text-rose-700 border-rose-200')
-                                    : portfolioBurnRate >= 80 
-                                    ? (isDark ? 'bg-amber-950/60 text-amber-300 border-amber-800/60' : 'bg-amber-50 text-amber-700 border-amber-200')
-                                    : (isDark ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60' : 'bg-emerald-50 text-emerald-700 border-emerald-200')
-                                }`}>
-                                  {portfolioBurnRate > 0 && portfolioBurnRate < 0.1 ? '<0.1%' : `${portfolioBurnRate.toFixed(1)}%`}
-                                </span>
-                              </div>
-                            </div>
                           </div>
                         </div>
 
@@ -3776,7 +3563,11 @@ export default function AdminPortal({
                     onCreateProject={!isFinance ? onCreateProject : undefined}
                     onUpdateProject={!isFinance ? onUpdateProject : undefined}
                     onDeleteProject={!isFinance ? onDeleteProject : undefined}
-                    onNavigateToTab={(tab) => setActiveTab(tab)}
+                    onNavigateToTab={(tab) => {
+                      if (canAccessModule(currentRole, tab)) {
+                        setActiveTab(tab);
+                      }
+                    }}
                   />
                 </div>
               )}
@@ -4928,9 +4719,9 @@ export default function AdminPortal({
                     setRegTrack('FIELD_SUPERVISION');
                     setContEmploymentType('INTERNAL');
                     setContDepartment('Project Management & Construction ("CONSTRUCT" Phase)');
-                    setContRoleTitle('Site Foremen');
-                    setContDailyRate(1500);
-                    setContMonthlySalary(33000);
+                    setContRoleTitle('Project Manager / Site Engineer');
+                    setContDailyRate(2500);
+                    setContMonthlySalary(55000);
                     setContManpower(1);
                   }}
                   className={`py-2 px-2 rounded-lg text-[11px] font-bold font-mono transition-all flex items-center justify-center gap-1.5 cursor-pointer ${regTrack === 'FIELD_SUPERVISION'
@@ -4995,7 +4786,7 @@ export default function AdminPortal({
                   <div>
                     <strong className="font-bold text-white">Field Supervision &amp; Engineering (Individual • Headcount: 1)</strong>
                     <p className="text-[10px] text-slate-400 mt-0.5">
-                      Dedicated site professionals (Project Managers, Engineers, Safety Officers, Foremen) stationed for technical supervision and quality assurance.
+                      Dedicated site professionals (Project Manager / Site Engineer, Safety Officer) stationed for technical supervision and quality assurance.
                     </p>
                   </div>
                 </div>
@@ -5221,19 +5012,55 @@ export default function AdminPortal({
                     </select>
                   </div>
 
-                  {/* Crew Lead / Worker Name */}
+                  {/* Crew Lead / Worker Name(s) */}
                   <div>
-                    <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider mb-1">
-                      Artisan / Worker Full Name *
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-[10px] font-mono text-slate-400 uppercase font-bold tracking-wider">
+                        {contManpower > 1
+                          ? `Gang Members / Artisan Names (${contManpower} Workers) *`
+                          : 'Artisan / Worker Full Name *'}
+                      </label>
+                      {contManpower > 1 && (
+                        <span className="text-[10px] font-mono text-emerald-400 font-semibold">
+                          Comma-separated ({contName.split(',').map(s => s.trim()).filter(Boolean).length} / {contManpower} entered)
+                        </span>
+                      )}
+                    </div>
                     <input
                       type="text"
                       required
                       value={contName}
                       onChange={(e) => setContName(e.target.value)}
-                      placeholder="e.g. Juan Dela Cruz"
+                      placeholder={
+                        contManpower > 1
+                          ? `Enter all ${contManpower} worker names separated by commas (e.g., Juan Dela Cruz, Jose Reyes, Kevin Santos)`
+                          : 'e.g. Juan Dela Cruz'
+                      }
                       className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-white text-xs focus:outline-none focus:border-emerald-500"
                     />
+                    {contManpower > 1 && (
+                      <div className="mt-1.5 p-2 rounded-lg bg-slate-900/80 border border-emerald-800/40 space-y-1.5">
+                        <p className="text-[10px] text-emerald-300 font-mono">
+                          💡 Tip: Separate each worker&apos;s name with a comma (<code className="text-white">,</code>). The first worker listed serves as the senior on-site lead.
+                        </p>
+                        {contName.trim().length > 0 && (
+                          <div className="flex flex-wrap gap-1.5 pt-0.5">
+                            {contName
+                              .split(',')
+                              .map((s) => s.trim())
+                              .filter(Boolean)
+                              .map((member, idx) => (
+                                <span
+                                  key={idx}
+                                  className="px-2 py-0.5 rounded bg-emerald-950/80 border border-emerald-600/40 text-emerald-300 text-[10px] font-mono font-semibold"
+                                >
+                                  #{idx + 1} {member} {idx === 0 ? '(Lead)' : ''}
+                                </span>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Registered Crew Headcount & Wage */}

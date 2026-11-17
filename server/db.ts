@@ -191,6 +191,26 @@ export async function initializeDatabaseTables() {
 
       ALTER TABLE users ADD COLUMN IF NOT EXISTS project_ids TEXT[] DEFAULT '{}';
 
+      -- Migrate any legacy corporate user email domain to @ldmconstruction.ph
+      UPDATE users
+      SET email = 'om@ldmconstruction.ph'
+      WHERE LOWER(email) IN ('admin@ctvill.com', 'om@ctvill.com', 'admin@ldmconstruction.ph')
+      AND NOT EXISTS (SELECT 1 FROM users u2 WHERE LOWER(u2.email) = 'om@ldmconstruction.ph' AND u2.id <> users.id);
+
+      UPDATE users
+      SET email = 'pm@ldmconstruction.ph'
+      WHERE LOWER(email) IN ('pm@ctvill.com', 'engineer@ctvill.com', 'engineer@ldmconstruction.ph')
+      AND NOT EXISTS (SELECT 1 FROM users u2 WHERE LOWER(u2.email) = 'pm@ldmconstruction.ph' AND u2.id <> users.id);
+
+      UPDATE users
+      SET email = CONCAT(SPLIT_PART(LOWER(email), '@', 1), '@ldmconstruction.ph')
+      WHERE LOWER(email) LIKE '%@ctvill.%'
+      AND NOT EXISTS (
+        SELECT 1 FROM users u2
+        WHERE LOWER(u2.email) = CONCAT(SPLIT_PART(LOWER(users.email), '@', 1), '@ldmconstruction.ph')
+        AND u2.id <> users.id
+      );
+
       -- Workers masterlist (Unified Single Source of Truth)
       CREATE TABLE IF NOT EXISTS workers (
         id TEXT PRIMARY KEY,

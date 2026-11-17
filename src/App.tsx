@@ -2275,8 +2275,11 @@ export default function App() {
     );
   };
 
+  const isDashboardShellActive =
+    activeView === 'dashboard' && authStatus === 'authenticated' && Boolean(session);
+
   return (
-    <div className={`w-full relative bg-slate-950 ${authStatus === 'authenticated' && session
+    <div className={`w-full relative bg-slate-950 ${isDashboardShellActive
         ? 'h-screen h-[100dvh] overflow-hidden flex flex-col'
         : 'min-h-screen flex flex-col justify-between overflow-x-hidden'
       }`}>
@@ -2322,7 +2325,7 @@ export default function App() {
         />
       )}
 
-      <div className={`w-full ${authStatus === 'authenticated' && session ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-1'}`}>
+      <div className={`w-full ${isDashboardShellActive ? 'flex-1 min-h-0 flex flex-col overflow-hidden' : 'flex-1'}`}>
         {renderActiveWorkspace()}
       </div>
     </div>

@@ -51,7 +51,7 @@ export async function sendFitOutQuotationEmail(params: {
     spaceType, finishTier, projectNotes, quoteId
   } = params;
 
-  const senderFrom = `"CTVill Design & Construction" <${process.env.SMTP_USER || 'projectmanagementsytem@gmail.com'}>`;
+  const senderFrom = `"LDM Construction" <${process.env.SMTP_USER || 'projectmanagementsytem@gmail.com'}>`;
   const formattedCost = estimatedCost ? `₱${Number(estimatedCost).toLocaleString()}` : 'Custom Estimate Pending';
   const formattedWeeks = estimatedWeeks ? `${estimatedWeeks} Weeks Estimated` : 'To be determined';
 
@@ -61,7 +61,7 @@ export async function sendFitOutQuotationEmail(params: {
     <head>
       <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
       <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-      <title>CTVill Fit-Out Quotation Confirmation</title>
+      <title>LDM Construction Fit-Out Quotation Confirmation</title>
     </head>
     <body style="margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased;">
       
@@ -77,7 +77,7 @@ export async function sendFitOutQuotationEmail(params: {
               <tr>
                 <td align="center" bgcolor="#0f172a" style="background-color: #0f172a; padding: 32px 24px; border-bottom: 4px solid #f59e0b;">
                   <h1 style="margin: 0; font-size: 22px; font-weight: 800; color: #ffffff; letter-spacing: 0.5px; text-transform: uppercase;">
-                    CTVill Design &amp; Construction
+                    LDM Construction
                   </h1>
                   <p style="margin: 6px 0 0 0; color: #cbd5e1; font-size: 13px; font-weight: 500;">
                     Turnkey Commercial Fit-Out &amp; Engineering Contractors
@@ -94,7 +94,7 @@ export async function sendFitOutQuotationEmail(params: {
                   </p>
                   
                   <p style="margin: 0 0 20px 0; font-size: 14px; color: #334155; line-height: 1.6;">
-                    Thank you for reaching out to <strong>CTVill Design &amp; Construction</strong>. We have officially registered your commercial fit-out quotation inquiry in our engineering system:
+                    Thank you for reaching out to <strong>LDM Construction</strong>. We have officially registered your commercial fit-out quotation inquiry in our engineering system:
                   </p>
 
                   <!-- Specifications Table -->
@@ -176,7 +176,7 @@ export async function sendFitOutQuotationEmail(params: {
                   </table>
 
                   <p style="margin: 0; font-size: 13px; color: #64748b; line-height: 1.6;">
-                    If you have existing architectural blueprints or lease guidelines to share, feel free to reply directly to this email or send them to <a href="mailto:estimate@ctvill.com" style="color: #0284c7; text-decoration: none; font-weight: 600;">estimate@ctvill.com</a>.
+                    If you have existing architectural blueprints or lease guidelines to share, feel free to reply directly to this email or send them to <a href="mailto:estimate@ldmconstruction.ph" style="color: #0284c7; text-decoration: none; font-weight: 600;">estimate@ldmconstruction.ph</a>.
                   </p>
 
                 </td>
@@ -213,8 +213,8 @@ export async function sendFitOutQuotationEmail(params: {
       const clientMailPromise = transporter.sendMail({
         from: senderFrom,
         to: clientEmail,
-        replyTo: 'estimate@ctvill.com',
-        subject: `[CTVill Fit-Out] Official Quotation Request Confirmation - ${clientName}`,
+        replyTo: 'estimate@ldmconstruction.ph',
+        subject: `[LDM Construction] Official Quotation Request Confirmation - ${clientName}`,
         html: htmlContent,
         text: `Hello ${clientName},\n\nThank you for requesting a fit-out quotation with CTVill Design & Construction.\n\nRef: ${quoteId}\nProject Scope: ${projectScope}\nEstimated Cost: ${formattedCost}\nTarget Timeline: ${formattedWeeks}\n\nOur architectural and engineering estimators will review your inquiry and contact you within 24 hours.\n\nCTVill Design & Construction\nCabuyao, Laguna, Philippines | (049) 544 7724`,
       });

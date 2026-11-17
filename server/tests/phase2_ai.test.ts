@@ -181,7 +181,7 @@ async function main() {
 
   registerTestSession(ADMIN_TOKEN, {
     id: 'usr-admin-p2',
-    email: 'admin_p2@ctvill.com',
+    email: 'admin_p2@ldmconstruction.ph',
     name: 'Chief Construction Officer',
     role: 'ADMIN',
     accountStatus: 'ACTIVE',
@@ -190,7 +190,7 @@ async function main() {
 
   registerTestSession(ENG_TOKEN, {
     id: 'usr-eng-p2',
-    email: 'eng_p2@ctvill.com',
+    email: 'eng_p2@ldmconstruction.ph',
     name: 'Lead Site Engineer',
     role: 'ENGINEER',
     accountStatus: 'ACTIVE',
@@ -200,7 +200,7 @@ async function main() {
   const ENG_SINGLE_TOKEN = 'tok_phase2_eng_single_123456';
   registerTestSession(ENG_SINGLE_TOKEN, {
     id: 'usr-eng-single-p2',
-    email: 'eng_single@ctvill.com',
+    email: 'eng_single@ldmconstruction.ph',
     name: 'Single Site Engineer',
     role: 'ENGINEER',
     accountStatus: 'ACTIVE',
@@ -209,7 +209,7 @@ async function main() {
 
   registerTestSession(ENG_UNASSIGNED_TOKEN, {
     id: 'usr-eng-unassigned-p2',
-    email: 'eng_unassigned@ctvill.com',
+    email: 'eng_unassigned@ldmconstruction.ph',
     name: 'Unassigned Site Engineer',
     role: 'ENGINEER',
     accountStatus: 'ACTIVE',
@@ -218,7 +218,7 @@ async function main() {
 
   registerTestSession(TK_TOKEN, {
     id: 'usr-tk-p2',
-    email: 'tk_p2@ctvill.com',
+    email: 'tk_p2@ldmconstruction.ph',
     name: 'Site Timekeeper',
     role: 'TIMEKEEPER',
     accountStatus: 'ACTIVE',
@@ -227,7 +227,7 @@ async function main() {
 
   registerTestSession(CLI_TOKEN, {
     id: 'usr-cli-p2',
-    email: 'cli_p2@ctvill.com',
+    email: 'cli_p2@ldmconstruction.ph',
     name: 'Commercial Tenant Client',
     role: 'CLIENT',
     accountStatus: 'ACTIVE',

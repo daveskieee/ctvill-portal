@@ -215,7 +215,7 @@ async function main() {
     await runTest('ADMIN role has global administrative project access', async () => {
       const admin = {
         id: 'usr-admin',
-        email: 'admin@ctvill.com',
+        email: 'admin@ldmconstruction.ph',
         name: 'Administrator',
         role: 'ADMIN' as const,
         projectIds: [],
@@ -418,7 +418,7 @@ async function main() {
 
       const resBadPass = await request(baseUrl, '/api/auth/login', {
         method: 'POST',
-        body: { email: 'admin@ctvill.com', password: 'DefinitelyWrongPassword999!' }
+        body: { email: 'om@ldmconstruction.ph', password: 'DefinitelyWrongPassword999!' }
       });
       assert.strictEqual(resBadPass.status, 401);
       assert.strictEqual(resBadPass.json?.error, 'Invalid email or password.');
@@ -502,7 +502,7 @@ async function main() {
     });
 
     await runTest('Existing production database user records are preserved and intact', async () => {
-      const adminUser = await prisma.user.findFirst({ where: { email: 'admin@ctvill.com' } });
+      const adminUser = await prisma.user.findFirst({ where: { role: 'ADMIN' } });
       assert.ok(adminUser, 'Primary administrator account must be preserved');
       assert.strictEqual(adminUser.accountStatus, 'ACTIVE');
 
@@ -563,7 +563,7 @@ async function main() {
 
       registerTestSession(DI_TOKEN, {
         id: targetUserId,
-        email: existingUser?.email || 'admin@ctvill.com',
+        email: existingUser?.email || 'om@ldmconstruction.ph',
         name: existingUser?.name || 'Administrator',
         role: (existingUser?.role as any) || ('ADMIN' as any),
         accountStatus: 'ACTIVE' as any,
@@ -575,7 +575,7 @@ async function main() {
       });
       // Verified that test session was recognized via dependency injection
       assert.strictEqual(res.status, 200);
-      assert.strictEqual(res.json?.user?.email, existingUser?.email || 'admin@ctvill.com');
+      assert.strictEqual(res.json?.user?.email, String(existingUser?.email || 'om@ldmconstruction.ph').replace(/@[^@]+$/, '@ldmconstruction.ph'));
 
       // Verify zero session rows were written to live database
       const liveRecord = await prisma.session.findFirst({
@@ -915,7 +915,7 @@ async function main() {
       const ADMIN_TEST_TOKEN = 'test_token_admin_full_1234567890abcdef123456';
       registerTestSession(ADMIN_TEST_TOKEN, {
         id: 'usr-admin-test',
-        email: 'admin@ctvill.com',
+        email: 'om@ldmconstruction.ph',
         name: 'Administrator',
         role: 'ADMIN' as any,
         accountStatus: 'ACTIVE' as any,
@@ -958,7 +958,7 @@ async function main() {
 
     registerTestSession(ADMIN_ROLE_TOKEN, {
       id: 'role-usr-admin',
-      email: 'admin_role@ctvill.com',
+      email: 'admin_role@ldmconstruction.ph',
       name: 'System Admin',
       role: 'ADMIN' as any,
       accountStatus: 'ACTIVE' as any,
@@ -967,7 +967,7 @@ async function main() {
 
     registerTestSession(ENG_ROLE_TOKEN, {
       id: 'role-usr-eng',
-      email: 'eng_role@ctvill.com',
+      email: 'eng_role@ldmconstruction.ph',
       name: 'Site Engineer',
       role: 'ENGINEER' as any,
       accountStatus: 'ACTIVE' as any,
@@ -976,7 +976,7 @@ async function main() {
 
     registerTestSession(TK_ROLE_TOKEN, {
       id: 'role-usr-tk',
-      email: 'tk_role@ctvill.com',
+      email: 'tk_role@ldmconstruction.ph',
       name: 'Site Timekeeper',
       role: 'TIMEKEEPER' as any,
       accountStatus: 'ACTIVE' as any,
@@ -985,7 +985,7 @@ async function main() {
 
     registerTestSession(FIN_ROLE_TOKEN, {
       id: 'role-usr-fin',
-      email: 'fin_role@ctvill.com',
+      email: 'fin_role@ldmconstruction.ph',
       name: 'Finance Controller',
       role: 'FINANCE' as any,
       accountStatus: 'ACTIVE' as any,
@@ -994,7 +994,7 @@ async function main() {
 
     registerTestSession(CLI_ROLE_TOKEN, {
       id: 'role-usr-cli',
-      email: 'cli_role@ctvill.com',
+      email: 'cli_role@ldmconstruction.ph',
       name: 'Commercial Client',
       role: 'CLIENT' as any,
       accountStatus: 'ACTIVE' as any,

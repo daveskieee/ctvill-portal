@@ -859,7 +859,7 @@ export default function RfiManager({
           className="bg-slate-900/80 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/40 rounded-xl p-4 cursor-pointer transition"
         >
           <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase">
-            <span>Requisitions Queue</span>
+            <span>Material Requests</span>
             <ShoppingCart className="w-4 h-4 text-amber-400" />
           </div>
           <div className="text-xl font-bold font-mono text-white mt-1">{requests.length} Requests</div>
@@ -916,7 +916,7 @@ export default function RfiManager({
             }`}
           >
             <ShoppingCart className="w-3.5 h-3.5" />
-            <span>1. Purchase Requisitions</span>
+            <span>1. Material Requests</span>
           </button>
           <button
             type="button"

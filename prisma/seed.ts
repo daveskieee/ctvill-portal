@@ -63,7 +63,7 @@ async function main() {
   await prisma.user.create({
     data: {
       id: 'USER-PM-001',
-      email: 'pm@ctvill.com',
+      email: 'pm@ldmconstruction.ph',
       name: 'Project Manager',
       role: Role.PROJECT_MANAGER,
       accountStatus: AccountStatus.ACTIVE,
@@ -71,7 +71,7 @@ async function main() {
       contact: '',
     },
   });
-  console.log('  ✅ Project Manager → pm@ctvill.com / pm123');
+  console.log('  ✅ Project Manager → pm@ldmconstruction.ph / pm123');
 
   // ─── Audit Log ─────────────────────────────────────────────────────────────
   console.log('Logging system initialization audit record...');
@@ -87,8 +87,8 @@ async function main() {
   });
 
   console.log('\n🚀 System initialized! Staff accounts ready:');
-  console.log('   Admin         → davematthewreglos@gmail.com  /  admin123');
-  console.log('   Project Manager → pm@ctvill.com             /  pm123');
+  console.log('   Admin           → om@ldmconstruction.ph  /  admin123');
+  console.log('   Project Manager → pm@ldmconstruction.ph  /  pm123');
 }
 
 main()

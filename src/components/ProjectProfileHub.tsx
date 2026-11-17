@@ -29,6 +29,8 @@ import {
 } from '../utils/ganttProgress';
 import { ldmArchitecturalAssets } from '../utils/ldmAssets';
 import { OptimizedLdmImage } from './OptimizedLdmImage';
+import { InteractiveLeafletPinMap } from './InteractiveLeafletPinMap';
+import { canAccessModule } from '../utils/rbac';
 import { useTheme } from '../context/ThemeContext';
 
 export const AVAILABLE_PMS = [
@@ -153,9 +155,54 @@ export default function ProjectProfileHub({
   const [formPMName, setFormPMName] = useState<string>('');
   const [availablePMs, setAvailablePMs] = useState<{ id: string; name: string }[]>(AVAILABLE_PMS);
 
-  // Geocoding Coordinates State for Live Weather Station Sync
+  // Geocoding Coordinates State for Live Weather Station Sync & Interactive Map Pinpoint
   const [detectedCoords, setDetectedCoords] = useState<GeocodedLocation | null>(null);
   const [isGeocoding, setIsGeocoding] = useState<boolean>(false);
+  const [isMapPinModalOpen, setIsMapPinModalOpen] = useState<boolean>(false);
+  const [mapPinLat, setMapPinLat] = useState<number>(14.244357);
+  const [mapPinLon, setMapPinLon] = useState<number>(121.136757);
+  const [mapPinFlyTrigger, setMapPinFlyTrigger] = useState<number>(0);
+  const [mapPinSearchQuery, setMapPinSearchQuery] = useState<string>('');
+  const [mapPinSuggestions, setMapPinSuggestions] = useState<LocationSuggestion[]>([]);
+  const [hasCustomPinnedCoords, setHasCustomPinnedCoords] = useState<boolean>(false);
+
+  const openMapPinpointModal = () => {
+    const startLat = detectedCoords?.lat ?? 14.244357;
+    const startLon = detectedCoords?.lon ?? 121.136757;
+    setMapPinLat(Number(startLat.toFixed(6)));
+    setMapPinLon(Number(startLon.toFixed(6)));
+    setMapPinSearchQuery('');
+    setMapPinSuggestions([]);
+    setIsMapPinModalOpen(true);
+  };
+
+  const handleMapPinSearch = async (val: string) => {
+    setMapPinSearchQuery(val);
+    if (val.trim().length < 2) {
+      setMapPinSuggestions([]);
+      return;
+    }
+    try {
+      const results = await searchLocationsNationwide(val);
+      setMapPinSuggestions(results.slice(0, 6));
+    } catch {
+      setMapPinSuggestions([]);
+    }
+  };
+
+  const handleConfirmMapPinCoordinates = () => {
+    isLocationSelectedRef.current = true;
+    setHasCustomPinnedCoords(true);
+    setDetectedCoords({
+      name: formLocation.trim() || `Pinned Site (${mapPinLat.toFixed(4)}°N, ${mapPinLon.toFixed(4)}°E)`,
+      region: formLocation.trim() || 'Calabarzon / Metro Manila',
+      lat: Number(mapPinLat.toFixed(6)),
+      lon: Number(mapPinLon.toFixed(6)),
+      confidence: 'EXACT_COORDINATES',
+      isExactMatch: true,
+    });
+    setIsMapPinModalOpen(false);
+  };
 
   // Live Place Autocomplete State (Google Maps Style)
   const [locationSuggestions, setLocationSuggestions] = useState<LocationSuggestion[]>([]);
@@ -338,8 +385,8 @@ export default function ProjectProfileHub({
       return;
     }
 
-    // If coordinates were explicitly selected or custom entered, lock them
-    if (detectedCoords?.confidence === 'EXACT_COORDINATES' && isLocationSelectedRef.current) {
+    // If coordinates were explicitly selected or custom pinned on map, lock them so typing address details never overwrites the pin!
+    if (hasCustomPinnedCoords || (detectedCoords?.confidence === 'EXACT_COORDINATES' && isLocationSelectedRef.current)) {
       return;
     }
 
@@ -733,6 +780,7 @@ export default function ProjectProfileHub({
     setFormDescription('');
     setFormLocation('');
     setDetectedCoords(null);
+    setHasCustomPinnedCoords(false);
     setLocationSuggestions([]);
     setShowLocationDropdown(false);
     setSelectedSuggestionIndex(-1);
@@ -1423,9 +1471,10 @@ export default function ProjectProfileHub({
         </div>
       </div>
 
-      {/* Portfolio Overview KPIs — Open RFIs & Pending COs Removed per Civil Engineer Consultation */}
+      {/* Portfolio Overview KPIs — Interactive Hover Breakdown Popovers & RBAC-Gated Clickable Redirects */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
+        {/* 1. Total Budget */}
+        <div className="group relative bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/50 p-4 rounded-xl transition-all cursor-default">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Total Budget</span>
             <DollarSign className="w-4 h-4 text-amber-400" />
@@ -1433,12 +1482,35 @@ export default function ProjectProfileHub({
           <div className="text-xl font-bold text-white mt-1 font-mono">
             ₱{totalPortfolioBudget.toLocaleString()}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            {localProjects.length} Fit-Out Sites
+          <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
+            <span>{localProjects.length} Fit-Out Sites</span>
+            <span className="text-[10px] font-mono text-amber-400">Hover breakdown</span>
+          </div>
+
+          {/* Hover Popover */}
+          <div className="hidden group-hover:block absolute left-0 top-full mt-1.5 w-72 z-50 rounded-xl border border-slate-700 bg-slate-900 p-3 shadow-2xl text-xs">
+            <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold pb-1.5 mb-1.5 border-b border-slate-800">
+              <span>Project Contract Value</span>
+              <span>Budget</span>
+            </div>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+              {synchronizedProjects.map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-2 py-0.5">
+                  <span className="truncate text-slate-200 font-medium">{p.name}</span>
+                  <span className="font-mono text-amber-300 font-bold shrink-0">₱{p.budget.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
+        {/* 2. Collected — RBAC-Gated Clickable to Progress Billing & Receipts */}
+        <div
+          onClick={canAccessModule(userRole, 'payments') ? () => onNavigateToTab?.('payments') : undefined}
+          className={`group relative bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/50 p-4 rounded-xl transition-all ${
+            canAccessModule(userRole, 'payments') ? 'cursor-pointer' : 'cursor-default'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Collected</span>
             <TrendingUp className="w-4 h-4 text-emerald-400" />
@@ -1446,12 +1518,39 @@ export default function ProjectProfileHub({
           <div className="text-xl font-bold text-white mt-1 font-mono">
             ₱{totalFundsCollected.toLocaleString()}
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            {totalPortfolioBudget > 0 ? Math.round((totalFundsCollected / totalPortfolioBudget) * 100) : 0}% Collection Pace
+          <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
+            <span>{totalPortfolioBudget > 0 ? Math.round((totalFundsCollected / totalPortfolioBudget) * 100) : 0}% Collection Pace</span>
+            {canAccessModule(userRole, 'payments') ? (
+              <span className="text-[10px] font-mono text-emerald-400">Open Billings ↗</span>
+            ) : (
+              <span className="text-[10px] font-mono text-slate-500">Hover breakdown</span>
+            )}
+          </div>
+
+          {/* Hover Popover */}
+          <div className="hidden group-hover:block absolute left-0 top-full mt-1.5 w-72 z-50 rounded-xl border border-slate-700 bg-slate-900 p-3 shadow-2xl text-xs">
+            <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-emerald-400 font-bold pb-1.5 mb-1.5 border-b border-slate-800">
+              <span>Collections by Site</span>
+              <span>Collected</span>
+            </div>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+              {synchronizedProjects.map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-2 py-0.5">
+                  <span className="truncate text-slate-200 font-medium">{p.name}</span>
+                  <span className="font-mono text-emerald-400 font-bold shrink-0">₱{p.fundsCollected.toLocaleString()}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
-        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
+        {/* 3. Avg Progress — RBAC-Gated Clickable to Master Gantt */}
+        <div
+          onClick={canAccessModule(userRole, 'gantt') ? () => onNavigateToTab?.('gantt') : undefined}
+          className={`group relative bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/50 p-4 rounded-xl transition-all ${
+            canAccessModule(userRole, 'gantt') ? 'cursor-pointer' : 'cursor-default'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Avg Progress</span>
             <CheckCircle2 className="w-4 h-4 text-amber-400" />
@@ -1462,9 +1561,31 @@ export default function ProjectProfileHub({
           <div className="w-full bg-slate-800 rounded-full h-1.5 mt-2 overflow-hidden">
             <div className="bg-amber-500 h-full rounded-full" style={{ width: `${avgPortfolioProgress}%` }} />
           </div>
+
+          {/* Hover Popover */}
+          <div className="hidden group-hover:block absolute right-0 top-full mt-1.5 w-72 z-50 rounded-xl border border-slate-700 bg-slate-900 p-3 shadow-2xl text-xs">
+            <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-amber-400 font-bold pb-1.5 mb-1.5 border-b border-slate-800">
+              <span>WBS Progress by Site</span>
+              <span>Completion</span>
+            </div>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+              {synchronizedProjects.map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-2 py-0.5">
+                  <span className="truncate text-slate-200 font-medium">{p.name}</span>
+                  <span className="font-mono text-amber-300 font-bold shrink-0">{p.progressPercentage}%</span>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
-        <div className="bg-slate-900/60 border border-slate-800 p-4 rounded-xl">
+        {/* 4. Field Labor — RBAC-Gated Clickable to Labor Workforce & Artisan Trades */}
+        <div
+          onClick={canAccessModule(userRole, 'contractors') ? () => onNavigateToTab?.('contractors') : undefined}
+          className={`group relative bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-teal-500/50 p-4 rounded-xl transition-all ${
+            canAccessModule(userRole, 'contractors') ? 'cursor-pointer' : 'cursor-default'
+          }`}
+        >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Field Labor</span>
             <Users className="w-4 h-4 text-teal-400" />
@@ -1472,8 +1593,29 @@ export default function ProjectProfileHub({
           <div className="text-xl font-bold text-white mt-1 font-mono">
             {totalSiteManpower} Artisans
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">
-            On-Site Deployments
+          <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
+            <span>On-Site Deployments</span>
+            {canAccessModule(userRole, 'contractors') ? (
+              <span className="text-[10px] font-mono text-teal-400">Open Workforce ↗</span>
+            ) : (
+              <span className="text-[10px] font-mono text-slate-500">Hover breakdown</span>
+            )}
+          </div>
+
+          {/* Hover Popover */}
+          <div className="hidden group-hover:block absolute right-0 top-full mt-1.5 w-72 z-50 rounded-xl border border-slate-700 bg-slate-900 p-3 shadow-2xl text-xs">
+            <div className="flex items-center justify-between text-[10px] font-mono uppercase tracking-wider text-teal-400 font-bold pb-1.5 mb-1.5 border-b border-slate-800">
+              <span>Deployed Crew per Site</span>
+              <span>Headcount</span>
+            </div>
+            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
+              {synchronizedProjects.map((p) => (
+                <div key={p.id} className="flex items-center justify-between gap-2 py-0.5">
+                  <span className="truncate text-slate-200 font-medium">{p.name}</span>
+                  <span className="font-mono text-teal-300 font-bold shrink-0">{p.assignedWorkersCount || 0} Artisans</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -2553,11 +2695,11 @@ export default function ProjectProfileHub({
                 {modalTab === 'general' && (
                   <div className="space-y-3.5">
                     <div>
-                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Project Name *</label>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Project Title *</label>
                       <input
                         type="text"
                         required
-                        placeholder="e.g., Modern Residential Villa Phase 2"
+                        placeholder="e.g., 2-Storey Residential Unit / Modern Residential Villa Phase 2"
                         value={formName}
                         onChange={(e) => setFormName(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
@@ -2662,21 +2804,35 @@ export default function ProjectProfileHub({
                         </div>
                       )}
 
-                      {formLocation.trim() && (
-                        <div className={`mt-2 p-2 rounded-lg border text-xs flex items-center justify-between ${detectedCoords ? 'bg-emerald-950/60 border-emerald-500/40 text-emerald-300' : 'bg-slate-950 border-slate-800 text-slate-400'
-                          }`}>
-                          <div className="flex items-center gap-2 truncate">
-                            <MapPin className={`w-3.5 h-3.5 shrink-0 ${detectedCoords ? 'text-emerald-400' : 'text-slate-500'}`} />
-                            <span className="truncate">
-                              {detectedCoords ? (
-                                <>Weather Station: <strong className="text-white">{detectedCoords.name}</strong> ({detectedCoords.lat.toFixed(4)}°N, {detectedCoords.lon.toFixed(4)}°E)</>
-                              ) : (
-                                'Resolving weather station telemetry...'
-                              )}
+                      {/* Pandago-Style Pinned Coordinates & Interactive Map Pinpoint Bar */}
+                      <div className={`mt-2.5 p-2.5 rounded-xl border text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2 ${
+                        detectedCoords
+                          ? 'bg-emerald-950/50 border-emerald-500/40 text-emerald-300'
+                          : 'bg-slate-950 border-slate-800 text-slate-400'
+                      }`}>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <MapPin className={`w-4 h-4 shrink-0 ${detectedCoords ? 'text-emerald-400' : 'text-amber-400'}`} />
+                          <div className="truncate">
+                            <span className="text-[10px] font-mono uppercase tracking-wider block text-slate-400">
+                              Pinned Coordinates (Weather &amp; Site Telemetry)
+                            </span>
+                            <span className="font-mono font-bold text-white text-xs">
+                              {detectedCoords
+                                ? `${detectedCoords.lat.toFixed(6)}°N, ${detectedCoords.lon.toFixed(6)}°E`
+                                : 'No exact coordinates pinned yet'}
                             </span>
                           </div>
                         </div>
-                      )}
+
+                        <button
+                          type="button"
+                          onClick={openMapPinpointModal}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs font-mono flex items-center gap-1.5 cursor-pointer transition shadow-sm shrink-0"
+                        >
+                          <MapPin className="w-3.5 h-3.5" />
+                          <span>{detectedCoords ? '🗺️ View / Adjust Map Pin' : '📍 Set Coordinates / Pinpoint on Map'}</span>
+                        </button>
+                      </div>
                     </div>
 
                     <div>
@@ -2693,75 +2849,42 @@ export default function ProjectProfileHub({
                 )}
 
                 {modalTab === 'timeline' && (
-                  <div className="space-y-3.5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Contract Budget (PHP)</label>
-                        <input
-                          type="number"
-                          value={formBudget === 0 ? '' : formBudget}
-                          onChange={(e) => setFormBudget(e.target.value === '' ? 0 : Number(e.target.value))}
-                          placeholder="0"
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Physical Progress</label>
-                        <div className="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-xs flex items-center justify-between text-slate-300 font-mono">
-                          <span className="font-bold text-amber-400">0%</span>
-                          <span className="text-[10px] text-amber-400/90 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
-                            ⚡ Auto-Synced from Master CPM Gantt
-                          </span>
-                        </div>
-                      </div>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Contract Budget (PHP) *</label>
+                      <input
+                        type="number"
+                        required
+                        min={0}
+                        value={formBudget === 0 ? '' : formBudget}
+                        onChange={(e) => setFormBudget(e.target.value === '' ? 0 : Number(e.target.value))}
+                        placeholder="e.g., 2500000"
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2.5 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                      />
+                      <span className="text-[11px] text-slate-500 mt-1 block">
+                        Physical progress and WBS milestones are automatically computed and synced from the 14-phase Master CPM Gantt &amp; BOM.
+                      </span>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Project Status</label>
-                        <select
-                          value={formStatus}
-                          onChange={(e) => setFormStatus(e.target.value as any)}
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
-                        >
-                          <option value="PLANNING">Planning Phase</option>
-                          <option value="IN_PROGRESS">In Progress</option>
-                          <option value="PUNCHLIST_QA">Punchlist & QA</option>
-                          <option value="HANDED_OVER">Handed Over</option>
-                          <option value="COMPLETED">Completed</option>
-                        </select>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Deliverable Milestones</label>
-                        <input
-                          type="number"
-                          min={1}
-                          max={10}
-                          value={formMilestonesCount}
-                          onChange={(e) => setFormMilestonesCount(Number(e.target.value))}
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Start Date</label>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Start Date *</label>
                         <input
                           type="date"
+                          required
                           value={formStartDate}
                           onChange={(e) => setFormStartDate(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2.5 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Target Handover Date</label>
+                        <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Target Handover Date *</label>
                         <input
                           type="date"
+                          required
                           value={formEndDate}
                           onChange={(e) => setFormEndDate(e.target.value)}
-                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
+                          className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2.5 text-xs sm:text-sm focus:border-amber-500 focus:outline-none font-mono"
                         />
                       </div>
                     </div>
@@ -2895,11 +3018,11 @@ export default function ProjectProfileHub({
                 {modalTab === 'general' && (
                   <div className="space-y-3.5">
                     <div>
-                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Project Name *</label>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Project Title *</label>
                       <input
                         type="text"
                         required
-                        placeholder="e.g., Modern Residential Villa Phase 2"
+                        placeholder="e.g., 2-Storey Residential Unit / Modern Residential Villa Phase 2"
                         value={formName}
                         onChange={(e) => setFormName(e.target.value)}
                         className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
@@ -3278,6 +3401,124 @@ export default function ProjectProfileHub({
                 className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition cursor-pointer"
               >
                 Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Pandago-Style Interactive Map Pinpoint & Coordinate Picker Modal */}
+      {isMapPinModalOpen && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-5 bg-black/80 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-2xl w-full p-5 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-start justify-between border-b border-slate-800 pb-3">
+              <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="w-2 h-2 rounded-full bg-amber-400"></span>
+                  <span className="text-[10px] font-mono text-amber-400 font-bold uppercase tracking-wider">
+                    INTERACTIVE SITE PINPOINT GEOCODER
+                  </span>
+                </div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <MapPin className="w-5 h-5 text-amber-400" />
+                  Pinpoint Exact Project Coordinates on Map
+                </h3>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Pinpoint the exact lot coordinates for weather station telemetry while keeping your typed street/barangay address intact.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsMapPinModalOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Map Search Bar */}
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={mapPinSearchQuery}
+                onChange={(e) => handleMapPinSearch(e.target.value)}
+                placeholder="Search city, barangay, or subdivision to center map (e.g., Banaybanay Cabuyao, Banlic Calamba, BGC)..."
+                className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pl-9 pr-4 py-2 text-xs text-white placeholder-slate-500 focus:outline-none"
+              />
+              {mapPinSuggestions.length > 0 && (
+                <div className="absolute left-0 right-0 top-full mt-1 bg-slate-950 border border-amber-500/40 rounded-xl shadow-2xl z-[600] max-h-44 overflow-y-auto divide-y divide-slate-800">
+                  {mapPinSuggestions.map((sug, i) => (
+                    <button
+                      key={`${sug.lat}-${sug.lng}-${i}`}
+                      type="button"
+                      onClick={() => {
+                        setMapPinLat(Number(sug.lat.toFixed(6)));
+                        setMapPinLon(Number(sug.lng.toFixed(6)));
+                        setMapPinFlyTrigger((prev) => prev + 1);
+                        setMapPinSuggestions([]);
+                        setMapPinSearchQuery(sug.displayName);
+                      }}
+                      className="w-full px-3.5 py-2 text-left text-xs hover:bg-amber-500/15 flex items-center justify-between cursor-pointer"
+                    >
+                      <span className="text-white font-semibold truncate">{sug.displayName} <span className="text-slate-400 font-normal">{sug.subLabel}</span></span>
+                      <span className="font-mono text-[10px] text-amber-400 shrink-0 ml-2">{sug.lat.toFixed(4)}°N, {sug.lng.toFixed(4)}°E</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Real Interactive Leaflet Map with Draggable Pin & Click-to-Drop */}
+            <InteractiveLeafletPinMap
+              lat={mapPinLat}
+              lon={mapPinLon}
+              flyToTrigger={mapPinFlyTrigger}
+              onChange={(nextLat, nextLon) => {
+                setMapPinLat(nextLat);
+                setMapPinLon(nextLon);
+              }}
+            />
+
+            {/* Direct Coordinate Inputs */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Latitude (°N)</label>
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={mapPinLat}
+                  onChange={(e) => setMapPinLat(parseFloat(e.target.value) || 0)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Longitude (°E)</label>
+                <input
+                  type="number"
+                  step="0.000001"
+                  value={mapPinLon}
+                  onChange={(e) => setMapPinLon(parseFloat(e.target.value) || 0)}
+                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:border-amber-500 focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsMapPinModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 text-xs font-medium cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmMapPinCoordinates}
+                className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer flex items-center gap-1.5 shadow-md"
+              >
+                <Check className="w-4 h-4" />
+                <span>Set Coordinates</span>
               </button>
             </div>
           </div>

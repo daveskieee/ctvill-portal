@@ -4,9 +4,9 @@
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Calendar as CalendarIcon, Clock, Users, MapPin, Plus, 
-  ChevronLeft, ChevronRight, CheckCircle2, AlertCircle, 
+import {
+  Calendar as CalendarIcon, Clock, Users, MapPin, Plus,
+  ChevronLeft, ChevronRight, CheckCircle2, AlertCircle,
   Video, ShieldAlert, Tag, Filter, X, CalendarDays, Download,
   Edit3, Trash2, Check, RefreshCw, Layers
 } from 'lucide-react';
@@ -35,7 +35,7 @@ export default function ProjectScheduleCalendar({
   const [projectFilter, setProjectFilter] = useState<string>('ALL');
   const [calendarEvents, setCalendarEvents] = useState<ScheduleEvent[]>(events);
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  
+
   // Modals
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [editingEvent, setEditingEvent] = useState<ScheduleEvent | null>(null);
@@ -63,6 +63,38 @@ export default function ProjectScheduleCalendar({
   const [editAttendees, setEditAttendees] = useState('');
   const [editNotes, setEditNotes] = useState('');
   const [editStatus, setEditStatus] = useState<'SCHEDULED' | 'COMPLETED' | 'CANCELLED'>('SCHEDULED');
+
+  // Schedule Overlap / Conflict Detection State
+  const [detectedConflicts, setDetectedConflicts] = useState<ScheduleEvent[]>([]);
+  const [conflictNoticeToast, setConflictNoticeToast] = useState<string | null>(null);
+
+  const parseScheduleMinutes = (timeStr?: string, fallback = 480): number => {
+    if (!timeStr || !timeStr.includes(':')) return fallback;
+    const [hh, mm] = timeStr.split(':').map(Number);
+    if (isNaN(hh) || isNaN(mm)) return fallback;
+    return hh * 60 + mm;
+  };
+
+  const findOverlappingEvents = (
+    dateStr: string,
+    startTime: string,
+    endTime: string,
+    excludeId?: string
+  ): ScheduleEvent[] => {
+    if (!dateStr) return [];
+    const newStart = parseScheduleMinutes(startTime, 480);
+    const newEnd = Math.max(newStart + 30, parseScheduleMinutes(endTime, 1020));
+
+    return calendarEvents.filter((ev) => {
+      if (excludeId && ev.id === excludeId) return false;
+      if (ev.status === 'CANCELLED') return false;
+      if (getEventDate(ev) !== dateStr) return false;
+
+      const exStart = parseScheduleMinutes(ev.startTime || '08:00', 480);
+      const exEnd = Math.max(exStart + 30, parseScheduleMinutes(ev.endTime || '17:00', 1020));
+      return newStart < exEnd && newEnd > exStart;
+    });
+  };
 
   // Unified calendar events fetcher from backend
   const fetchCalendarEvents = useCallback(async (selectedProject: string) => {
@@ -140,10 +172,7 @@ export default function ProjectScheduleCalendar({
   // Events on selected date
   const eventsOnSelectedDate = filteredEvents.filter(e => getEventDate(e) === selectedDateStr);
 
-  const handleAddSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim() || !newEventDate) return;
-
+  const executeCreateEvent = async () => {
     setIsSubmitting(true);
     try {
       const payload: Partial<ScheduleEvent> = {
@@ -171,13 +200,29 @@ export default function ProjectScheduleCalendar({
       }
 
       await fetchCalendarEvents(projectFilter);
+      setDetectedConflicts([]);
       setShowAddModal(false);
       resetAddForm();
+      setConflictNoticeToast(`Scheduled "${payload.title}" on ${newEventDate} (${newStartTime || '08:00'} – ${newEndTime || '17:00'}).`);
+      setTimeout(() => setConflictNoticeToast(null), 4000);
     } catch (err) {
       console.error('Failed to create schedule event:', err);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleAddSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim() || !newEventDate) return;
+
+    const overlaps = findOverlappingEvents(newEventDate, newStartTime, newEndTime);
+    if (overlaps.length > 0 && detectedConflicts.length === 0) {
+      setDetectedConflicts(overlaps);
+      return;
+    }
+
+    await executeCreateEvent();
   };
 
   const resetAddForm = (initialDate?: string) => {
@@ -190,6 +235,7 @@ export default function ProjectScheduleCalendar({
     setNewLocation('');
     setNewAttendees('');
     setNewNotes('');
+    setDetectedConflicts([]);
   };
 
   const openAddModal = (dateStr?: string) => {
@@ -198,6 +244,7 @@ export default function ProjectScheduleCalendar({
   };
 
   const openEditModal = (evt: ScheduleEvent) => {
+    setDetectedConflicts([]);
     setEditingEvent(evt);
     setEditTitle(evt.title);
     setEditProject(evt.projectName || (projects && projects.length > 0 ? projects[0].name : ''));
@@ -213,10 +260,8 @@ export default function ProjectScheduleCalendar({
     setEditStatus(evt.status || 'SCHEDULED');
   };
 
-  const handleEditSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const executeEditEvent = async () => {
     if (!editingEvent) return;
-
     setIsSubmitting(true);
     try {
       const updates: Partial<ScheduleEvent> = {
@@ -244,12 +289,26 @@ export default function ProjectScheduleCalendar({
       }
 
       await fetchCalendarEvents(projectFilter);
+      setDetectedConflicts([]);
       setEditingEvent(null);
     } catch (err) {
       console.error('Failed to update schedule event:', err);
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEvent) return;
+
+    const overlaps = findOverlappingEvents(editEventDate, editStartTime, editEndTime, editingEvent.id);
+    if (overlaps.length > 0 && detectedConflicts.length === 0) {
+      setDetectedConflicts(overlaps);
+      return;
+    }
+
+    await executeEditEvent();
   };
 
   const handleToggleCompleted = async (evt: ScheduleEvent) => {
@@ -353,6 +412,13 @@ export default function ProjectScheduleCalendar({
 
   return (
     <div className="space-y-5">
+      {conflictNoticeToast && (
+        <div className="bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 px-4 py-2.5 rounded-xl text-xs font-mono flex items-center justify-between">
+          <span>✅ {conflictNoticeToast}</span>
+          <button onClick={() => setConflictNoticeToast(null)} className="text-slate-400 hover:text-white cursor-pointer">✕</button>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-xs">
         <div>
@@ -484,30 +550,28 @@ export default function ProjectScheduleCalendar({
                   <div
                     key={dateKey}
                     onClick={() => setSelectedDateStr(dateKey)}
-                    className={`min-h-[76px] p-2 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
-                      isSelected
+                    className={`min-h-[76px] p-2 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${isSelected
                         ? isDark
                           ? 'bg-blue-950/40 border-blue-500 shadow-md shadow-blue-500/10 ring-1 ring-blue-500/50'
                           : 'bg-blue-50 border-blue-500 shadow-md shadow-blue-500/10 ring-1 ring-blue-500/50'
                         : isToday
-                        ? isDark
-                          ? 'bg-slate-900 border-amber-500/50'
-                          : 'bg-amber-50/70 border-amber-500/70'
-                        : isDark
-                        ? 'bg-slate-950/50 border-slate-800/80 hover:border-slate-700'
-                        : dayEvents.length > 0
-                        ? 'bg-[#FFFFFF] border-[#CBD5E1] shadow-2xs hover:border-slate-400'
-                        : 'bg-[#F8FAFC] border-[#E2E8F0] hover:border-slate-300'
-                    }`}
+                          ? isDark
+                            ? 'bg-slate-900 border-amber-500/50'
+                            : 'bg-amber-50/70 border-amber-500/70'
+                          : isDark
+                            ? 'bg-slate-950/50 border-slate-800/80 hover:border-slate-700'
+                            : dayEvents.length > 0
+                              ? 'bg-[#FFFFFF] border-[#CBD5E1] shadow-2xs hover:border-slate-400'
+                              : 'bg-[#F8FAFC] border-[#E2E8F0] hover:border-slate-300'
+                      }`}
                   >
                     <div className="flex justify-between items-center">
-                      <span className={`text-xs font-mono font-bold ${
-                        isSelected 
+                      <span className={`text-xs font-mono font-bold ${isSelected
                           ? isDark ? 'text-blue-300' : 'text-blue-700'
-                          : isToday 
+                          : isToday
                             ? isDark ? 'text-amber-400' : 'text-amber-800'
                             : isDark ? 'text-slate-300' : 'text-slate-800'
-                      }`}>
+                        }`}>
                         {day}
                       </span>
                       {dayEvents.length > 0 && (
@@ -600,11 +664,10 @@ export default function ProjectScheduleCalendar({
                   return (
                     <div
                       key={evt.id}
-                      className={`p-4 rounded-xl border transition ${
-                        evt.status === 'COMPLETED'
+                      className={`p-4 rounded-xl border transition ${evt.status === 'COMPLETED'
                           ? 'bg-slate-950/60 border-emerald-900/50'
                           : 'bg-slate-950 border-slate-800/80 hover:border-slate-700'
-                      }`}
+                        }`}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="space-y-1 flex-1 min-w-0">
@@ -624,9 +687,8 @@ export default function ProjectScheduleCalendar({
                               </span>
                             )}
                           </div>
-                          <h4 className={`text-xs font-bold leading-snug break-words ${
-                            evt.status === 'COMPLETED' ? 'text-slate-400 line-through' : 'text-white'
-                          }`}>
+                          <h4 className={`text-xs font-bold leading-snug break-words ${evt.status === 'COMPLETED' ? 'text-slate-400 line-through' : 'text-white'
+                            }`}>
                             {evt.title}
                           </h4>
                           <div className="text-[11px] text-amber-400 font-medium truncate">
@@ -637,11 +699,10 @@ export default function ProjectScheduleCalendar({
                         <div className="flex items-center gap-1 shrink-0">
                           <button
                             onClick={() => handleToggleCompleted(evt)}
-                            className={`p-1 rounded transition cursor-pointer ${
-                              evt.status === 'COMPLETED' 
-                                ? 'text-emerald-400 hover:text-slate-400' 
+                            className={`p-1 rounded transition cursor-pointer ${evt.status === 'COMPLETED'
+                                ? 'text-emerald-400 hover:text-slate-400'
                                 : 'text-slate-500 hover:text-emerald-400'
-                            }`}
+                              }`}
                             title={evt.status === 'COMPLETED' ? 'Mark Incomplete' : 'Mark Completed'}
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
@@ -837,6 +898,48 @@ export default function ProjectScheduleCalendar({
                 />
               </div>
 
+              {/* Schedule Overlap / Conflict Detection Warning Banner */}
+              {detectedConflicts.length > 0 && (
+                <div className="p-3.5 rounded-xl bg-amber-950/80 border-2 border-amber-500/70 space-y-2.5 text-xs animate-fadeIn">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <strong className="text-amber-300 font-bold block">
+                        ⚠️ Schedule Conflict Detected on {newEventDate}
+                      </strong>
+                      <p className="text-slate-200 text-[11px] leading-relaxed">
+                        The selected time slot ({newStartTime || '08:00'} – {newEndTime || '17:00'}) overlaps with {detectedConflicts.length} existing scheduled activity:
+                      </p>
+                      <ul className="space-y-1 pt-1">
+                        {detectedConflicts.map((conf) => (
+                          <li key={conf.id} className="text-[11px] font-mono bg-slate-950/90 border border-amber-500/30 px-2.5 py-1.5 rounded-lg text-amber-200">
+                            • <strong>{conf.title}</strong> ({conf.projectName || 'Master Operations'}) — {conf.startTime || '08:00'} to {conf.endTime || '17:00'}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setDetectedConflicts([])}
+                      className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-semibold cursor-pointer"
+                    >
+                      Adjust Time
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => executeCreateEvent()}
+                      className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow-sm"
+                    >
+                      Proceed Anyway &amp; Confirm
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="pt-3 flex justify-end gap-3">
                 <button
                   type="button"
@@ -999,6 +1102,43 @@ export default function ProjectScheduleCalendar({
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-blue-500 focus:outline-none"
                 />
               </div>
+
+              {detectedConflicts.length > 0 && (
+                <div className="p-3.5 rounded-xl bg-amber-950/80 border-2 border-amber-500/70 space-y-2.5 text-xs animate-fadeIn">
+                  <div className="flex items-start gap-2.5">
+                    <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+                    <div className="space-y-1">
+                      <strong className="text-amber-300 font-bold block">
+                        ⚠️ Schedule Conflict Detected on {editEventDate}
+                      </strong>
+                      <ul className="space-y-1 pt-1">
+                        {detectedConflicts.map((conf) => (
+                          <li key={conf.id} className="text-[11px] font-mono bg-slate-950/90 border border-amber-500/30 px-2.5 py-1.5 rounded-lg text-amber-200">
+                            • <strong>{conf.title}</strong> ({conf.projectName || 'Master Operations'}) — {conf.startTime || '08:00'} to {conf.endTime || '17:00'}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setDetectedConflicts([])}
+                      className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 text-xs font-semibold cursor-pointer"
+                    >
+                      Adjust Time
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isSubmitting}
+                      onClick={() => executeEditEvent()}
+                      className="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow-sm"
+                    >
+                      Proceed Anyway &amp; Confirm
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="pt-3 flex justify-end gap-3">
                 <button

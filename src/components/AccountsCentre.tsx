@@ -3,15 +3,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import QRCode from 'qrcode';
 import {
   Shield, KeyRound, Mail, Sliders, Laptop, ChevronRight, ChevronLeft,
   X, CheckCircle2, AlertTriangle, Eye, EyeOff, Camera, Upload, Trash2,
-  Save, ShieldCheck, Lock, Sparkles, Smartphone, Check, Sun, Moon
+  Save, ShieldCheck, Lock, Sparkles, Smartphone, Check, Sun, Moon, QrCode, Copy
 } from 'lucide-react';
 import { updateStoredSession } from '../utils/session';
 import { ThemeMode } from '../context/ThemeContext';
+import { is2faEnrolled, set2faEnrolled, getAccountPasskey } from './LoginPortal';
+import { logAuditEvent } from '../utils/auditLogger';
+import {
+  getOrCreateTotpSecret,
+  formatTotpSecretDisplay,
+  buildOtpAuthUri,
+  verifyTotpCode,
+  getBackupRecoveryCodes,
+  generateBackupRecoveryCodes,
+  clearAccountTotpData,
+  BackupRecoveryCode,
+} from '../utils/totpAuth';
 
 interface AccountsCentreProps {
   session: any;
@@ -62,6 +75,41 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState<boolean>(false);
   const [isChangeEmailOpen, setIsChangeEmailOpen] = useState<boolean>(false);
   const [isSecurityCheckupOpen, setIsSecurityCheckupOpen] = useState<boolean>(false);
+  const [is2faModalOpen, setIs2faModalOpen] = useState<boolean>(false);
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState<boolean>(() =>
+    is2faEnrolled(profileEmail || session?.email || '')
+  );
+  const [totpSetupStep, setTotpSetupStep] = useState<'qr' | 'verify' | 'active'>('qr');
+  const [totpVerifyInput, setTotpVerifyInput] = useState<string>('');
+  const [totpSetupError, setTotpSetupError] = useState<string | null>(null);
+  const [totpQrDataUrl, setTotpQrDataUrl] = useState<string>('');
+  const [backupCodes, setBackupCodes] = useState<BackupRecoveryCode[]>(() =>
+    getBackupRecoveryCodes(profileEmail || session?.email || 'om@ldmconstruction.ph')
+  );
+  const [isBackupCodesUnlocked, setIsBackupCodesUnlocked] = useState<boolean>(false);
+  const [backupPassVerifyInput, setBackupPassVerifyInput] = useState<string>('');
+  const [showBackupPassVerify, setShowBackupPassVerify] = useState<boolean>(false);
+  const [backupVerifyError, setBackupVerifyError] = useState<string | null>(null);
+  const [isVerifyingBackupPass, setIsVerifyingBackupPass] = useState<boolean>(false);
+
+  // Unlink / Disable 2FA Inline Password Confirmation State
+  const [showUnlinkConfirm, setShowUnlinkConfirm] = useState<boolean>(false);
+  const [unlinkPassInput, setUnlinkPassInput] = useState<string>('');
+  const [showUnlinkPass, setShowUnlinkPass] = useState<boolean>(false);
+  const [unlinkError, setUnlinkError] = useState<string | null>(null);
+  const [isUnlinking2fa, setIsUnlinking2fa] = useState<boolean>(false);
+
+  useEffect(() => {
+    const activeEmail = profileEmail || session?.email || 'om@ldmconstruction.ph';
+    const uri = buildOtpAuthUri(activeEmail);
+    QRCode.toDataURL(uri, {
+      width: 180,
+      margin: 1,
+      color: { dark: '#0F172A', light: '#FFFFFF' },
+    })
+      .then((url) => setTotpQrDataUrl(url))
+      .catch(() => setTotpQrDataUrl(''));
+  }, [profileEmail, session?.email, is2faModalOpen]);
 
   // Change Password Form State
   const [currentPass, setCurrentPass] = useState<string>('');
@@ -179,19 +227,19 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
       return;
     }
     if (!currentPass) {
-      setPassError('Please enter your current security passkey.');
+      setPassError('Please enter your current password.');
       return;
     }
     if (!newPass || newPass.length < 6) {
-      setPassError('New passkey must be at least 6 characters.');
+      setPassError('New password must be at least 6 characters.');
       return;
     }
     if (newPass !== confirmPass) {
-      setPassError('The new passkeys do not match.');
+      setPassError('The new passwords do not match.');
       return;
     }
     if (newPass === currentPass) {
-      setPassError('New passkey must be different from current passkey.');
+      setPassError('New password must be different from current password.');
       return;
     }
 
@@ -210,11 +258,11 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
       });
       const data = await res.json();
       if (!res.ok) {
-        setPassError(data.error || 'Failed to update passkey.');
-        notify('❌ ' + (data.error || 'Failed to update passkey.'));
+        setPassError(data.error || 'Failed to update password.');
+        notify('❌ ' + (data.error || 'Failed to update password.'));
       } else {
-        setPassSuccess('✅ Passkey updated successfully! Hashed and secured.');
-        notify('✅ Passkey updated successfully.');
+        setPassSuccess('✅ Password updated successfully! Hashed and secured.');
+        notify('✅ Password updated successfully.');
         setCurrentPass('');
         setNewPass('');
         setConfirmPass('');
@@ -224,7 +272,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
         }, 1500);
       }
     } catch (err) {
-      setPassError('Network error while updating passkey.');
+      setPassError('Network error while updating password.');
     } finally {
       setIsUpdatingPass(false);
     }
@@ -248,7 +296,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
       return;
     }
     if (!emailPasskeyVerify) {
-      setEmailChangeError('Please enter your current security passkey to authorize this update.');
+      setEmailChangeError('Please enter your current password to authorize this update.');
       return;
     }
 
@@ -457,7 +505,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                         Change password
                       </div>
                       <div className="text-[10px] text-slate-500 mt-0.5">
-                        Rotate your active login passkey
+                        Rotate your active login password
                       </div>
                     </div>
                     <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-colors" />
@@ -491,6 +539,51 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                     </div>
                   </button>
 
+                  {/* Two-factor authentication (2FA) row */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const targetEmail = profileEmail || session?.email || '';
+                      const enrolled = is2faEnrolled(targetEmail);
+                      setTotpSetupError(null);
+                      setTotpVerifyInput('');
+                      setTwoFactorEnabled(enrolled);
+                      setBackupCodes(getBackupRecoveryCodes(targetEmail));
+                      setIsBackupCodesUnlocked(false);
+                      setBackupPassVerifyInput('');
+                      setBackupVerifyError(null);
+                      setShowUnlinkConfirm(false);
+                      setUnlinkPassInput('');
+                      setUnlinkError(null);
+                      setTotpSetupStep(enrolled ? 'active' : 'qr');
+                      setIs2faModalOpen(true);
+                    }}
+                    className="w-full flex items-center justify-between p-4 hover:bg-slate-800/50 transition-colors text-left cursor-pointer group"
+                  >
+                    <div>
+                      <div className="text-xs font-semibold text-white group-hover:text-amber-400 transition-colors">
+                        Two-factor authentication (2FA)
+                      </div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">
+                        {twoFactorEnabled
+                          ? 'Authenticator app & emergency recovery codes active on sign-in'
+                          : 'Not enrolled — click to register an Authenticator app or enable 2FA'}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-[9px] font-mono px-2 py-0.5 rounded font-bold border ${
+                          twoFactorEnabled
+                            ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}
+                      >
+                        {twoFactorEnabled ? 'ENABLED' : 'OPTIONAL (OFF)'}
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-slate-500 group-hover:text-amber-400 transition-colors" />
+                    </div>
+                  </button>
+
                   {/* Saved login row */}
                   <div className="flex items-center justify-between p-4">
                     <div>
@@ -504,10 +597,10 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                     </span>
                   </div>
 
-                  {/* Passkey authentication row */}
+                  {/* Password authentication row */}
                   <div className="flex items-center justify-between p-4">
                     <div>
-                      <div className="text-xs font-semibold text-white">Passkey authentication</div>
+                      <div className="text-xs font-semibold text-white">Password authentication</div>
                       <div className="text-[10px] text-slate-500 mt-0.5">
                         Encrypted credential storage with salt verification
                       </div>
@@ -984,7 +1077,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
             <div className="space-y-3 pt-1">
               <button
                 type="button"
-                onClick={() => notify('ℹ️ To reset your initial passkey, contact LDM Operations Support or your System Administrator.')}
+                onClick={() => notify('ℹ️ To reset your initial password, contact LDM Operations Support or your System Administrator.')}
                 className="text-xs text-blue-400 hover:underline cursor-pointer font-medium block"
               >
                 Forgotten your password?
@@ -1056,7 +1149,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
               </div>
               <h3 className="text-xl font-bold text-white tracking-tight mt-0.5">Update official login email</h3>
               <p className="text-xs text-slate-400 mt-1 leading-relaxed">
-                Modifying your login email alters your recovery credentials and authentication address. You must confirm your current security passkey.
+                Modifying your login email alters your recovery credentials and authentication address. You must confirm your current password.
               </p>
             </div>
 
@@ -1107,7 +1200,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
 
               <div>
                 <label className="block text-[11px] text-slate-400 font-semibold mb-1">
-                  Current Passkey <span className="text-amber-400 text-[10px]">(Verify Identity)</span>
+                  Current Password <span className="text-amber-400 text-[10px]">(Verify Identity)</span>
                 </label>
                 <div className="relative">
                   <input
@@ -1117,7 +1210,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                     autoComplete="new-password"
                     data-lpignore="true"
                     data-1p-ignore="true"
-                    placeholder="Enter current passkey"
+                    placeholder="Enter current password"
                     value={emailPasskeyVerify}
                     onChange={(e) => { setEmailPasskeyVerify(e.target.value); setEmailChangeError(null); }}
                     className="w-full bg-slate-900/90 border border-slate-700/80 rounded-xl pl-3.5 pr-10 py-3 text-xs text-white focus:outline-none focus:border-blue-500 font-mono placeholder:text-slate-500"
@@ -1143,7 +1236,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                 className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-blue-600/30 cursor-pointer flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
               >
                 <ShieldCheck className="w-4 h-4" />
-                <span>{isChangingEmail ? 'Verifying & Updating...' : 'Verify Passkey & Update Email'}</span>
+                <span>{isChangingEmail ? 'Verifying & Updating...' : 'Verify Password & Update Email'}</span>
               </button>
             </div>
           </div>
@@ -1187,7 +1280,7 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
               <div className="p-3 bg-slate-900/80 border border-slate-800 rounded-xl flex items-start gap-3">
                 <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                 <div>
-                  <div className="text-xs font-bold text-white">Passkey Encryption</div>
+                  <div className="text-xs font-bold text-white">Password Encryption</div>
                   <div className="text-[11px] text-slate-400">Cryptographically hashed with salt and stored securely.</div>
                 </div>
               </div>
@@ -1226,6 +1319,580 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
                 Done
               </button>
             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ============================================================= */}
+      {/* POPUP MODAL: TWO-FACTOR AUTHENTICATION (2FA) SETUP             */}
+      {/* ============================================================= */}
+      {is2faModalOpen && typeof document !== 'undefined' && createPortal(
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4">
+          <div
+            className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm cursor-pointer"
+            onClick={() => setIs2faModalOpen(false)}
+          />
+          <div className="relative z-10 w-full max-w-md bg-slate-950 border border-slate-800 rounded-3xl shadow-2xl p-6 sm:p-7 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-1">
+              <span className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                <Smartphone className="w-4 h-4 text-amber-400" /> Two-Factor Authentication (2FA)
+              </span>
+              <button
+                type="button"
+                onClick={() => setIs2faModalOpen(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-full hover:bg-slate-900 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Step Progress Indicator when enrolling */}
+            {totpSetupStep !== 'active' && (
+              <div className="flex items-center gap-2 text-[10px] font-mono font-bold uppercase tracking-wider">
+                <span
+                  className={`px-2.5 py-1 rounded-lg border ${
+                    totpSetupStep === 'qr'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                  }`}
+                >
+                  {totpSetupStep === 'qr' ? 'Step 1 of 2 • Scan QR' : '✓ Step 1 Scanned'}
+                </span>
+                <span className="text-slate-600">→</span>
+                <span
+                  className={`px-2.5 py-1 rounded-lg border ${
+                    totpSetupStep === 'verify'
+                      ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                      : 'bg-slate-900 text-slate-500 border-slate-800'
+                  }`}
+                >
+                  Step 2 of 2 • Enter 6-Digit Code
+                </span>
+              </div>
+            )}
+
+            {/* ========================================================= */}
+            {/* STEP 1: SCAN QR CODE ONLY (NO VERIFICATION INPUT YET)      */}
+            {/* ========================================================= */}
+            {totpSetupStep === 'qr' && (
+              <>
+                <div>
+                  <h3 className="text-xl font-bold text-white tracking-tight">
+                    Scan QR with Authenticator App
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    Open <strong>Google Authenticator</strong>, <strong>Microsoft Authenticator</strong>, or <strong>Apple Passwords</strong> on your phone and scan this QR code first.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-2xl space-y-3 text-xs">
+                  {totpQrDataUrl && (
+                    <div className="flex flex-col items-center justify-center space-y-2">
+                      <div className="bg-white p-3 rounded-2xl border border-slate-200 shadow-lg">
+                        <img
+                          src={totpQrDataUrl}
+                          alt="Authenticator Setup QR Code"
+                          className="w-44 h-44 object-contain"
+                        />
+                      </div>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        Account: <strong className="text-white">{profileEmail || session?.email}</strong>
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="space-y-1 pt-2 border-t border-slate-800/80">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-300 font-bold text-[11px]">Can&apos;t scan? Manual Setup Key (Base32)</span>
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-bold">
+                        RFC 6238 TOTP
+                      </span>
+                    </div>
+                    <div className="p-2 bg-slate-950 border border-slate-800 rounded-xl font-mono text-center text-amber-400 font-bold tracking-wider text-[11px] select-all">
+                      {formatTotpSecretDisplay(getOrCreateTotpSecret(profileEmail || session?.email || ''))}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTotpSetupError(null);
+                    setTotpVerifyInput('');
+                    setTotpSetupStep('verify');
+                  }}
+                  className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl cursor-pointer transition-colors shadow-md"
+                >
+                  I&apos;ve Scanned the QR Code → Continue
+                </button>
+              </>
+            )}
+
+            {/* ========================================================= */}
+            {/* STEP 2: ENTER 6-DIGIT VERIFICATION CODE (AFTER SCANNING)   */}
+            {/* ========================================================= */}
+            {totpSetupStep === 'verify' && (
+              <>
+                <div>
+                  <h3 className="text-xl font-bold text-white tracking-tight">
+                    Enter 6-Digit Verification Code
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1 leading-relaxed">
+                    Your Authenticator app is now generating a 6-digit code every 30 seconds for <strong>{profileEmail || session?.email}</strong>. Enter it below to confirm setup.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-2xl space-y-3 text-xs">
+                  <label className="block text-[11px] font-bold text-slate-300 text-center">
+                    6-Digit Authenticator Code
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoFocus
+                    maxLength={6}
+                    value={totpVerifyInput}
+                    onChange={(e) => {
+                      setTotpSetupError(null);
+                      setTotpVerifyInput(e.target.value.replace(/\D/g, ''));
+                    }}
+                    placeholder="000000"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-center font-mono text-xl font-black tracking-[0.35em] text-white focus:outline-none focus:border-amber-400"
+                  />
+                  <p className="text-[10px] text-slate-400 text-center">
+                    Enter the current 6-digit code displayed in your Authenticator app.
+                  </p>
+                </div>
+
+                {totpSetupError && (
+                  <div className="p-2.5 rounded-xl bg-red-950/60 border border-red-800 text-red-300 text-xs">
+                    {totpSetupError}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2.5 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTotpSetupError(null);
+                      setTotpSetupStep('qr');
+                    }}
+                    className="px-4 py-2.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-colors"
+                  >
+                    ← Back to QR
+                  </button>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const targetEmail = profileEmail || session?.email || '';
+                      setTotpSetupError(null);
+                      if (totpVerifyInput.trim().length !== 6) {
+                        setTotpSetupError('Please enter the 6-digit verification code from your Authenticator app.');
+                        return;
+                      }
+                      const valid = await verifyTotpCode(targetEmail, totpVerifyInput.trim());
+                      if (!valid) {
+                        setTotpSetupError('Invalid 6-digit code. Make sure your phone time is synced and enter the active 6-digit code.');
+                        return;
+                      }
+                      set2faEnrolled(targetEmail, true);
+                      setTwoFactorEnabled(true);
+                      const freshCodes = generateBackupRecoveryCodes(targetEmail, 4);
+                      setBackupCodes(freshCodes);
+                      setIsBackupCodesUnlocked(true);
+                      setTotpSetupStep('active');
+                      notify('🛡️ Authenticator App verified! Save your newly generated single-use backup codes.');
+                    }}
+                    className="flex-1 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl cursor-pointer transition-colors shadow-md"
+                  >
+                    Verify &amp; Enable 2FA
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* ========================================================= */}
+            {/* STEP 3: 2FA ACTIVE + PASSWORD-PROTECTED BACKUP CODES       */}
+            {/* ========================================================= */}
+            {totpSetupStep === 'active' && (
+              <>
+                <div className="space-y-1.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <h3 className="text-xl font-bold text-white tracking-tight">
+                      2FA Protection Active
+                    </h3>
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 text-[11px] font-mono font-bold shrink-0">
+                      ✓ Linked
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Your account (<strong>{profileEmail || session?.email}</strong>) is protected with RFC 6238 Two-Factor Authentication. Each emergency backup code is dynamically generated and <strong>expires immediately once used</strong>.
+                  </p>
+                </div>
+
+                <div className="p-4 bg-slate-900/90 border border-slate-800 rounded-2xl space-y-3 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-mono text-slate-300 uppercase font-bold tracking-wider">
+                      Single-Use Emergency Backup Codes
+                    </span>
+                    <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-bold">
+                      {backupCodes.filter((c) => !c.used).length} / {backupCodes.length} UNUSED
+                    </span>
+                  </div>
+
+                  {!isBackupCodesUnlocked ? (
+                    <>
+                      {/* Masked Backup Codes Preview Tiles */}
+                      <div className="grid grid-cols-2 gap-2">
+                        {backupCodes.map((item, idx) => (
+                          <div
+                            key={idx}
+                            className="rounded-lg bg-slate-950/60 border border-slate-800 px-3.5 py-2.5 flex items-center justify-between font-mono text-xs text-slate-400 select-none"
+                          >
+                            <span className="font-semibold tracking-wider">LDM-••••-••••</span>
+                            <span
+                              className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${
+                                item.used
+                                  ? 'bg-rose-950/70 text-rose-400 border-rose-800/50'
+                                  : 'bg-slate-900 text-slate-500 border-slate-800'
+                              }`}
+                            >
+                              {item.used ? 'EXPIRED' : 'LOCKED'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* Password Verification Gate */}
+                      <div className="pt-2 border-t border-slate-800/80 space-y-2.5">
+                        <label className="block text-[11px] font-bold text-amber-400 flex items-center gap-1.5">
+                          <Lock className="w-3.5 h-3.5" /> Verify Account Password to View or Generate Codes
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showBackupPassVerify ? 'text' : 'password'}
+                            value={backupPassVerifyInput}
+                            onChange={(e) => {
+                              setBackupVerifyError(null);
+                              setBackupPassVerifyInput(e.target.value);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault();
+                                (document.getElementById('verify-backup-pass-btn') as HTMLButtonElement | null)?.click();
+                              }
+                            }}
+                            placeholder="Enter your current account password"
+                            className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-3.5 pr-10 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowBackupPassVerify(!showBackupPassVerify)}
+                            className="absolute right-3 top-2 text-slate-400 hover:text-amber-400 cursor-pointer"
+                          >
+                            {showBackupPassVerify ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                          </button>
+                        </div>
+
+                        {backupVerifyError && (
+                          <div className="p-2 rounded-lg bg-red-950/60 border border-red-800 text-red-300 text-[11px]">
+                            {backupVerifyError}
+                          </div>
+                        )}
+
+                        <button
+                          id="verify-backup-pass-btn"
+                          type="button"
+                          disabled={isVerifyingBackupPass}
+                          onClick={async () => {
+                            const targetEmail = (profileEmail || session?.email || '').trim().toLowerCase();
+                            const cleanPass = backupPassVerifyInput.trim();
+                            if (!cleanPass) {
+                              setBackupVerifyError('Please enter your account password to verify your identity.');
+                              return;
+                            }
+                            setIsVerifyingBackupPass(true);
+                            setBackupVerifyError(null);
+
+                            const defaultPassMap: Record<string, string> = {
+                              'om@ldmconstruction.ph': 'admin123',
+                              'pm@ldmconstruction.ph': 'pm123',
+                              'finance@ldmconstruction.ph': 'finance123',
+                              'timekeeper@ldmconstruction.ph': 'tk123',
+                            };
+                            const expectedLocalPass = getAccountPasskey(
+                              targetEmail,
+                              defaultPassMap[targetEmail] || 'admin123'
+                            );
+
+                            let verified = cleanPass === expectedLocalPass;
+                            if (!verified) {
+                              try {
+                                const res = await fetch('/api/auth/login', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ email: targetEmail, password: cleanPass }),
+                                });
+                                if (res.ok) verified = true;
+                              } catch {
+                                /* offline fallback already checked */
+                              }
+                            }
+
+                            setIsVerifyingBackupPass(false);
+                            if (!verified) {
+                              setBackupVerifyError('Incorrect password. Access to view or regenerate backup codes denied.');
+                              return;
+                            }
+
+                            setBackupCodes(getBackupRecoveryCodes(targetEmail));
+                            setIsBackupCodesUnlocked(true);
+                            setBackupPassVerifyInput('');
+                          }}
+                          className="w-full py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs rounded-xl cursor-pointer transition-colors shadow-sm disabled:opacity-50"
+                        >
+                          {isVerifyingBackupPass ? 'Verifying Password...' : 'Verify Password & Reveal Backup Codes'}
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Unlocked Dynamic Single-Use Backup Code Tiles */}
+                      <div className="grid grid-cols-2 gap-2">
+                        {backupCodes.map((item, idx) => (
+                          <div
+                            key={idx}
+                            onClick={() => {
+                              if (!item.used && navigator.clipboard) {
+                                navigator.clipboard.writeText(item.code);
+                                notify(`📋 Copied ${item.code} to clipboard.`);
+                              }
+                            }}
+                            title={item.used ? 'Backup code already used' : 'Click to copy backup code'}
+                            className={`rounded-lg bg-slate-950/60 border px-3.5 py-2.5 flex items-center justify-between font-mono text-xs ${
+                              item.used
+                                ? 'border-rose-900/40 text-slate-500 line-through select-none'
+                                : 'border-slate-800 hover:border-emerald-500/40 text-emerald-400 cursor-pointer group'
+                            }`}
+                          >
+                            <span className="font-bold tracking-wider">{item.code}</span>
+                            {item.used ? (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-950/80 text-rose-400 border border-rose-800/60 no-underline font-bold">
+                                EXPIRED
+                              </span>
+                            ) : (
+                              <Copy className="w-3.5 h-3.5 text-slate-500 group-hover:text-emerald-400 shrink-0 transition-colors" />
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-800/80">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const unusedList = backupCodes
+                              .filter((c) => !c.used)
+                              .map((c) => c.code)
+                              .join('\n');
+                            if (unusedList && navigator.clipboard) {
+                              navigator.clipboard.writeText(unusedList);
+                              notify('📋 Unused emergency backup codes copied to clipboard.');
+                            }
+                          }}
+                          className="flex-1 py-2 bg-slate-950 hover:bg-slate-800 text-slate-200 border border-slate-700 font-bold text-[11px] rounded-xl cursor-pointer transition-colors"
+                        >
+                          Copy Unused Codes
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const targetEmail = profileEmail || session?.email || '';
+                            const newBatch = generateBackupRecoveryCodes(targetEmail, 4);
+                            setBackupCodes(newBatch);
+                            notify('🔄 Generated 4 new single-use backup codes! All previous codes are now expired.');
+                          }}
+                          className="flex-1 py-2 bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/40 font-bold text-[11px] rounded-xl cursor-pointer transition-colors"
+                        >
+                          ↻ Generate New Codes
+                        </button>
+                      </div>
+
+                      <p className="text-[10px] text-slate-400 leading-relaxed">
+                        Save these codes offline. Each code works <strong>only once</strong> and expires immediately upon use. Generating new codes permanently invalidates your old set.
+                      </p>
+                    </>
+                  )}
+                </div>
+
+                {/* Smooth Inline Unlink Confirmation Drawer (Expands above footer when Unlink App is clicked) */}
+                {showUnlinkConfirm && (
+                  <div className="p-3.5 bg-rose-950/30 border border-rose-500/40 rounded-xl space-y-2.5 text-xs animate-in fade-in duration-150">
+                    <div className="font-bold text-rose-300 flex items-center gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                      <span>
+                        {isBackupCodesUnlocked
+                          ? 'Disable 2FA and unlink your authenticator app?'
+                          : 'Enter your password to disable 2FA and unlink your authenticator app'}
+                      </span>
+                    </div>
+
+                    {!isBackupCodesUnlocked && (
+                      <div className="relative">
+                        <input
+                          type={showUnlinkPass ? 'text' : 'password'}
+                          value={unlinkPassInput}
+                          onChange={(e) => {
+                            setUnlinkError(null);
+                            setUnlinkPassInput(e.target.value);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              (document.getElementById('confirm-unlink-2fa-btn') as HTMLButtonElement | null)?.click();
+                            }
+                          }}
+                          placeholder="Enter your current account password"
+                          className="w-full bg-slate-950 border border-rose-500/40 rounded-xl pl-3.5 pr-10 py-2 text-xs text-white focus:outline-none focus:border-rose-400"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowUnlinkPass(!showUnlinkPass)}
+                          className="absolute right-3 top-2 text-slate-400 hover:text-rose-300 cursor-pointer"
+                        >
+                          {showUnlinkPass ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    )}
+
+                    {unlinkError && (
+                      <div className="p-2 rounded-lg bg-red-950/70 border border-red-800 text-red-200 text-[11px]">
+                        {unlinkError}
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-end gap-2 pt-0.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowUnlinkConfirm(false);
+                          setUnlinkPassInput('');
+                          setUnlinkError(null);
+                        }}
+                        className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 font-semibold text-xs rounded-lg cursor-pointer transition-colors"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        id="confirm-unlink-2fa-btn"
+                        type="button"
+                        disabled={isUnlinking2fa}
+                        onClick={async () => {
+                          const targetEmail = (profileEmail || session?.email || '').trim().toLowerCase();
+
+                          if (!isBackupCodesUnlocked) {
+                            const cleanPass = unlinkPassInput.trim();
+                            if (!cleanPass) {
+                              setUnlinkError('Please enter your current account password to confirm.');
+                              return;
+                            }
+                            setIsUnlinking2fa(true);
+                            setUnlinkError(null);
+
+                            const defaultPassMap: Record<string, string> = {
+                              'om@ldmconstruction.ph': 'admin123',
+                              'pm@ldmconstruction.ph': 'pm123',
+                              'finance@ldmconstruction.ph': 'finance123',
+                              'timekeeper@ldmconstruction.ph': 'tk123',
+                            };
+                            const expectedLocalPass = getAccountPasskey(
+                              targetEmail,
+                              defaultPassMap[targetEmail] || 'admin123'
+                            );
+
+                            let verified = cleanPass === expectedLocalPass;
+                            if (!verified) {
+                              try {
+                                const res = await fetch('/api/auth/login', {
+                                  method: 'POST',
+                                  headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ email: targetEmail, password: cleanPass }),
+                                });
+                                if (res.ok) verified = true;
+                              } catch {
+                                /* offline fallback already checked */
+                              }
+                            }
+
+                            setIsUnlinking2fa(false);
+                            if (!verified) {
+                              setUnlinkError('Incorrect password. Authenticator app was not unlinked.');
+                              return;
+                            }
+                          }
+
+                          // 1. Clear 2FA enrollment and TOTP data in localStorage & state
+                          set2faEnrolled(targetEmail, false);
+                          clearAccountTotpData(targetEmail);
+                          setTwoFactorEnabled(false);
+                          setIsBackupCodesUnlocked(false);
+                          setShowUnlinkConfirm(false);
+                          setUnlinkPassInput('');
+                          setTotpVerifyInput('');
+                          setTotpSetupError(null);
+
+                          // 2. Record Audit Trail entry
+                          logAuditEvent({
+                            entityId: session?.id || 'SECURITY-2FA',
+                            action: '2FA_UNLINKED',
+                            actorName: profileName || session?.name || 'Operations Lead',
+                            actorRole: session?.role || 'Staff',
+                            details: `User unlinked Authenticator App / disabled 2FA (${targetEmail})`,
+                          });
+
+                          // 3. Transition modal back to 2FA Setup / QR Code Enrollment view
+                          setTotpSetupStep('qr');
+                          notify('Authenticator app unlinked. You can link a new device anytime.');
+                        }}
+                        className="px-4 py-1.5 bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs rounded-lg cursor-pointer transition-colors shadow-sm disabled:opacity-50"
+                      >
+                        {isUnlinking2fa ? 'Unlinking...' : 'Confirm Unlink'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Balanced Equal-Height Footer Buttons (grid-cols-2 gap-3) */}
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTotpSetupError(null);
+                      setTotpVerifyInput('');
+                      setShowUnlinkConfirm(false);
+                      setTotpSetupStep('qr');
+                    }}
+                    className="h-11 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 whitespace-nowrap bg-slate-900 hover:bg-slate-800 text-slate-200 border border-slate-700 cursor-pointer transition-colors"
+                  >
+                    <QrCode className="w-4 h-4 shrink-0" />
+                    <span>View QR Code</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUnlinkError(null);
+                      setUnlinkPassInput('');
+                      setShowUnlinkConfirm((prev) => !prev);
+                    }}
+                    className="h-11 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 whitespace-nowrap bg-rose-600/15 hover:bg-rose-600/25 text-rose-300 border border-rose-500/40 cursor-pointer transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4 shrink-0" />
+                    <span>Unlink App</span>
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>,
         document.body

@@ -18,7 +18,6 @@ export const CTVILL_ORGANIZATION_HIERARCHY: DepartmentConfig[] = [
     phase: 'Strategic Governance',
     badgeColor: 'border-purple-600/60 text-purple-300 bg-purple-950/60',
     roles: [
-      { title: 'Board of Directors / President', defaultDailyRate: 5000, description: 'Corporate board executive governance & shareholder direction', isFieldRole: false },
       { title: 'Chief Executive Officer (CEO)', defaultDailyRate: 4500, description: 'Executive strategic leadership & enterprise growth', isFieldRole: false },
       { title: 'Chief Operating Officer (COO)', defaultDailyRate: 4000, description: 'Operational oversight across CREATE, CONSTRUCT & AFTER-CARE', isFieldRole: false },
     ]
@@ -28,11 +27,11 @@ export const CTVILL_ORGANIZATION_HIERARCHY: DepartmentConfig[] = [
     phase: 'CREATE Phase',
     badgeColor: 'border-blue-600/60 text-blue-300 bg-blue-950/60',
     roles: [
-      { title: 'Principal Architect', defaultDailyRate: 2800, description: 'Lead architectural vision, spatial planning & design sign-offs', isFieldRole: false },
-      { title: 'Design & Interior Architects', defaultDailyRate: 2200, description: 'Residential, commercial, and custom interior architectural layouts', isFieldRole: false },
-      { title: 'Lead Electrical & Mechanical Engineers', defaultDailyRate: 2400, description: 'MEP engineering calculations, equipment sizing & building code compliance', isFieldRole: false },
-      { title: 'PEZA Permitting Specialists', defaultDailyRate: 1800, description: 'City hall clearances, building permits & regulatory filings', isFieldRole: false },
-      { title: 'Quantity Surveyors & Estimators', defaultDailyRate: 2000, description: 'Bill of Quantities (BOQ), material takeoffs & procurement budgets', isFieldRole: false },
+      { title: 'Architect', defaultDailyRate: 2600, description: 'Architectural design, spatial planning & structural layout sign-offs', isFieldRole: false },
+      { title: 'Interior Designer', defaultDailyRate: 2200, description: 'Residential, commercial, and custom interior fit-out specifications', isFieldRole: false },
+      { title: 'Electrical Engineer', defaultDailyRate: 2400, description: 'Electrical load calculations, MEPFS sizing & PEC compliance', isFieldRole: false },
+      { title: 'Master Plumber', defaultDailyRate: 2000, description: 'Sanitary, water supply, and drainage layout design & inspection', isFieldRole: false },
+      { title: 'Quantity Surveyor & Estimator', defaultDailyRate: 2000, description: 'Bill of Quantities (BOQ), material takeoffs & procurement budgets', isFieldRole: false },
     ]
   },
   {
@@ -40,11 +39,9 @@ export const CTVILL_ORGANIZATION_HIERARCHY: DepartmentConfig[] = [
     phase: 'CONSTRUCT Phase',
     badgeColor: 'border-amber-600/60 text-amber-300 bg-amber-950/60',
     roles: [
-      { title: 'Project Managers (PM)', defaultDailyRate: 3000, description: 'Site master schedule, trade coordination & contract milestone sign-off', isFieldRole: true },
-      { title: 'Project & Site Engineers', defaultDailyRate: 1800, description: 'Civil/structural field execution & technical QA inspections', isFieldRole: true },
-      { title: 'Safety Officers (EHSO)', defaultDailyRate: 1400, description: 'DOLE-BOSH compliance, hazard identification & safety briefings', isFieldRole: true },
-      { title: 'Site Foremen', defaultDailyRate: 1200, description: 'On-site trade supervision, daily roll-call & tool management', isFieldRole: true },
-      { title: 'Skilled Trade Crews (Electricians, Carpenters, Painters, Masons)', defaultDailyRate: 850, description: 'Direct in-house craft execution (electrical, joinery, painting, masonry)', isFieldRole: true },
+      { title: 'Project Manager / Site Engineer', defaultDailyRate: 2500, description: 'Unified field lead managing 14-phase Master Gantt, WBS execution & QA inspections', isFieldRole: true },
+      { title: 'Safety Officer', defaultDailyRate: 1400, description: 'DOLE-BOSH compliance, hazard identification & daily toolbox safety briefings', isFieldRole: true },
+      { title: 'Skilled Trade Crew (Electricians, Carpenters, Masons, Plumbers)', defaultDailyRate: 900, description: 'Direct in-house craft execution (senior skilled artisan acts as on-site lead)', isFieldRole: true },
     ]
   },
   {
@@ -61,9 +58,9 @@ export const CTVILL_ORGANIZATION_HIERARCHY: DepartmentConfig[] = [
     phase: 'Corporate Services',
     badgeColor: 'border-cyan-600/60 text-cyan-300 bg-cyan-950/60',
     roles: [
-      { title: 'Finance & Accounting Department', defaultDailyRate: 1600, description: 'Disbursement ledgers, payroll runs, cash flow & financial reporting', isFieldRole: false },
-      { title: 'Human Resources & Admin Department', defaultDailyRate: 1400, description: 'Talent management, labor compliance, benefits & administrative affairs', isFieldRole: false },
-      { title: 'Procurement & Logistics Department', defaultDailyRate: 1500, description: 'Vendor POs, bulk materials logistics, fleet & heavy equipment rentals', isFieldRole: false },
+      { title: 'Finance & Accounting', defaultDailyRate: 1600, description: 'Disbursement ledgers, payroll runs, cash flow & financial reporting', isFieldRole: false },
+      { title: 'Human Resources & Admin', defaultDailyRate: 1400, description: 'Talent management, labor compliance, benefits & administrative affairs', isFieldRole: false },
+      { title: 'Procurement & Logistics (On-Delivery)', defaultDailyRate: 1500, description: 'Vendor POs, site material deliveries, and supplier coordination', isFieldRole: false },
     ]
   }
 ];

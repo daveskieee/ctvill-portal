@@ -47,6 +47,37 @@ export interface StoredSessionEnvelope {
 const CURRENT_ENVELOPE_VERSION = 2;
 
 /**
+ * Normalizes any legacy corporate email in a UserSession object to @ldmconstruction.ph
+ * and migrates cached account settings in localStorage without touching ctvill_* project keys.
+ */
+export function normalizeSessionEmail(session: UserSession): UserSession {
+  if (!session || typeof session !== 'object') return session;
+  const rawEmail = String(session.email || '').trim();
+  const normalizedEmail = rawEmail.includes('@')
+    ? `${rawEmail.split('@')[0].toLowerCase()}@ldmconstruction.ph`
+    : rawEmail;
+  if (typeof window !== 'undefined' && session.id) {
+    try {
+      const settingsKey = `ctvill_account_settings_${session.id}`;
+      const rawSettings = localStorage.getItem(settingsKey);
+      if (rawSettings) {
+        const parsedSettings = JSON.parse(rawSettings);
+        if (parsedSettings && typeof parsedSettings.profileEmail === 'string' && parsedSettings.profileEmail.includes('@') && !parsedSettings.profileEmail.toLowerCase().endsWith('@ldmconstruction.ph')) {
+          parsedSettings.profileEmail = `${parsedSettings.profileEmail.split('@')[0].toLowerCase()}@ldmconstruction.ph`;
+          localStorage.setItem(settingsKey, JSON.stringify(parsedSettings));
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (normalizedEmail !== rawEmail) {
+    return { ...session, email: normalizedEmail };
+  }
+  return session;
+}
+
+/**
  * Check whether a session is an offline demo session that should not be terminated by backend 401s.
  */
 export function isDemoSession(session: any): boolean {
@@ -111,6 +142,7 @@ export function getStoredSession(): UserSession | null {
       const parsed = JSON.parse(rawSession);
       if (isValidEnvelope(parsed)) {
         if (!isExpired(parsed, now)) {
+          parsed.session = normalizeSessionEmail(parsed.session);
           touchSessionActivity(parsed, false);
           return parsed.session;
         } else {
@@ -120,7 +152,7 @@ export function getStoredSession(): UserSession | null {
         }
       } else if (parsed && typeof parsed === 'object') {
         const sessionObj = parsed.session || parsed;
-        if (isSessionValid(sessionObj)) return sessionObj;
+        if (isSessionValid(sessionObj)) return normalizeSessionEmail(sessionObj);
       }
     }
   } catch {
@@ -134,6 +166,7 @@ export function getStoredSession(): UserSession | null {
       const parsed = JSON.parse(rawLocal);
       if (isValidEnvelope(parsed)) {
         if (!isExpired(parsed, now)) {
+          parsed.session = normalizeSessionEmail(parsed.session);
           touchSessionActivity(parsed, true);
           return parsed.session;
         } else {
@@ -143,7 +176,7 @@ export function getStoredSession(): UserSession | null {
         }
       } else if (parsed && typeof parsed === 'object') {
         const sessionObj = parsed.session || parsed;
-        if (isSessionValid(sessionObj)) return sessionObj;
+        if (isSessionValid(sessionObj)) return normalizeSessionEmail(sessionObj);
       }
     }
   } catch {
@@ -157,7 +190,7 @@ export function getStoredSession(): UserSession | null {
       const parsed = JSON.parse(rawCtwll);
       const sessionObj = parsed?.session || parsed;
       if (isSessionValid(sessionObj)) {
-        return sessionObj;
+        return normalizeSessionEmail(sessionObj);
       }
     }
   } catch {
@@ -171,9 +204,10 @@ export function getStoredSession(): UserSession | null {
  * Persist user session with cryptographic-like envelope metadata (TTL + Inactivity pulse).
  * Persists to both localStorage and sessionStorage to eliminate refresh race conditions.
  */
-export function saveStoredSession(session: UserSession): void {
+export function saveStoredSession(rawSession: UserSession): void {
   if (typeof window === 'undefined') return;
 
+  const session = normalizeSessionEmail(rawSession);
   const rememberMe = Boolean(session.rememberMe);
   const envelope = wrapSession(session, rememberMe);
   const serialized = JSON.stringify(envelope);

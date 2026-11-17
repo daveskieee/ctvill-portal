@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { DailySiteLog, ProjectProfile, Contractor } from '../types';
 import { resolveProjectCoordinatesSync, searchLocationsNationwide, resolveLocalGeocoding } from '../utils/geocoding';
+import { InteractiveLeafletPinMap } from './InteractiveLeafletPinMap';
 import { useTheme } from '../context/ThemeContext';
 
 interface DailySiteDiaryProps {
@@ -350,6 +351,7 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
   const [isMapPickerOpen, setIsMapPickerOpen] = useState(false);
   const [pickerLat, setPickerLat] = useState<number>(selectedLocation.lat);
   const [pickerLon, setPickerLon] = useState<number>(selectedLocation.lon);
+  const [pickerFlyTrigger, setPickerFlyTrigger] = useState<number>(0);
   const [pickerLocationName, setPickerLocationName] = useState<string>(selectedLocation.region || selectedLocation.name);
   const [mapSearchInput, setMapSearchInput] = useState('');
   const [mapSuggestions, setMapSuggestions] = useState<any[]>([]);
@@ -398,8 +400,9 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
   };
 
   const handleSelectPresetOrSuggestion = (lat: number, lon: number, name: string) => {
-    setPickerLat(parseFloat(lat.toFixed(6)));
-    setPickerLon(parseFloat(lon.toFixed(6)));
+    setPickerLat(parseFloat(Number(lat).toFixed(6)));
+    setPickerLon(parseFloat(Number(lon).toFixed(6)));
+    setPickerFlyTrigger(prev => prev + 1);
     setPickerLocationName(name);
     setMapSuggestions([]);
     setMapSearchInput(name);
@@ -1371,8 +1374,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               type="button"
               onClick={handleToggleForceMajeure}
               className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer border ${isForceMajeureSuspended
-                  ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400 shadow-xs'
-                  : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-slate-700'
+                ? 'bg-rose-600 hover:bg-rose-500 text-white border-rose-400 shadow-xs'
+                : 'bg-slate-800 hover:bg-slate-700 text-rose-300 border-slate-700'
                 }`}
               title="Toggle Work Stoppage due to Severe Weather (Force Majeure)"
             >
@@ -1385,8 +1388,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               type="button"
               onClick={() => setIsManualOverride(prev => !prev)}
               className={`px-2.5 py-1.5 rounded-lg text-xs transition-colors border flex items-center gap-1.5 cursor-pointer ${isManualOverride
-                  ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
-                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                ? 'bg-amber-500/20 border-amber-500/50 text-amber-300'
+                : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
                 }`}
               title="Toggle Manual Site Weather Fallback"
             >
@@ -1498,8 +1501,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                     } : null);
                   }}
                   className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium transition cursor-pointer ${manualCondition === condition
-                      ? 'bg-amber-500 text-slate-950 font-bold'
-                      : 'text-slate-400 hover:text-white hover:bg-slate-900'
+                    ? 'bg-amber-500 text-slate-950 font-bold'
+                    : 'text-slate-400 hover:text-white hover:bg-slate-900'
                     }`}
                 >
                   <Icon className="w-3.5 h-3.5" />
@@ -1662,8 +1665,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               </div>
             </div>
 
-            {/* Core Meteorological Data Grid (4 Sensors) - Syncs Live or Reflects Selected Day */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            {/* Core Meteorological Data Grid (3 Sensors: Humidity, Wind Speed, Precipitation) */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
                 <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase tracking-wider">
                   <span>HUMIDITY</span>
@@ -1715,25 +1718,6 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                     : 'Precipitation Probability'}
                 </div>
               </div>
-
-              <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5 space-y-1">
-                <div className="flex items-center justify-between text-slate-400 text-[11px] font-mono uppercase tracking-wider">
-                  <span>{selectedForecastIndex === 0 ? 'BAROMETER' : 'TEMP RANGE'}</span>
-                  {selectedForecastIndex === 0 ? (
-                    <Gauge className="w-3.5 h-3.5 text-purple-400" />
-                  ) : (
-                    <Thermometer className="w-3.5 h-3.5 text-amber-400" />
-                  )}
-                </div>
-                <div className="text-lg font-bold font-mono text-white">
-                  {selectedForecastIndex === 0
-                    ? (liveWeather ? `${liveWeather.pressure.toFixed(0)} hPa` : '1012 hPa')
-                    : `${selectedDay.tempMin}° – ${selectedDay.tempMax}°C`}
-                </div>
-                <div className="text-[10px] text-slate-400">
-                  {selectedForecastIndex === 0 ? 'Atmospheric pressure' : 'Forecasted Diurnal Range'}
-                </div>
-              </div>
             </div>
 
             {/* Field Operational Weather Advisory Banner */}
@@ -1755,8 +1739,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                 type="button"
                 onClick={() => setChartTab('temperature')}
                 className={`pb-2.5 transition-all cursor-pointer relative ${chartTab === 'temperature'
-                    ? 'text-amber-400 font-bold border-b-2 border-amber-400'
-                    : 'text-slate-400 hover:text-slate-200'
+                  ? 'text-amber-400 font-bold border-b-2 border-amber-400'
+                  : 'text-slate-400 hover:text-slate-200'
                   }`}
               >
                 Temperature
@@ -1765,8 +1749,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                 type="button"
                 onClick={() => setChartTab('precipitation')}
                 className={`pb-2.5 transition-all cursor-pointer relative ${chartTab === 'precipitation'
-                    ? 'text-sky-400 font-bold border-b-2 border-sky-400'
-                    : 'text-slate-400 hover:text-slate-200'
+                  ? 'text-sky-400 font-bold border-b-2 border-sky-400'
+                  : 'text-slate-400 hover:text-slate-200'
                   }`}
               >
                 Precipitation
@@ -1775,8 +1759,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                 type="button"
                 onClick={() => setChartTab('wind')}
                 className={`pb-2.5 transition-all cursor-pointer relative ${chartTab === 'wind'
-                    ? 'text-teal-400 font-bold border-b-2 border-teal-400'
-                    : 'text-slate-400 hover:text-slate-200'
+                  ? 'text-teal-400 font-bold border-b-2 border-teal-400'
+                  : 'text-slate-400 hover:text-slate-200'
                   }`}
               >
                 Wind
@@ -1907,8 +1891,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                     type="button"
                     onClick={() => setSelectedForecastIndex(idx)}
                     className={`flex flex-col items-center justify-between p-3 rounded-xl transition-all cursor-pointer text-center ${isSelected
-                        ? 'bg-slate-800 border border-amber-500/50 shadow-md ring-1 ring-amber-400/20'
-                        : 'bg-slate-900/60 hover:bg-slate-800/60 border border-slate-800 hover:border-slate-700'
+                      ? 'bg-slate-800 border border-amber-500/50 shadow-md ring-1 ring-amber-400/20'
+                      : 'bg-slate-900/60 hover:bg-slate-800/60 border border-slate-800 hover:border-slate-700'
                       }`}
                   >
                     <span className="text-xs font-semibold text-slate-300">
@@ -1974,8 +1958,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
             <button
               onClick={() => setIsSimulationMode(!isSimulationMode)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition border cursor-pointer ${isSimulationMode
-                  ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
-                  : 'bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700'
+                ? 'bg-amber-500 text-slate-950 border-amber-400 font-bold'
+                : 'bg-slate-800 text-slate-200 border-slate-700 hover:bg-slate-700'
                 }`}
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -1999,8 +1983,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               key={trade.id}
               onClick={() => setSelectedTrade(trade)}
               className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${selectedTrade.id === trade.id
-                  ? 'bg-indigo-600 text-white font-semibold shadow-xs'
-                  : 'bg-slate-950 border border-slate-800 text-slate-400 hover:text-white'
+                ? 'bg-indigo-600 text-white font-semibold shadow-xs'
+                : 'bg-slate-950 border border-slate-800 text-slate-400 hover:text-white'
                 }`}
             >
               {trade.name}
@@ -2475,8 +2459,8 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                           );
                         }}
                         className={`p-3 rounded-xl border transition-all cursor-pointer flex items-center justify-between ${isSelected
-                            ? 'bg-amber-950/20 border-amber-500/50 text-white'
-                            : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
+                          ? 'bg-amber-950/20 border-amber-500/50 text-white'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-400 hover:border-slate-700'
                           }`}
                       >
                         <div>
@@ -2661,23 +2645,27 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
 
                 {/* Suggestions Dropdown */}
                 {mapSuggestions.length > 0 && (
-                  <div className="absolute left-0 right-0 top-full mt-1.5 bg-slate-950 border border-amber-500/50 rounded-xl shadow-2xl z-30 max-h-48 overflow-y-auto divide-y divide-slate-800">
-                    {mapSuggestions.map((sug, idx) => (
-                      <button
-                        key={`${sug.displayName}-${idx}`}
-                        type="button"
-                        onClick={() => handleSelectPresetOrSuggestion(sug.lat, sug.lon, sug.displayName)}
-                        className="w-full px-3.5 py-2.5 text-left text-xs hover:bg-amber-500/10 cursor-pointer flex items-center justify-between transition-colors"
-                      >
-                        <div>
-                          <div className="font-semibold text-white">{sug.displayName}</div>
-                          {sug.subLabel && <div className="text-[10px] text-slate-400">{sug.subLabel}</div>}
-                        </div>
-                        <div className="font-mono text-[10px] text-amber-400 shrink-0">
-                          {sug.lat.toFixed(4)}°, {sug.lon.toFixed(4)}°
-                        </div>
-                      </button>
-                    ))}
+                  <div className="absolute left-0 right-0 top-full mt-1.5 bg-slate-950 border border-amber-500/50 rounded-xl shadow-2xl z-[600] max-h-48 overflow-y-auto divide-y divide-slate-800">
+                    {mapSuggestions.map((sug, idx) => {
+                      const sLat = Number(sug.lat ?? 14.246909);
+                      const sLon = Number(sug.lon ?? sug.lng ?? 121.138789);
+                      return (
+                        <button
+                          key={`${sug.displayName}-${idx}`}
+                          type="button"
+                          onClick={() => handleSelectPresetOrSuggestion(sLat, sLon, sug.displayName)}
+                          className="w-full px-3.5 py-2.5 text-left text-xs hover:bg-amber-500/10 cursor-pointer flex items-center justify-between transition-colors"
+                        >
+                          <div>
+                            <div className="font-semibold text-white">{sug.displayName}</div>
+                            {sug.subLabel && <div className="text-[10px] text-slate-400">{sug.subLabel}</div>}
+                          </div>
+                          <div className="font-mono text-[10px] text-amber-400 shrink-0">
+                            {sLat.toFixed(4)}°, {sLon.toFixed(4)}°
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2698,70 +2686,16 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
               </div>
             </div>
 
-            {/* Interactive OpenStreetMap Embed Canvas */}
-            <div className="rounded-xl overflow-hidden border border-slate-800 bg-slate-950 relative">
-              <iframe
-                title="Interactive Project Map View"
-                width="100%"
-                height="280"
-                frameBorder="0"
-                scrolling="no"
-                marginHeight={0}
-                marginWidth={0}
-                src={`https://www.openstreetmap.org/export/embed.html?bbox=${(pickerLon - 0.008).toFixed(6)}%2C${(pickerLat - 0.006).toFixed(6)}%2C${(pickerLon + 0.008).toFixed(6)}%2C${(pickerLat + 0.006).toFixed(6)}&layer=mapnik&marker=${pickerLat.toFixed(6)}%2C${pickerLon.toFixed(6)}`}
-                className="w-full h-72 opacity-90 contrast-105"
-              />
-
-              {/* Live Pin Information Overlay Pill */}
-              <div className="absolute top-3 left-3 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-lg px-3 py-1.5 shadow-lg flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-amber-400 animate-bounce" />
-                <div>
-                  <div className="text-[10px] font-mono uppercase text-slate-400">Current Pin Target</div>
-                  <div className="text-xs font-mono font-bold text-white">
-                    {pickerLat.toFixed(6)}° N, {pickerLon.toFixed(6)}° E
-                  </div>
-                </div>
-              </div>
-
-              {/* Directional Nudge Pad (Precision Fine-Tuning) */}
-              <div className="absolute bottom-3 right-3 bg-slate-900/90 backdrop-blur-md border border-slate-700/80 rounded-xl p-1.5 shadow-lg flex flex-col items-center gap-1">
-                <span className="text-[9px] font-mono uppercase text-slate-400 tracking-wider">Nudge Pin</span>
-                <button
-                  type="button"
-                  onClick={() => handleNudgePin(0.001, 0)}
-                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-mono cursor-pointer"
-                  title="Nudge North (+0.001°)"
-                >
-                  ▲ North
-                </button>
-                <div className="flex items-center gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleNudgePin(0, -0.001)}
-                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-mono cursor-pointer"
-                    title="Nudge West (-0.001°)"
-                  >
-                    ◀ West
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleNudgePin(0, 0.001)}
-                    className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-mono cursor-pointer"
-                    title="Nudge East (+0.001°)"
-                  >
-                    East ▶
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => handleNudgePin(-0.001, 0)}
-                  className="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-mono cursor-pointer"
-                  title="Nudge South (-0.001°)"
-                >
-                  ▼ South
-                </button>
-              </div>
-            </div>
+            {/* Real Interactive Leaflet Map with Draggable Pin & Click-to-Drop */}
+            <InteractiveLeafletPinMap
+              lat={pickerLat}
+              lon={pickerLon}
+              flyToTrigger={pickerFlyTrigger}
+              onChange={(nextLat, nextLon) => {
+                setPickerLat(nextLat);
+                setPickerLon(nextLon);
+              }}
+            />
 
             {/* Coordinate Numeric Inputs & Address */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2809,21 +2743,43 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
             <div className="pt-3 border-t border-slate-800 flex flex-col sm:flex-row items-center justify-between gap-3">
               <button
                 type="button"
+                disabled={isGpsLocating}
                 onClick={() => {
-                  if (navigator.geolocation) {
-                    navigator.geolocation.getCurrentPosition((pos) => {
-                      handleSelectPresetOrSuggestion(
-                        pos.coords.latitude,
-                        pos.coords.longitude,
-                        `Device GPS (${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)})`
-                      );
-                    });
+                  if (!navigator.geolocation) {
+                    handleSelectPresetOrSuggestion(14.244357, 121.136757, 'Cabuyao, Laguna HQ Fallback');
+                    setNotification(
+                      '⚠️ Location permission denied or unavailable on this device — centered on Cabuyao HQ fallback'
+                    );
+                    setTimeout(() => setNotification(null), 4500);
+                    return;
                   }
+                  setIsGpsLocating(true);
+                  navigator.geolocation.getCurrentPosition(
+                    (pos) => {
+                      setIsGpsLocating(false);
+                      const nextLat = Number(pos.coords.latitude.toFixed(6));
+                      const nextLon = Number(pos.coords.longitude.toFixed(6));
+                      handleSelectPresetOrSuggestion(
+                        nextLat,
+                        nextLon,
+                        `Device GPS (${nextLat.toFixed(6)}, ${nextLon.toFixed(6)})`
+                      );
+                    },
+                    () => {
+                      setIsGpsLocating(false);
+                      handleSelectPresetOrSuggestion(14.244357, 121.136757, 'Cabuyao, Laguna HQ Fallback');
+                      setNotification(
+                        '⚠️ Location permission denied or unavailable on this device — centered on Cabuyao HQ fallback'
+                      );
+                      setTimeout(() => setNotification(null), 4500);
+                    },
+                    { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+                  );
                 }}
-                className="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-medium cursor-pointer flex items-center gap-1.5 transition"
+                className="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-medium cursor-pointer flex items-center gap-1.5 transition disabled:opacity-60"
               >
-                <LocateFixed className="w-3.5 h-3.5 text-cyan-400" />
-                <span>Use Current Device GPS</span>
+                <LocateFixed className={`w-3.5 h-3.5 text-cyan-400 ${isGpsLocating ? 'animate-spin' : ''}`} />
+                <span>{isGpsLocating ? 'Locating...' : 'Use Current Device GPS'}</span>
               </button>
 
               <div className="flex items-center gap-2 self-end sm:self-auto">

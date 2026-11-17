@@ -166,16 +166,24 @@ export type CTVillDepartment =
 
 export type CTVillRole =
   // Executive Leadership
-  | 'Board of Directors / President'
   | 'Chief Executive Officer (CEO)'
   | 'Chief Operating Officer (COO)'
+  | 'Board of Directors / President'
   // Design & Pre-Construction ("CREATE" Phase)
+  | 'Architect'
+  | 'Interior Designer'
+  | 'Electrical Engineer'
+  | 'Master Plumber'
+  | 'Quantity Surveyor & Estimator'
   | 'Principal Architect'
   | 'Design & Interior Architects'
   | 'Lead Electrical & Mechanical Engineers'
   | 'PEZA Permitting Specialists'
   | 'Quantity Surveyors & Estimators'
   // Project Management & Construction ("CONSTRUCT" Phase)
+  | 'Project Manager / Site Engineer'
+  | 'Safety Officer'
+  | 'Skilled Trade Crew (Electricians, Carpenters, Masons, Plumbers)'
   | 'Project Managers (PM)'
   | 'Project & Site Engineers'
   | 'Safety Officers (EHSO)'
@@ -185,6 +193,9 @@ export type CTVillRole =
   | 'Aftercare Coordinators'
   | 'Facilities Maintenance Technicians'
   // Corporate Support
+  | 'Finance & Accounting'
+  | 'Human Resources & Admin'
+  | 'Procurement & Logistics (On-Delivery)'
   | 'Finance & Accounting Department'
   | 'Human Resources & Admin Department'
   | 'Procurement & Logistics Department';

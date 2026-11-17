@@ -70,19 +70,38 @@ export default function ChangeOrderManager({
   const pendingCount = changeOrders.filter(c => c.status === 'PENDING').length;
   const pendingAmount = changeOrders.filter(c => c.status === 'PENDING').reduce((sum, c) => sum + (Number(c.requestedAmount) || 0), 0);
 
+  const resolveOrderProject = (co: ChangeOrder): string => {
+    if (co.projectName && co.projectName.trim()) return co.projectName.trim();
+    const match = (co.justification || '').match(/^\[([^\]]+)\]/);
+    if (match && match[1]) return match[1].trim();
+    return projects[0]?.name || 'LDM Prime Residential Build';
+  };
+
+  const resolveOrderDate = (co: ChangeOrder): string => {
+    const raw = co.submittedDate || co.createdAt;
+    if (!raw) return new Date().toISOString().split('T')[0];
+    return String(raw).split('T')[0];
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTitle.trim() || formAmount <= 0) return;
 
     setIsSubmitting(true);
     try {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const matchedProj = projects.find(p => p.name === formProject);
       const newOrder: Partial<ChangeOrder> = {
         orderNumber: `CO-${new Date().getFullYear()}-${String(changeOrders.length + 1).padStart(3, '0')}`,
         title: formTitle.trim(),
+        projectId: matchedProj?.id,
+        projectName: formProject,
         contractorName: formContractor,
         requestedAmount: Number(formAmount),
         status: 'PENDING',
-        justification: `[${formProject}] ${formJustification.trim()}`
+        submittedDate: todayStr,
+        createdAt: new Date().toISOString(),
+        justification: formJustification.trim()
       };
 
       if (onSubmitChangeOrder) {
@@ -318,8 +337,10 @@ export default function ChangeOrderManager({
             <thead className="bg-slate-900/90 text-slate-400 font-mono text-[11px] uppercase border-b border-slate-800">
               <tr>
                 <th className="py-3.5 px-4">Order Ref</th>
-                <th className="py-3.5 px-4">Title & Scope</th>
+                <th className="py-3.5 px-4">Title &amp; Scope</th>
+                <th className="py-3.5 px-4">Target Project</th>
                 <th className="py-3.5 px-4">Trade Partner</th>
+                <th className="py-3.5 px-4">Date Requested</th>
                 <th className="py-3.5 px-4 text-right">Requested</th>
                 <th className="py-3.5 px-4 text-right">Approved</th>
                 <th className="py-3.5 px-4 text-center">Status</th>
@@ -329,7 +350,7 @@ export default function ChangeOrderManager({
             <tbody className="divide-y divide-slate-800/60 font-sans">
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="text-center py-12 text-slate-500">
+                  <td colSpan={9} className="text-center py-12 text-slate-500">
                     <FileSpreadsheet className="w-8 h-8 mx-auto mb-2 opacity-30" />
                     <p className="text-sm font-medium">No Change Orders found matching criteria</p>
                     <p className="text-xs text-slate-600 mt-0.5">Click "Raise Change Order" to submit a new scope variation.</p>
@@ -337,19 +358,31 @@ export default function ChangeOrderManager({
                 </tr>
               ) : (
                 filteredOrders.map((order) => {
+                  const targetProjName = resolveOrderProject(order);
+                  const dateRequestedStr = resolveOrderDate(order);
+                  const cleanJustification = (order.justification || '').replace(/^\[[^\]]+\]\s*/, '');
                   return (
                     <tr key={order.id} className="hover:bg-slate-900/50 transition-colors">
-                      <td className="py-3.5 px-4 font-mono font-bold text-amber-400">
+                      <td className="py-3.5 px-4 font-mono font-bold text-amber-400 whitespace-nowrap">
                         {order.orderNumber}
                       </td>
                       <td className="py-3.5 px-4">
                         <div className="font-bold text-white max-w-xs sm:max-w-md truncate">{order.title}</div>
                         <div className="text-[11px] text-slate-400 truncate max-w-xs sm:max-w-md mt-0.5">
-                          {order.justification}
+                          {cleanJustification}
                         </div>
+                      </td>
+                      <td className="py-3.5 px-4">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/30 text-[11px] font-mono font-semibold max-w-[180px] truncate">
+                          <Building2 className="w-3 h-3 text-amber-400 shrink-0" />
+                          <span className="truncate">{targetProjName}</span>
+                        </span>
                       </td>
                       <td className="py-3.5 px-4 text-slate-300 font-medium">
                         {order.contractorName}
+                      </td>
+                      <td className="py-3.5 px-4 font-mono text-[11px] text-slate-300 whitespace-nowrap">
+                        {dateRequestedStr}
                       </td>
                       <td className="py-3.5 px-4 text-right font-mono font-bold text-white">
                         ₱{Number(order.requestedAmount).toLocaleString()}
@@ -618,6 +651,14 @@ export default function ChangeOrderManager({
               </div>
 
               <div className="grid grid-cols-2 gap-3 bg-slate-950 p-3 rounded-xl border border-slate-800/80">
+                <div>
+                  <span className="text-slate-500 block text-[11px]">Target Project</span>
+                  <span className="text-amber-300 font-semibold">{resolveOrderProject(selectedOrder)}</span>
+                </div>
+                <div>
+                  <span className="text-slate-500 block text-[11px]">Date Requested</span>
+                  <span className="text-slate-200 font-mono">{resolveOrderDate(selectedOrder)}</span>
+                </div>
                 <div>
                   <span className="text-slate-500 block text-[11px]">Contractor</span>
                   <span className="text-slate-200 font-medium">{selectedOrder.contractorName}</span>

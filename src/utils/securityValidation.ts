@@ -26,7 +26,7 @@ export function validateEmailPreFlight(rawEmail: string): { valid: boolean; clea
     return {
       valid: false,
       cleanEmail,
-      error: 'Please enter a valid email address with a complete domain (e.g., name@company.com).',
+      error: 'Please enter a valid corporate email address (e.g., name@ldmconstruction.ph).',
     };
   }
   return { valid: true, cleanEmail };

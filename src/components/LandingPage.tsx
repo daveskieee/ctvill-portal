@@ -377,8 +377,21 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
     }
   };
 
+  // Ensure window/document scroll is never locked when LandingPage mounts (e.g., when navigating from Dashboard logo)
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.style.overflow = '';
+      document.documentElement.style.overflowY = 'auto';
+      document.body.style.overflow = '';
+      document.body.style.overflowY = 'auto';
+    }
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
+    }
+  }, []);
+
   return (
-    <div className="bg-slate-950 text-slate-100 min-h-screen font-sans selection:bg-amber-500 selection:text-slate-950" id="landing-page-root">
+    <div className="bg-slate-950 text-slate-100 min-h-screen w-full overflow-y-auto font-sans selection:bg-amber-500 selection:text-slate-950" id="landing-page-root">
       
       {/* MAIN HEADER NAVIGATION */}
       <header className="border-b border-slate-800/80 bg-slate-950/92 backdrop-blur-md sticky top-0 z-40 transform-gpu will-change-transform" id="home">
