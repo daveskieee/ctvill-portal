@@ -29,7 +29,7 @@ export const OperationsSystemSettings: React.FC<OperationsSystemSettingsProps> =
       <div>
         <h2 className="text-xl font-bold text-white tracking-tight">Operations & System Settings</h2>
         <p className="text-xs text-slate-400 mt-1">
-          Configure real-time jobsite telemetry, automated audit intervals, and ERP system parameters.
+          Configure real-time jobsite telemetry, automated audit intervals, and Project Management System parameters.
         </p>
       </div>
 

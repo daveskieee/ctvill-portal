@@ -11,6 +11,7 @@ import {
   Edit3, Trash2
 } from 'lucide-react';
 import { GovernmentPermit, PermitType, ProjectProfile } from '../types';
+import { uploadFileToServer } from '../utils/imageCompression';
 
 interface GovernmentPermitsTrackerProps {
   permits: GovernmentPermit[];
@@ -116,19 +117,33 @@ export default function GovernmentPermitsTracker({
   } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handlePermitFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePermitFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const sizeStr =
       file.size >= 1024 * 1024
         ? `${(file.size / (1024 * 1024)).toFixed(2)} MB`
         : `${Math.max(1, Math.round(file.size / 1024))} KB`;
+
+    let docUrl = URL.createObjectURL(file);
+    let finalFileName = file.name;
+
+    try {
+      const uploadRes = await uploadFileToServer(file, true);
+      if (uploadRes?.url) {
+        docUrl = uploadRes.url;
+        finalFileName = uploadRes.filename;
+      }
+    } catch (err) {
+      console.warn('Permit upload using local URL reference:', err);
+    }
+
     setNewFileMeta({
-      fileName: file.name,
+      fileName: finalFileName,
       mimeType: file.type || 'application/pdf',
       fileSize: sizeStr,
       uploadedAt: new Date().toISOString(),
-      documentUrl: URL.createObjectURL(file),
+      documentUrl: docUrl,
     });
   };
 

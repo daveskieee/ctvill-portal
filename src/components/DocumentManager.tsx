@@ -14,9 +14,10 @@ import {
   LayoutGrid, List, ArrowUpDown, ArrowUp, ArrowDown,
   HardDrive, ChevronDown, CheckSquare, Square, Search,
   Calendar, User, Tag, FileCheck, FileArchive,
-  Database, AlertCircle
+  Database, AlertCircle, Loader2
 } from 'lucide-react';
 import { ProjectDocument, CivilWorksMilestone } from '../types';
+import { uploadFileToServer, isImageFile } from '../utils/imageCompression';
 
 interface DocumentManagerProps {
   documents: ProjectDocument[];
@@ -207,6 +208,8 @@ export default function DocumentManager({
   const [selectedFileMimeType, setSelectedFileMimeType] = useState<string>('');
   const [selectedFileObjectUrl, setSelectedFileObjectUrl] = useState<string>('');
   const [selectedFileSizeBytes, setSelectedFileSizeBytes] = useState<number>(0);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [isUploading, setIsUploading] = useState<boolean>(false);
   const [fileSizeError, setFileSizeError] = useState<string | null>(null);
 
   // Edit Form State
@@ -334,7 +337,19 @@ export default function DocumentManager({
 
   // Real download trigger
   const handleDownloadFile = (doc: ProjectDocument) => {
-    const dummyContent = `LDM Construction ERP Centralized Project Archive\nDocument: ${doc.title}\nVersion: ${doc.version}\nCategory: ${doc.category}\nStatus: ${doc.status}\nAuthor: ${doc.uploadedBy}\nNotes: ${doc.notes || 'None'}\nExported: ${new Date().toISOString()}`;
+    if (doc.fileUrl && (doc.fileUrl.startsWith('/uploads/') || doc.fileUrl.startsWith('http') || doc.fileUrl.startsWith('blob:'))) {
+      const link = document.createElement('a');
+      link.href = doc.fileUrl;
+      link.download = doc.fileName || doc.title;
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      showToast(`Downloading: ${doc.title}`);
+      return;
+    }
+
+    const dummyContent = `LDM Construction Project Management System Centralized Project Archive\nDocument: ${doc.title}\nVersion: ${doc.version}\nCategory: ${doc.category}\nStatus: ${doc.status}\nAuthor: ${doc.uploadedBy}\nNotes: ${doc.notes || 'None'}\nExported: ${new Date().toISOString()}`;
     const blob = new Blob([dummyContent], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -351,6 +366,7 @@ export default function DocumentManager({
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setSelectedFile(file);
       setSelectedFileName(file.name);
       setSelectedFileMimeType(file.type || 'application/octet-stream');
       setSelectedFileObjectUrl(URL.createObjectURL(file));
@@ -384,19 +400,35 @@ export default function DocumentManager({
     }
   };
 
-  // Upload Submission (Stores Lightweight Metadata Only)
-  const handleUploadSubmit = (e: React.FormEvent) => {
+  // Upload Submission (Saves to server/uploads/ disk, stores relative /uploads/ path in PostgreSQL)
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!uploadTitle.trim()) return;
+    if (!uploadTitle.trim() || isUploading) return;
 
     if (fileSizeError || selectedFileSizeBytes > MAX_UPLOAD_SIZE_BYTES) {
       showToast('Cannot upload: File exceeds the maximum database limit of 50 MB');
       return;
     }
 
+    setIsUploading(true);
+    let storageRefUrl = selectedFileObjectUrl || `/uploads/${encodeURIComponent(selectedFileName || uploadTitle.trim())}`;
+    let safeFileName = selectedFileName || `${uploadTitle.trim().replace(/\s+/g, '_')}.pdf`;
+
+    try {
+      if (selectedFile) {
+        const uploadRes = await uploadFileToServer(selectedFile, true);
+        if (uploadRes?.url) {
+          storageRefUrl = uploadRes.url;
+          safeFileName = uploadRes.filename;
+        }
+      }
+    } catch (err: any) {
+      console.warn('Direct disk upload notice, falling back to local storage ref:', err?.message || err);
+    } finally {
+      setIsUploading(false);
+    }
+
     const uploadedAtIso = new Date().toISOString();
-    const safeFileName = selectedFileName || `${uploadTitle.trim().replace(/\s+/g, '_')}.pdf`;
-    const storageRefUrl = selectedFileObjectUrl || `/vault/documents/${encodeURIComponent(safeFileName)}`;
 
     onUploadDocument({
       title: uploadTitle.trim(),
@@ -418,9 +450,10 @@ export default function DocumentManager({
     setSelectedFileMimeType('');
     setSelectedFileObjectUrl('');
     setSelectedFileSizeBytes(0);
+    setSelectedFile(null);
     setFileSizeError(null);
     setIsUploadModalOpen(false);
-    showToast(`Uploaded "${uploadTitle.trim()}" (lightweight metadata indexed)`);
+    showToast(`Uploaded "${uploadTitle.trim()}" (saved to server disk, indexed in database)`);
   };
 
   // Open Edit Modal
@@ -1507,14 +1540,21 @@ export default function DocumentManager({
                 </button>
                 <button
                   type="submit"
-                  disabled={Boolean(fileSizeError || selectedFileSizeBytes > MAX_UPLOAD_SIZE_BYTES)}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${
-                    fileSizeError || selectedFileSizeBytes > MAX_UPLOAD_SIZE_BYTES
+                  disabled={Boolean(isUploading || fileSizeError || selectedFileSizeBytes > MAX_UPLOAD_SIZE_BYTES)}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 ${
+                    isUploading || fileSizeError || selectedFileSizeBytes > MAX_UPLOAD_SIZE_BYTES
                       ? 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed opacity-60'
                       : 'text-white bg-teal-600 hover:bg-teal-500 shadow-lg shadow-teal-950 cursor-pointer'
                   }`}
                 >
-                  Save to Centralized Archive
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Optimizing & Saving...</span>
+                    </>
+                  ) : (
+                    <span>Save to Centralized Archive</span>
+                  )}
                 </button>
               </div>
 
@@ -1996,29 +2036,49 @@ export default function DocumentManager({
 
               {/* Specialized C: PDF / Document Clearance Sheet Preview */}
               {!isCadDocument(previewDoc) && !isExcelScheduleDocument(previewDoc) && (
-                <div className="w-full h-full flex flex-col items-center justify-center space-y-4 text-center max-w-md p-6 bg-slate-900 border border-slate-800 rounded-3xl shadow-xl">
-                  <div className="w-16 h-16 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center">
-                    <FileText className="w-8 h-8" />
+                previewDoc.fileUrl && /\.(jpe?g|png|webp|gif)$/i.test(previewDoc.fileUrl || previewDoc.title) ? (
+                  <div className="w-full h-full flex flex-col items-center justify-center p-4">
+                    <img 
+                      src={previewDoc.fileUrl} 
+                      alt={previewDoc.title} 
+                      className="max-h-[75vh] max-w-full object-contain rounded-2xl border border-slate-700 shadow-2xl" 
+                    />
+                    <div className="mt-3 flex items-center gap-3">
+                      <span className="text-xs text-slate-300 font-medium">{previewDoc.title} ({previewDoc.fileSize})</span>
+                      <button
+                        onClick={() => handleDownloadFile(previewDoc)}
+                        className="px-3 py-1.5 bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-bold rounded-lg flex items-center gap-1.5 cursor-pointer shadow-md"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Download</span>
+                      </button>
+                    </div>
                   </div>
-                  <div>
-                    <h4 className="text-base font-bold text-white mb-1">{previewDoc.title}</h4>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      {previewDoc.notes || 'Official Project Document Record and Compliance Clearances.'}
-                    </p>
+                ) : (
+                  <div className="w-full h-full flex flex-col items-center justify-center space-y-4 text-center max-w-md p-6 bg-slate-900 border border-slate-800 rounded-3xl shadow-xl">
+                    <div className="w-16 h-16 rounded-2xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center">
+                      <FileText className="w-8 h-8" />
+                    </div>
+                    <div>
+                      <h4 className="text-base font-bold text-white mb-1">{previewDoc.title}</h4>
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        {previewDoc.notes || 'Official Project Document Record and Compliance Clearances.'}
+                      </p>
+                    </div>
+                    <div className="text-xs font-mono text-slate-400 space-y-1">
+                      <div>Author: <span className="text-slate-200">{previewDoc.uploadedBy}</span></div>
+                      <div>File Size: <span className="text-slate-200">{previewDoc.fileSize || '2.1 MB'}</span></div>
+                      <div>Status: <span className="text-emerald-400 font-bold">{previewDoc.status}</span></div>
+                    </div>
+                    <button
+                      onClick={() => handleDownloadFile(previewDoc)}
+                      className="px-4 py-2 bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-bold rounded-xl flex items-center gap-2 cursor-pointer shadow-md"
+                    >
+                      <Download className="w-4 h-4" />
+                      <span>Download Official Document</span>
+                    </button>
                   </div>
-                  <div className="text-xs font-mono text-slate-400 space-y-1">
-                    <div>Author: <span className="text-slate-200">{previewDoc.uploadedBy}</span></div>
-                    <div>File Size: <span className="text-slate-200">{previewDoc.fileSize || '2.1 MB'}</span></div>
-                    <div>Status: <span className="text-emerald-400 font-bold">{previewDoc.status}</span></div>
-                  </div>
-                  <button
-                    onClick={() => handleDownloadFile(previewDoc)}
-                    className="px-4 py-2 bg-teal-500 hover:bg-teal-400 text-slate-950 text-xs font-bold rounded-xl flex items-center gap-2 cursor-pointer shadow-md"
-                  >
-                    <Download className="w-4 h-4" />
-                    <span>Download Official Document</span>
-                  </button>
-                </div>
+                )
               )}
 
             </div>

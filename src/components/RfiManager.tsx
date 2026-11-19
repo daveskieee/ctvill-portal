@@ -17,6 +17,8 @@ import { openEnterprisePrintWindow, escapePrintHtml } from '../utils/printEngine
 import { exportToCsv } from '../utils/exportUtils';
 import { logAuditEvent } from '../utils/auditLogger';
 import { useTheme } from '../context/ThemeContext';
+import { uploadFileToServer, compressImageToDataUrl } from '../utils/imageCompression';
+import { notifyBomProfitSync } from '../utils/bomProfitSync';
 
 interface RfiManagerProps {
   rfis: ProjectRFI[];
@@ -241,7 +243,7 @@ export default function RfiManager({
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
-    } catch {}
+    } catch { }
     return DEFAULT_MATERIAL_DIRECTORY;
   });
   const [ledgerCategoryFilter, setLedgerCategoryFilter] = useState<string>('ALL');
@@ -381,7 +383,7 @@ export default function RfiManager({
           priority: urgency === 'CRITICAL' ? 'CRITICAL' : urgency === 'URGENT' ? 'HIGH' : 'MEDIUM',
           status: 'OPEN'
         });
-      } catch {}
+      } catch { }
     }
   };
 
@@ -389,7 +391,8 @@ export default function RfiManager({
     try {
       localStorage.setItem('ldm_material_directory', JSON.stringify(items));
       localStorage.setItem('ctvill_material_directory', JSON.stringify(items));
-    } catch {}
+      notifyBomProfitSync();
+    } catch { }
   };
 
   const handleDecision = async (reqId: string, decision: 'APPROVED' | 'DENIED') => {
@@ -442,7 +445,7 @@ export default function RfiManager({
     if (onAnswerRfi) {
       try {
         await onAnswerRfi(reqId, `Procurement ${decision}`, decision === 'APPROVED' ? 'ANSWERED' : 'CLOSED');
-      } catch {}
+      } catch { }
     }
   };
 
@@ -685,6 +688,8 @@ export default function RfiManager({
       }
 
       localStorage.setItem('ldm_material_directory', JSON.stringify(next));
+      localStorage.setItem('ctvill_material_directory', JSON.stringify(next));
+      notifyBomProfitSync();
       return next;
     });
 
@@ -754,31 +759,28 @@ export default function RfiManager({
           <td class="text-center mono font-bold">${req.quantity} ${escapePrintHtml(req.unit)}</td>
           <td class="text-right mono font-bold">₱${req.estimatedCostPhp.toLocaleString()}</td>
           <td class="text-center">
-            <span class="badge ${
-              req.urgency === 'CRITICAL'
-                ? 'badge-rose'
-                : req.urgency === 'URGENT'
-                ? 'badge-amber'
-                : 'badge-slate'
-            }">${escapePrintHtml(req.urgency)}</span>
+            <span class="badge ${req.urgency === 'CRITICAL'
+            ? 'badge-rose'
+            : req.urgency === 'URGENT'
+              ? 'badge-amber'
+              : 'badge-slate'
+          }">${escapePrintHtml(req.urgency)}</span>
           </td>
           <td class="text-center">
-            <span class="badge ${
-              req.approvalStatus === 'APPROVED'
-                ? 'badge-emerald'
-                : req.approvalStatus === 'DENIED'
-                ? 'badge-rose'
-                : 'badge-amber'
-            }">${escapePrintHtml(req.approvalStatus)}</span>
+            <span class="badge ${req.approvalStatus === 'APPROVED'
+            ? 'badge-emerald'
+            : req.approvalStatus === 'DENIED'
+              ? 'badge-rose'
+              : 'badge-amber'
+          }">${escapePrintHtml(req.approvalStatus)}</span>
           </td>
           <td class="text-center">
-            <span class="badge ${
-              req.deliveryStatus === 'Accepted'
-                ? 'badge-emerald'
-                : req.deliveryStatus === 'Delayed'
-                ? 'badge-rose'
-                : 'badge-sky'
-            }">${escapePrintHtml(req.deliveryStatus || 'Pending PO')}</span>
+            <span class="badge ${req.deliveryStatus === 'Accepted'
+            ? 'badge-emerald'
+            : req.deliveryStatus === 'Delayed'
+              ? 'badge-rose'
+              : 'badge-sky'
+          }">${escapePrintHtml(req.deliveryStatus || 'Pending PO')}</span>
           </td>
         </tr>`
       )
@@ -909,11 +911,10 @@ export default function RfiManager({
           <button
             type="button"
             onClick={() => setActiveSubTab('requests')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
-              activeSubTab === 'requests'
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shrink-0 ${activeSubTab === 'requests'
                 ? 'bg-amber-500 text-slate-950 font-bold'
                 : 'text-slate-400 hover:text-white'
-            }`}
+              }`}
           >
             <ShoppingCart className="w-3.5 h-3.5" />
             <span>1. Material Requests</span>
@@ -921,11 +922,10 @@ export default function RfiManager({
           <button
             type="button"
             onClick={() => setActiveSubTab('directory')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
-              activeSubTab === 'directory'
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shrink-0 ${activeSubTab === 'directory'
                 ? 'bg-amber-500 text-slate-950 font-bold'
                 : 'text-slate-400 hover:text-white'
-            }`}
+              }`}
           >
             <Database className="w-3.5 h-3.5" />
             <span>2. Material Directory Ledger ({materialLedger.length})</span>
@@ -933,11 +933,10 @@ export default function RfiManager({
           <button
             type="button"
             onClick={() => setActiveSubTab('approvals')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
-              activeSubTab === 'approvals'
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shrink-0 ${activeSubTab === 'approvals'
                 ? 'bg-emerald-500 text-slate-950 font-bold'
                 : 'text-slate-400 hover:text-white'
-            }`}
+              }`}
           >
             <ClipboardCheck className="w-3.5 h-3.5" />
             <span>3. Approvals Inbox ({pendingApprovals.length})</span>
@@ -945,11 +944,10 @@ export default function RfiManager({
           <button
             type="button"
             onClick={() => setActiveSubTab('deliveries')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
-              activeSubTab === 'deliveries'
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition cursor-pointer flex items-center gap-1.5 shrink-0 ${activeSubTab === 'deliveries'
                 ? 'bg-cyan-500 text-slate-950 font-bold'
                 : 'text-slate-400 hover:text-white'
-            }`}
+              }`}
           >
             <Truck className="w-3.5 h-3.5" />
             <span>4. Deliveries Tracker ({approvedDeliveries.length})</span>
@@ -1054,285 +1052,305 @@ export default function RfiManager({
                     </div>
                   </div>
 
-              <div>
-                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Project Site</label>
-                <select
-                  value={selectedProjectName}
-                  onChange={(e) => setSelectedProjectName(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
-                >
-                  {projects.map(p => (
-                    <option key={p.id} value={p.name}>{p.name}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-[10px] font-mono uppercase text-slate-400">Material / Request Type *</label>
-                  <button
-                    type="button"
-                    onClick={() => setShowAddCatalogModal(prev => !prev)}
-                    className="text-[10px] font-mono font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer"
-                  >
-                    <Plus className="w-3 h-3" />
-                    <span>+ Add Material / Request Type</span>
-                  </button>
-                </div>
-                <select
-                  value={selectedMaterial}
-                  onChange={(e) => setSelectedMaterial(e.target.value)}
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
-                >
-                  {materialCatalog.map(item => (
-                    <option key={item} value={item}>{item}</option>
-                  ))}
-                </select>
-
-                {showAddCatalogModal && (
-                  <div className="mt-2 p-2.5 rounded-xl bg-slate-950 border border-amber-500/40 flex items-center gap-2">
-                    <input
-                      type="text"
-                      value={newCatalogItemName}
-                      onChange={(e) => setNewCatalogItemName(e.target.value)}
-                      placeholder="e.g. Ready-Mix Concrete 5,000 PSI or Scaffolding Set..."
-                      className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:border-amber-500 focus:outline-none"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAddMaterialToCatalog}
-                      className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer shrink-0"
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Project Site</label>
+                    <select
+                      value={selectedProjectName}
+                      onChange={(e) => setSelectedProjectName(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
                     >
-                      Add Item
-                    </button>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.name}>{p.name}</option>
+                      ))}
+                    </select>
                   </div>
-                )}
-              </div>
 
-              <div className="grid grid-cols-3 gap-2.5">
-                <div>
-                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Quantity *</label>
-                  <input
-                    type="number"
-                    min={1}
-                    value={quantity}
-                    onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Unit *</label>
-                  <select
-                    value={unit}
-                    onChange={(e) => setUnit(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-mono text-white focus:border-amber-500 focus:outline-none cursor-pointer"
-                  >
-                    {STANDARD_UNITS.map((u) => (
-                      <option key={u} value={u}>{u}</option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Unit Cost (₱) *</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={unitCost}
-                    onChange={(e) => setUnitCost(Math.max(0, parseFloat(e.target.value) || 0))}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              {/* Auto-Calculated Total Estimated Cost Badge */}
-              <div className="p-3 rounded-xl bg-slate-950 border border-amber-500/30 flex items-center justify-between">
-                <div>
-                  <span className="text-[10px] font-mono text-slate-400 uppercase block">Total Estimated Requisition Cost</span>
-                  <span className="text-[11px] font-mono text-slate-400">
-                    {quantity.toLocaleString()} {unit} × ₱{unitCost.toLocaleString()}
-                  </span>
-                </div>
-                <div className="text-right">
-                  <div className="text-base font-bold font-mono text-amber-400">
-                    ₱{(quantity * unitCost).toLocaleString()}
-                  </div>
-                  <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
-                    AUTO-CALCULATED
-                  </span>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Urgency Level</label>
-                  <select
-                    value={urgency}
-                    onChange={(e) => setUrgency(e.target.value as any)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
-                  >
-                    <option value="NORMAL">Normal (Standard Lead Time)</option>
-                    <option value="URGENT">Urgent (Within 48 Hours)</option>
-                    <option value="CRITICAL">Critical Path Blocker</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Preferred Supplier</label>
-                  <input
-                    type="text"
-                    value={supplierName}
-                    onChange={(e) => setSupplierName(e.target.value)}
-                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Construction Phase & Purpose</label>
-                <input
-                  type="text"
-                  value={purposePhase}
-                  onChange={(e) => setPurposePhase(e.target.value)}
-                  placeholder="e.g. Concreting Works — Footing Pouring"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
-                />
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer transition shadow-md shadow-amber-500/10"
-              >
-                Submit Material Requisition
-              </button>
-            </form>
-          </div>
-        )}
-
-          {/* Right: Active Material Requisitions List */}
-          <div className={`${isOM ? 'lg:col-span-12' : 'lg:col-span-7'} space-y-3`}>
-            {filteredRequests.map(req => (
-              <div
-                key={req.id}
-                className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
-              >
-                <div className="space-y-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800 text-amber-400">
-                      {req.id}
-                    </span>
-                    <span className="text-xs font-semibold text-slate-300">{req.projectName}</span>
-                    <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${
-                      req.urgency === 'CRITICAL'
-                        ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                        : req.urgency === 'URGENT'
-                        ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                        : 'bg-slate-800 text-slate-400'
-                    }`}>
-                      {req.urgency}
-                    </span>
-                  </div>
-                  <h4 className="text-sm font-bold text-white">
-                    {req.materialType} — <span className="text-amber-400 font-mono">{req.quantity} {req.unit}</span>
-                  </h4>
-                  <p className="text-xs text-slate-400">
-                    {req.purposePhase} • Est. <span className="font-mono text-white font-semibold">₱{req.estimatedCostPhp.toLocaleString()}</span>
-                  </p>
-                  <div className="text-[11px] text-slate-500 font-mono">
-                    Requested by {req.requestedBy} on {req.dateRequested}
-                  </div>
-                </div>
-
-                <div className="flex flex-col sm:items-end gap-2 shrink-0">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handlePrintPurchaseOrderSheet(req)}
-                      className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-mono font-semibold flex items-center gap-1 cursor-pointer"
-                      title="Print Official PR / PO Sheet"
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-mono uppercase text-slate-400">Material / Request Type *</label>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddCatalogModal(prev => !prev)}
+                        className="text-[10px] font-mono font-bold text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        <span>+ Add Material / Request Type</span>
+                      </button>
+                    </div>
+                    <select
+                      value={selectedMaterial}
+                      onChange={(e) => setSelectedMaterial(e.target.value)}
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
                     >
-                      <Printer className="w-3 h-3 text-amber-400" />
-                      <span>Print PR / PO Form</span>
-                    </button>
-                    <span className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold border ${
-                      req.approvalStatus === 'APPROVED'
-                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                        : req.approvalStatus === 'DENIED'
-                        ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                        : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                    }`}>
-                      {req.approvalStatus}
-                    </span>
-                  </div>
-                  {req.approvalStatus === 'PENDING' && (
-                    isOM ? (
-                      <div className="flex items-center gap-1.5">
+                      {materialCatalog.map(item => (
+                        <option key={item} value={item}>{item}</option>
+                      ))}
+                    </select>
+
+                    {showAddCatalogModal && (
+                      <div className="mt-2 p-2.5 rounded-xl bg-slate-950 border border-amber-500/40 flex items-center gap-2">
+                        <input
+                          type="text"
+                          value={newCatalogItemName}
+                          onChange={(e) => setNewCatalogItemName(e.target.value)}
+                          placeholder="e.g. Ready-Mix Concrete 5,000 PSI or Scaffolding Set..."
+                          className="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white focus:border-amber-500 focus:outline-none"
+                        />
                         <button
                           type="button"
-                          onClick={() => handleDecision(req.id, 'APPROVED')}
-                          className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                          onClick={handleAddMaterialToCatalog}
+                          className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer shrink-0"
                         >
-                          <Check className="w-3 h-3" />
-                          <span>Approve</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDecision(req.id, 'DENIED')}
-                          className="px-2.5 py-1 rounded-lg bg-rose-950/90 hover:bg-rose-900 text-rose-300 border border-rose-800 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
-                        >
-                          <X className="w-3 h-3" />
-                          <span>Deny</span>
+                          Add Item
                         </button>
                       </div>
-                    ) : (
-                      <span className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 font-mono text-[10px]">
-                        Awaiting OM Approval
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Quantity *</label>
+                      <input
+                        type="number"
+                        min={1}
+                        value={quantity}
+                        onChange={(e) => setQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Unit *</label>
+                      <select
+                        value={unit}
+                        onChange={(e) => setUnit(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-2.5 py-2 text-xs font-mono text-white focus:border-amber-500 focus:outline-none cursor-pointer"
+                      >
+                        {STANDARD_UNITS.map((u) => (
+                          <option key={u} value={u}>{u}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Unit Cost (₱) *</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={unitCost}
+                        onChange={(e) => setUnitCost(Math.max(0, parseFloat(e.target.value) || 0))}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono font-bold text-white focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Auto-Calculated Total Estimated Cost Badge */}
+                  <div className="p-3 rounded-xl bg-slate-950 border border-amber-500/30 flex items-center justify-between">
+                    <div>
+                      <span className="text-[10px] font-mono text-slate-400 uppercase block">Total Estimated Requisition Cost</span>
+                      <span className="text-[11px] font-mono text-slate-400">
+                        {quantity.toLocaleString()} {unit} × ₱{unitCost.toLocaleString()}
                       </span>
-                    )
-                  )}
-                </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-base font-bold font-mono text-amber-400">
+                        ₱{(quantity * unitCost).toLocaleString()}
+                      </div>
+                      <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                        AUTO-CALCULATED
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Urgency Level</label>
+                      <select
+                        value={urgency}
+                        onChange={(e) => setUrgency(e.target.value as any)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                      >
+                        <option value="NORMAL">Normal (Standard Lead Time)</option>
+                        <option value="URGENT">Urgent (Within 48 Hours)</option>
+                        <option value="CRITICAL">Critical Path Blocker</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Preferred Supplier</label>
+                      <input
+                        type="text"
+                        value={supplierName}
+                        onChange={(e) => setSupplierName(e.target.value)}
+                        className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-slate-400 mb-1">Construction Phase & Purpose</label>
+                    <input
+                      type="text"
+                      value={purposePhase}
+                      onChange={(e) => setPurposePhase(e.target.value)}
+                      placeholder="e.g. Concreting Works — Footing Pouring"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:border-amber-500 focus:outline-none"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs cursor-pointer transition shadow-md shadow-amber-500/10"
+                  >
+                    Submit Material Requisition
+                  </button>
+                </form>
               </div>
-            ))}
+            )}
+
+            {/* Right: Active Material Requisitions List */}
+            <div className={`${isOM ? 'lg:col-span-12' : 'lg:col-span-7'} space-y-3`}>
+              {filteredRequests.map(req => (
+                <div
+                  key={req.id}
+                  className="bg-slate-900/80 border border-slate-800 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-mono font-bold px-2 py-0.5 rounded bg-slate-800 text-amber-400">
+                        {req.id}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-300">{req.projectName}</span>
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-bold ${req.urgency === 'CRITICAL'
+                          ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                          : req.urgency === 'URGENT'
+                            ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                            : 'bg-slate-800 text-slate-400'
+                        }`}>
+                        {req.urgency}
+                      </span>
+                    </div>
+                    <h4 className="text-sm font-bold text-white">
+                      {req.materialType} — <span className="text-amber-400 font-mono">{req.quantity} {req.unit}</span>
+                    </h4>
+                    <p className="text-xs text-slate-400">
+                      {req.purposePhase} • Est. <span className="font-mono text-white font-semibold">₱{req.estimatedCostPhp.toLocaleString()}</span>
+                    </p>
+                    <div className="text-[11px] text-slate-500 font-mono">
+                      Requested by {req.requestedBy} on {req.dateRequested}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col sm:items-end gap-2 shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handlePrintPurchaseOrderSheet(req)}
+                        className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-mono font-semibold flex items-center gap-1 cursor-pointer"
+                        title="Print Official PR / PO Sheet"
+                      >
+                        <Printer className="w-3 h-3 text-amber-400" />
+                        <span>Print PR / PO Form</span>
+                      </button>
+                      <span className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold border ${req.approvalStatus === 'APPROVED'
+                          ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
+                          : req.approvalStatus === 'DENIED'
+                            ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                            : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                        }`}>
+                        {req.approvalStatus}
+                      </span>
+                    </div>
+                    {req.approvalStatus === 'PENDING' && (
+                      isOM ? (
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleDecision(req.id, 'APPROVED')}
+                            className="px-2.5 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                          >
+                            <Check className="w-3 h-3" />
+                            <span>Approve</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDecision(req.id, 'DENIED')}
+                            className="px-2.5 py-1 rounded-lg bg-rose-950/90 hover:bg-rose-900 text-rose-300 border border-rose-800 font-bold text-[11px] flex items-center gap-1 cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                            <span>Deny</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 font-mono text-[10px]">
+                          Awaiting OM Approval
+                        </span>
+                      )
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
-    )}
+      )}
 
       {/* ===================================================================== */}
       {/* TAB 2: MATERIAL DIRECTORY (SITE INVENTORY & DELIVERY TRACKING LEDGER) */}
       {/* ===================================================================== */}
       {activeSubTab === 'directory' && (
         <div className="space-y-4">
-          {/* Category Filter Pills & Week Dropdown */}
-          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
-            <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto py-1">
-              <span className="text-[10px] font-mono uppercase text-slate-500 font-bold mr-1 shrink-0">Category:</span>
-              {['ALL', ...MATERIAL_CATEGORIES].map((cat) => (
+          {/* Instant Keyword Search Bar + Category Filter Pills & Week Dropdown */}
+          <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-3 shadow-xs">
+            <div className="relative">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={ledgerSearch}
+                onChange={(e) => setLedgerSearch(e.target.value)}
+                placeholder="Search Material Directory by item name, supplier, category, phase, or project..."
+                className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pl-9 pr-9 py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition"
+              />
+              {ledgerSearch && (
                 <button
-                  key={cat}
                   type="button"
-                  onClick={() => setLedgerCategoryFilter(cat)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer shrink-0 ${
-                    ledgerCategoryFilter === cat
-                      ? 'bg-amber-500 text-slate-950 font-black'
-                      : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
-                  }`}
+                  onClick={() => setLedgerSearch('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                  title="Clear search"
                 >
-                  {cat}
+                  <X className="w-3.5 h-3.5" />
                 </button>
-              ))}
+              )}
             </div>
 
-            <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-              <span className="text-[10px] font-mono uppercase text-slate-500 font-bold">Week:</span>
-              <select
-                value={ledgerWeekFilter}
-                onChange={(e) => setLedgerWeekFilter(e.target.value)}
-                className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs font-mono text-white focus:border-amber-500 focus:outline-none cursor-pointer"
-              >
-                <option value="ALL">All Weeks</option>
-                {Array.from(new Set(materialLedger.map(m => m.week))).sort().map(w => (
-                  <option key={w} value={w}>{w}</option>
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto py-1">
+                <span className="text-[10px] font-mono uppercase text-slate-500 font-bold mr-1 shrink-0">Category:</span>
+                {['ALL', ...MATERIAL_CATEGORIES].map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setLedgerCategoryFilter(cat)}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold transition-colors cursor-pointer shrink-0 ${ledgerCategoryFilter === cat
+                        ? 'bg-amber-500 text-slate-950 font-black'
+                        : 'bg-slate-950 text-slate-400 hover:text-white border border-slate-800'
+                      }`}
+                  >
+                    {cat}
+                  </button>
                 ))}
-              </select>
+              </div>
+
+              <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                <span className="text-[10px] font-mono uppercase text-slate-500 font-bold">Week:</span>
+                <select
+                  value={ledgerWeekFilter}
+                  onChange={(e) => setLedgerWeekFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-800 rounded-lg px-2.5 py-1 text-xs font-mono text-white focus:border-amber-500 focus:outline-none cursor-pointer"
+                >
+                  <option value="ALL">All Weeks</option>
+                  {Array.from(new Set(materialLedger.map(m => m.week))).sort().map(w => (
+                    <option key={w} value={w}>{w}</option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -1466,11 +1484,10 @@ export default function RfiManager({
 
                           {/* Status */}
                           <td className="py-3 px-3 text-center">
-                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border ${
-                              isComplete
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border ${isComplete
                                 ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                                 : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                            }`}>
+                              }`}>
                               {isComplete ? 'Completed' : 'Incomplete'}
                             </span>
                           </td>
@@ -1640,13 +1657,12 @@ export default function RfiManager({
                       {del.approvedBy || 'Head Engineer'}
                     </td>
                     <td className="py-3 px-3">
-                      <span className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-bold border ${
-                        del.deliveryStatus === 'Accepted'
+                      <span className={`px-2.5 py-1 rounded-md text-[11px] font-mono font-bold border ${del.deliveryStatus === 'Accepted'
                           ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                           : del.deliveryStatus === 'Delayed'
-                          ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                          : 'bg-sky-500/15 text-sky-400 border-sky-500/30'
-                      }`}>
+                            ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                            : 'bg-sky-500/15 text-sky-400 border-sky-500/30'
+                        }`}>
                         {del.deliveryStatus || 'Scheduled'}
                       </span>
                     </td>
@@ -1681,11 +1697,10 @@ export default function RfiManager({
                         )
                       ) : (
                         <div className="inline-flex items-center gap-2 justify-end">
-                          <span className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold border ${
-                            del.deliveryStatus === 'Accepted'
+                          <span className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold border ${del.deliveryStatus === 'Accepted'
                               ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                               : 'bg-slate-800 text-slate-400 border-slate-700'
-                          }`}>
+                            }`}>
                             {del.deliveryStatus === 'Accepted' ? `Received (${del.actualReceivedQty || del.quantity} ${del.unit})` : 'In Transit / Scheduled'}
                           </span>
                           {del.receivingProofPhoto && (
@@ -1937,13 +1952,25 @@ export default function RfiManager({
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const file = e.target.files?.[0];
-                      if (file) {
-                        const reader = new FileReader();
-                        reader.onload = () => setReceivingProofPhoto(reader.result as string);
-                        reader.readAsDataURL(file);
+                      if (!file) return;
+                      try {
+                        // Upload compressed photo (<1600px, 0.8 quality) to disk storage
+                        const uploadRes = await uploadFileToServer(file, true);
+                        if (uploadRes?.url) {
+                          setReceivingProofPhoto(uploadRes.url);
+                          return;
+                        }
+                      } catch {
+                        // Fallback to client-side compressed data URL
                       }
+                      const compressedUrl = await compressImageToDataUrl(file, {
+                        maxWidth: 1600,
+                        maxHeight: 1600,
+                        quality: 0.8,
+                      });
+                      setReceivingProofPhoto(compressedUrl);
                     }}
                     className={`w-full text-xs ${isDark ? 'text-slate-400 file:bg-slate-800 file:text-slate-200 hover:file:bg-slate-700' : 'text-slate-600 file:bg-slate-200 file:text-slate-800 hover:file:bg-slate-300'} file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold cursor-pointer`}
                   />

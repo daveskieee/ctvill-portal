@@ -8,12 +8,15 @@ import {
   Building2, Users, CheckCircle2, TrendingUp, DollarSign, Calendar,
   Layers, Plus, ExternalLink, ShieldCheck, Clock, FileText, ArrowRight,
   X, AlertCircle, Edit3, Trash2, Check, Sliders, HardHat, Search, Download, HelpCircle, FileSpreadsheet, Lock,
-  MapPin, CloudSun, RefreshCw, LayoutGrid, Table, Eye, PieChart as PieChartIcon, Loader2, Sparkles, AlertTriangle
+  MapPin, CloudSun, RefreshCw, LayoutGrid, Table, Eye, PieChart as PieChartIcon, Loader2, Sparkles, AlertTriangle, Printer
 } from 'lucide-react';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip as ReTooltip, Legend } from 'recharts';
 import { ProjectProfile, ProjectTask, Contractor, WorkforceReallocationRecommendation, ProjectRFI, ChangeOrder } from '../types';
 import { generateReallocationRecommendations } from '../services/WorkforceReallocationService';
 import { exportToCsv } from '../utils/exportUtils';
+import { openEnterprisePrintWindow, escapePrintHtml } from '../utils/printEngine';
+import { calculateProjectBomProfitSync, BOM_PROFIT_SYNC_EVENT } from '../utils/bomProfitSync';
+import BudgetsExpensesModal from './BudgetsExpensesModal';
 import {
   resolveLocalGeocoding,
   resolveProjectCoordinatesAsync,
@@ -743,6 +746,77 @@ export default function ProjectProfileHub({
   const pendingChangeOrders = changeOrders.filter(co => co.status === 'PENDING');
   const totalPendingCOValue = pendingChangeOrders.reduce((sum, co) => sum + (Number(co.requestedAmount ?? co.amount ?? 0) || 0), 0);
 
+  const [isBudgetsModalOpen, setIsBudgetsModalOpen] = useState(false);
+  const [budgetsModalFocus, setBudgetsModalFocus] = useState<'budget' | 'collected' | 'progress' | 'all'>('all');
+  const [profitSyncTick, setProfitSyncTick] = useState(0);
+
+  useEffect(() => {
+    const onProfitSync = () => setProfitSyncTick((t) => t + 1);
+    window.addEventListener(BOM_PROFIT_SYNC_EVENT, onProfitSync);
+    return () => window.removeEventListener(BOM_PROFIT_SYNC_EVENT, onProfitSync);
+  }, []);
+
+  const openBudgetsModal = (focus: 'budget' | 'collected' | 'progress' | 'all' = 'all') => {
+    setBudgetsModalFocus(focus);
+    setIsBudgetsModalOpen(true);
+  };
+
+  const handlePrintSummary = () => {
+    const rowsHtml = synchronizedProjects
+      .map((p) => {
+        const colPct = p.budget > 0 ? Math.round((p.fundsCollected / p.budget) * 100) : 0;
+        const profitSummary = calculateProjectBomProfitSync({ projectId: p.id, projectName: p.name });
+        return `
+          <tr>
+            <td class="mono">${escapePrintHtml(p.id)}</td>
+            <td><strong>${escapePrintHtml(p.name)}</strong><br/><span style="color:#64748b;font-size:10px;">${escapePrintHtml(p.clientName)}</span></td>
+            <td>${escapePrintHtml(p.location)}</td>
+            <td style="text-align:center;">${escapePrintHtml(p.status)}</td>
+            <td class="mono" style="text-align:right;">₱${p.budget.toLocaleString()}</td>
+            <td class="mono" style="text-align:right;color:#047857;">₱${p.fundsCollected.toLocaleString()} (${colPct}%)</td>
+            <td class="mono" style="text-align:center;font-weight:700;">${p.progressPercentage}%</td>
+            <td class="mono" style="text-align:center;font-weight:700;color:${profitSummary.isIntact ? '#047857' : '#b45309'};">${profitSummary.profitMarginPct}%</td>
+            <td class="mono" style="text-align:center;">${escapePrintHtml(p.targetHandoverDate || 'TBD')}</td>
+          </tr>
+        `;
+      })
+      .join('');
+
+    openEnterprisePrintWindow({
+      title: 'Commercial Sites & Portfolio Executive Summary',
+      subtitle: 'LDM Construction — Design & Build Project Management System',
+      docRef: `LDM-SITES-${new Date().toISOString().slice(0, 10)}`,
+      orientation: 'landscape',
+      kpiSummary: [
+        { label: 'Active Projects', value: `${synchronizedProjects.length} Sites` },
+        { label: 'Total Portfolio Budget', value: `₱${totalPortfolioBudget.toLocaleString()}` },
+        { label: 'Total Collected Funds', value: `₱${totalFundsCollected.toLocaleString()}` },
+        { label: 'Average Physical Progress', value: `${avgPortfolioProgress}%` },
+      ],
+      bodyHtml: `
+        <div class="section-title">Portfolio Directory &amp; Execution Status</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Project &amp; Client</th>
+              <th>Site Location</th>
+              <th style="text-align:center;">Status</th>
+              <th style="text-align:right;">Contract Budget</th>
+              <th style="text-align:right;">Collected</th>
+              <th style="text-align:center;">Progress</th>
+              <th style="text-align:center;">Profit Margin</th>
+              <th style="text-align:center;">Target Handover</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      `,
+    });
+  };
+
   const handleExportCsv = () => {
     const headers = [
       'Project ID', 'Project Name', 'Client', 'Location', 'Status',
@@ -1448,14 +1522,25 @@ export default function ProjectProfileHub({
             </button>
           </div>
 
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="flex items-center gap-2 w-full sm:w-auto flex-wrap">
             <button
+              type="button"
               onClick={handleExportCsv}
               className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer text-xs"
               title="Export Commercial Sites to CSV"
             >
               <Download className="w-3.5 h-3.5 text-amber-400" />
               <span>Export CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePrintSummary}
+              className="flex-1 sm:flex-initial flex items-center justify-center gap-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold px-3 py-1.5 rounded-lg transition-colors cursor-pointer text-xs"
+              title="Print Formatted A4 Portfolio Summary"
+            >
+              <Printer className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Print Summary</span>
             </button>
 
             {isAdmin && (
@@ -1471,10 +1556,13 @@ export default function ProjectProfileHub({
         </div>
       </div>
 
-      {/* Portfolio Overview KPIs — Interactive Hover Breakdown Popovers & RBAC-Gated Clickable Redirects */}
+      {/* Portfolio Overview KPIs — Interactive Hover Breakdown Popovers & Clickable Budgets & Expenses View */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* 1. Total Budget */}
-        <div className="group relative bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/50 p-4 rounded-xl transition-all cursor-default">
+        <div
+          onClick={() => openBudgetsModal('budget')}
+          className="group relative bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/50 p-4 rounded-xl transition-all cursor-pointer"
+        >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Total Budget</span>
             <DollarSign className="w-4 h-4 text-amber-400" />
@@ -1484,7 +1572,7 @@ export default function ProjectProfileHub({
           </div>
           <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
             <span>{localProjects.length} Fit-Out Sites</span>
-            <span className="text-[10px] font-mono text-amber-400">Hover breakdown</span>
+            <span className="text-[10px] font-mono text-amber-400">Budgets &amp; Expenses ↗</span>
           </div>
 
           {/* Hover Popover */}
@@ -1504,12 +1592,10 @@ export default function ProjectProfileHub({
           </div>
         </div>
 
-        {/* 2. Collected — RBAC-Gated Clickable to Progress Billing & Receipts */}
+        {/* 2. Collected — Clickable to Budgets & Expenses Overview */}
         <div
-          onClick={canAccessModule(userRole, 'payments') ? () => onNavigateToTab?.('payments') : undefined}
-          className={`group relative bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/50 p-4 rounded-xl transition-all ${
-            canAccessModule(userRole, 'payments') ? 'cursor-pointer' : 'cursor-default'
-          }`}
+          onClick={() => openBudgetsModal('collected')}
+          className="group relative bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-emerald-500/50 p-4 rounded-xl transition-all cursor-pointer"
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Collected</span>
@@ -1520,11 +1606,7 @@ export default function ProjectProfileHub({
           </div>
           <div className="text-[11px] text-slate-400 mt-1 flex items-center justify-between">
             <span>{totalPortfolioBudget > 0 ? Math.round((totalFundsCollected / totalPortfolioBudget) * 100) : 0}% Collection Pace</span>
-            {canAccessModule(userRole, 'payments') ? (
-              <span className="text-[10px] font-mono text-emerald-400">Open Billings ↗</span>
-            ) : (
-              <span className="text-[10px] font-mono text-slate-500">Hover breakdown</span>
-            )}
+            <span className="text-[10px] font-mono text-emerald-400">Budgets &amp; Expenses ↗</span>
           </div>
 
           {/* Hover Popover */}
@@ -1544,12 +1626,10 @@ export default function ProjectProfileHub({
           </div>
         </div>
 
-        {/* 3. Avg Progress — RBAC-Gated Clickable to Master Gantt */}
+        {/* 3. Avg Progress — Clickable to Budgets & Expenses Overview */}
         <div
-          onClick={canAccessModule(userRole, 'gantt') ? () => onNavigateToTab?.('gantt') : undefined}
-          className={`group relative bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/50 p-4 rounded-xl transition-all ${
-            canAccessModule(userRole, 'gantt') ? 'cursor-pointer' : 'cursor-default'
-          }`}
+          onClick={() => openBudgetsModal('progress')}
+          className="group relative bg-slate-900/60 hover:bg-slate-900 border border-slate-800 hover:border-amber-500/50 p-4 rounded-xl transition-all cursor-pointer"
         >
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-mono text-slate-400 uppercase tracking-wider">Avg Progress</span>
@@ -2232,7 +2312,7 @@ export default function ProjectProfileHub({
                             </span>
                           </div>
 
-                          {/* 2. Materials */}
+                          {/* 2. Materials & Requests (Unified Action Card) */}
                           <div
                             onClick={() => {
                               setSelectedProject(null);
@@ -2242,12 +2322,12 @@ export default function ProjectProfileHub({
                           >
                             <div>
                               <div className="flex items-center justify-between mb-1">
-                                <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 font-semibold">2. Materials</span>
-                                <ExternalLink className="w-3.5 h-3.5 text-cyan-400 opacity-70 group-hover:opacity-100 shrink-0" />
+                                <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-400 font-semibold">2. Materials &amp; Requests</span>
+                                <FileSpreadsheet className="w-3.5 h-3.5 text-cyan-400 opacity-80 group-hover:opacity-100 shrink-0" />
                               </div>
-                              <div className="text-xs font-bold text-white">Stock & Deliveries</div>
+                              <div className="text-xs font-bold text-white">Stock, Deliveries &amp; Approvals</div>
                               <p className="text-[11px] text-slate-400 mt-1">
-                                Cement, Rebar, CHB & Finishing inventory
+                                {pendingReqCount} Pending Requests • Site Material Directory
                               </p>
                             </div>
                             <span className="text-[10px] font-mono text-cyan-400 mt-2 flex items-center gap-1 font-semibold">
@@ -2281,29 +2361,64 @@ export default function ProjectProfileHub({
                             </span>
                           </div>
 
-                          {/* 4. Requests */}
-                          <div
-                            onClick={() => {
-                              setSelectedProject(null);
-                              onNavigateToTab?.('rfis', selectedProject.id);
-                            }}
-                            className="bg-slate-950 hover:bg-slate-900 p-3.5 rounded-xl border border-slate-800 hover:border-indigo-500/50 flex flex-col justify-between cursor-pointer transition group"
-                          >
-                            <div>
-                              <div className="flex items-center justify-between mb-1">
-                                <span className="text-[10px] font-mono uppercase tracking-wider text-indigo-400 font-semibold">4. Requests</span>
-                                <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-400 shrink-0" />
+                          {/* 4. Live Profit Margin % (Synced to BOM Profit Pool & Material Overruns) */}
+                          {(() => {
+                            void profitSyncTick;
+                            const profitSummary = calculateProjectBomProfitSync({
+                              projectId: selectedProject.id,
+                              projectName: selectedProject.name,
+                            });
+                            const isHealthy = profitSummary.isIntact;
+                            const isWarning = !isHealthy && profitSummary.profitMarginPct >= 60;
+                            return (
+                              <div
+                                onClick={() => openBudgetsModal('budget')}
+                                className={`bg-slate-950 hover:bg-slate-900 p-3.5 rounded-xl border flex flex-col justify-between cursor-pointer transition group ${
+                                  isHealthy
+                                    ? 'border-emerald-500/30 hover:border-emerald-400/60'
+                                    : isWarning
+                                    ? 'border-amber-500/40 hover:border-amber-400/70'
+                                    : 'border-rose-500/40 hover:border-rose-400/70'
+                                }`}
+                              >
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className={`text-[10px] font-mono uppercase tracking-wider font-semibold ${
+                                      isHealthy ? 'text-emerald-400' : isWarning ? 'text-amber-400' : 'text-rose-400'
+                                    }`}>
+                                      4. Profit Margin
+                                    </span>
+                                    <TrendingUp className={`w-3.5 h-3.5 shrink-0 ${
+                                      isHealthy ? 'text-emerald-400' : isWarning ? 'text-amber-400' : 'text-rose-400'
+                                    }`} />
+                                  </div>
+                                  <div className="flex items-baseline gap-1.5">
+                                    <span className={`text-base font-bold font-mono ${
+                                      isHealthy ? 'text-emerald-400' : isWarning ? 'text-amber-300' : 'text-rose-400'
+                                    }`}>
+                                      {profitSummary.profitMarginPct}%
+                                    </span>
+                                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border font-semibold ${
+                                      isHealthy
+                                        ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                                        : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                                    }`}>
+                                      {isHealthy ? 'Intact' : `-₱${profitSummary.totalOverrun.toLocaleString()}`}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-slate-400 mt-1 font-mono truncate">
+                                    Pool: ₱{profitSummary.remainingProfit.toLocaleString()} / ₱{profitSummary.baselineProfit.toLocaleString()}
+                                  </p>
+                                </div>
+                                <span className={`text-[10px] font-mono mt-2 flex items-center gap-1 font-semibold ${
+                                  isHealthy ? 'text-emerald-400' : 'text-amber-400'
+                                }`}>
+                                  <span>{isHealthy ? 'BOM Profit Pool Synced' : `${profitSummary.overrunCount} BOM Overrun(s)`}</span>
+                                  <ArrowRight className="w-3 h-3" />
+                                </span>
                               </div>
-                              <div className="text-xs font-bold text-white font-mono">{pendingReqCount} Pending Requests</div>
-                              <p className="text-[11px] text-slate-400 mt-1">
-                                Material & Purchase Approvals
-                              </p>
-                            </div>
-                            <span className="text-[10px] font-mono text-indigo-400 mt-2 flex items-center gap-1 font-semibold">
-                              <span>Review Approvals Inbox</span>
-                              <ArrowRight className="w-3 h-3" />
-                            </span>
-                          </div>
+                            );
+                          })()}
                         </div>
                       );
                     })()}
@@ -2719,15 +2834,15 @@ export default function ProjectProfileHub({
 
                     <div className="relative" ref={locationDropdownRef}>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="text-xs font-mono text-slate-400 uppercase">Site Location / Address</label>
+                        <label className="text-xs font-mono text-slate-400 uppercase">Detailed Street / Subdivision Address (Manual)</label>
                         <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
-                          <CloudSun className="w-3 h-3" /> Live Weather Sync
+                          <CloudSun className="w-3 h-3" /> Separate from Map Pin Coordinates
                         </span>
                       </div>
                       <div className="relative">
                         <input
                           type="text"
-                          placeholder="Search any Philippine street, subdivision, barangay, or city..."
+                          placeholder="e.g., Blk 12 Lot 5, South Forbes Golf City, Brgy. Inchican, Silang, Cavite..."
                           value={formLocation}
                           onChange={(e) => {
                             setFormLocation(e.target.value);
@@ -2863,6 +2978,22 @@ export default function ProjectProfileHub({
                       />
                       <span className="text-[11px] text-slate-500 mt-1 block">
                         Physical progress and WBS milestones are automatically computed and synced from the 14-phase Master CPM Gantt &amp; BOM.
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Initial Project Status</label>
+                      <select
+                        value={formStatus || 'PLANNING'}
+                        onChange={(e) => setFormStatus(e.target.value as any)}
+                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2.5 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
+                      >
+                        <option value="PLANNING">Planning Phase</option>
+                        <option value="IN_PROGRESS">In Progress</option>
+                        <option value="PUNCHLIST_QA">Punchlist &amp; QA</option>
+                      </select>
+                      <span className="text-[11px] text-slate-500 mt-1 block">
+                        New projects start in an active pre-handover stage (Completed status is disabled at creation).
                       </span>
                     </div>
 
@@ -3042,15 +3173,15 @@ export default function ProjectProfileHub({
 
                     <div className="relative" ref={locationDropdownRef}>
                       <div className="flex items-center justify-between mb-1">
-                        <label className="text-xs font-mono text-slate-400 uppercase">Site Location / Address</label>
+                        <label className="text-xs font-mono text-slate-400 uppercase">Detailed Street / Subdivision Address (Manual)</label>
                         <span className="text-[10px] text-amber-400 font-mono flex items-center gap-1">
-                          <CloudSun className="w-3 h-3" /> Live Weather Sync
+                          <CloudSun className="w-3 h-3" /> Separate from Map Pin Coordinates
                         </span>
                       </div>
                       <div className="relative">
                         <input
                           type="text"
-                          placeholder="Search any Philippine street, subdivision, barangay, or city..."
+                          placeholder="e.g., Blk 12 Lot 5, South Forbes Golf City, Brgy. Inchican, Silang, Cavite..."
                           value={formLocation}
                           onChange={(e) => {
                             setFormLocation(e.target.value);
@@ -3524,6 +3655,14 @@ export default function ProjectProfileHub({
           </div>
         </div>
       )}
+
+      {/* Unified Budgets & Expenses Overview Modal */}
+      <BudgetsExpensesModal
+        isOpen={isBudgetsModalOpen}
+        onClose={() => setIsBudgetsModalOpen(false)}
+        projects={synchronizedProjects}
+        initialFocus={budgetsModalFocus}
+      />
     </div>
   );
 }

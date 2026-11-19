@@ -4,10 +4,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { 
-  ArrowRight, Building2, ShieldCheck, Award, Sparkles, Phone, Mail, 
-  MapPin, Activity, FileText, CheckCircle2, Calendar, Calculator, 
-  Compass, Layers, Eye, X, Check, Send, ChevronLeft, ChevronRight, HardHat, 
+import {
+  ArrowRight, Building2, ShieldCheck, Award, Sparkles, Phone, Mail,
+  MapPin, Activity, FileText, CheckCircle2, Calendar, Calculator,
+  Compass, Layers, Eye, X, Check, Send, ChevronLeft, ChevronRight, HardHat,
   Scale, Briefcase, Ruler, Clock, ExternalLink, Hammer, Wrench,
   CheckSquare, FileCheck, Users, HelpCircle, AlertTriangle, RefreshCw, Star, MessageSquarePlus, Globe
 } from 'lucide-react';
@@ -157,7 +157,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
     setProjectNotes(`Inquiring about ${fact.title.toLowerCase()} for our workplace layout.`);
     setShowQuoteModal(true);
   };
-  
+
   // Quotation Modal & Pre-Flight Anti-Spam Cooldown State
   const [showQuoteModal, setShowQuoteModal] = useState<boolean>(false);
   const [quoteSubmitted, setQuoteSubmitted] = useState<boolean>(false);
@@ -327,7 +327,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
     if (!emailValidation.valid || !STRICT_EMAIL_REGEX.test(emailValidation.cleanEmail)) {
       setQuoteError(
         emailValidation.error ||
-          'Invalid email address. Please include a valid domain (e.g., operations@company.com).'
+        'Invalid email address. Please include a valid domain (e.g., operations@company.com).'
       );
       return;
     }
@@ -392,11 +392,11 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
 
   return (
     <div className="bg-slate-950 text-slate-100 min-h-screen w-full overflow-y-auto font-sans selection:bg-amber-500 selection:text-slate-950" id="landing-page-root">
-      
+
       {/* MAIN HEADER NAVIGATION */}
       <header className="border-b border-slate-800/80 bg-slate-950/92 backdrop-blur-md sticky top-0 z-40 transform-gpu will-change-transform" id="home">
         <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
-          
+
           {/* Left — Brand Identity */}
           <a href="#home" className="flex items-center gap-3.5 group cursor-pointer shrink-0">
             <img
@@ -487,7 +487,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                 </>
               ) : (
                 <>
-                  <span>ERP Portal</span>
+                  <span>Project Portal</span>
                   <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
                 </>
               )}
@@ -498,15 +498,14 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
 
       {/* 3. HERO SHOWCASE SECTION */}
       <section className="relative overflow-hidden pt-14 pb-20 sm:pt-20 sm:pb-28 bg-gradient-to-b from-slate-950 via-[#0a0f1d] to-slate-950 border-b border-slate-800">
-        
+
         {/* Dynamic Cross-Fading Hero Background Showcase (Only 1 active high-res slide eagerly loaded) */}
         <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none opacity-20">
           {ldmHeroShowcaseAssets.map((asset, idx) => (
             <div
               key={asset.id}
-              className={`absolute inset-0 transition-opacity duration-1000 ${
-                idx === heroSlideIdx ? 'opacity-100' : 'opacity-0'
-              }`}
+              className={`absolute inset-0 transition-opacity duration-1000 ${idx === heroSlideIdx ? 'opacity-100' : 'opacity-0'
+                }`}
             >
               <img
                 src={asset.url}
@@ -523,7 +522,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
         </div>
 
         <div className="max-w-6xl mx-auto px-6 text-center relative z-10 space-y-8">
-          
+
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-slate-900 border border-amber-500/40 text-amber-300 text-xs font-mono font-bold tracking-wider uppercase shadow-inner">
             <Sparkles className="w-3.5 h-3.5 text-amber-400" />
             LDM Construction • Engineers • Architects • Builders
@@ -556,11 +555,11 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
           {/* Featured Hero Portfolio Preview Card */}
           <div className="max-w-5xl mx-auto mt-10 rounded-3xl overflow-hidden border border-slate-800 shadow-2xl bg-slate-900/90 p-3 relative group">
             <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-              
+
               <div className="md:col-span-7 overflow-hidden rounded-2xl h-64 sm:h-80 relative bg-slate-950">
-                <OptimizedLdmImage 
-                  src={ldmHeroShowcaseAssets[0]?.url || ldmArchitecturalAssets[0]?.url || ''} 
-                  alt="Proyecto Bahia & Modern Residence Collection by LDM Construction" 
+                <OptimizedLdmImage
+                  src={ldmHeroShowcaseAssets[0]?.url || ldmArchitecturalAssets[0]?.url || ''}
+                  alt="Proyecto Bahia & Modern Residence Collection by LDM Construction"
                   className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
                   fetchPriority="high"
                 />
@@ -592,7 +591,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                 </div>
 
                 <div className="pt-2 flex items-center justify-between">
-                  <button 
+                  <button
                     onClick={() => {
                       const firstAsset = ldmArchitecturalAssets[0] || allLdmPortfolioAssets[0];
                       if (firstAsset) setLightboxAsset(firstAsset);
@@ -635,7 +634,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
       {/* 4. THE 4 PILLARS OF "CREATE" */}
       <section className="py-20 bg-slate-900/60 border-b border-slate-800" id="create">
         <div className="max-w-7xl mx-auto px-6">
-          
+
           <div className="text-center space-y-3 max-w-3xl mx-auto mb-16">
             <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full px-4 py-1 text-xs font-mono font-bold uppercase inline-block">
               THE "CREATE" PILLAR
@@ -649,13 +648,13 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            
+
             {/* Phase 01 */}
             <div className="bg-slate-950 border border-slate-800 hover:border-amber-500/50 rounded-2xl overflow-hidden transition-all duration-300 flex flex-col justify-between group shadow-xl">
               <div className="h-44 overflow-hidden relative">
-                <img 
-                  src={ldmArchitecturalAssets[0]?.url || ''} 
-                  alt="Design Conceptualization" 
+                <img
+                  src={ldmArchitecturalAssets[0]?.url || ''}
+                  alt="Design Conceptualization"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
                   decoding="async"
@@ -681,9 +680,9 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
             {/* Phase 02 */}
             <div className="bg-slate-950 border border-slate-800 hover:border-amber-500/50 rounded-2xl overflow-hidden transition-all duration-300 flex flex-col justify-between group shadow-xl">
               <div className="h-44 overflow-hidden relative">
-                <img 
-                  src={ldmInteriorAssets[0]?.url || ''} 
-                  alt="Engineering Design" 
+                <img
+                  src={ldmInteriorAssets[0]?.url || ''}
+                  alt="Engineering Design"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
                   decoding="async"
@@ -709,9 +708,9 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
             {/* Phase 03 */}
             <div className="bg-slate-950 border border-slate-800 hover:border-amber-500/50 rounded-2xl overflow-hidden transition-all duration-300 flex flex-col justify-between group shadow-xl">
               <div className="h-44 overflow-hidden relative">
-                <img 
-                  src={ldmSiteConstructionAssets[0]?.url || ''} 
-                  alt="Permitting Application" 
+                <img
+                  src={ldmSiteConstructionAssets[0]?.url || ''}
+                  alt="Permitting Application"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
                   decoding="async"
@@ -737,9 +736,9 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
             {/* Phase 04 */}
             <div className="bg-slate-950 border border-slate-800 hover:border-amber-500/50 rounded-2xl overflow-hidden transition-all duration-300 flex flex-col justify-between group shadow-xl">
               <div className="h-44 overflow-hidden relative">
-                <img 
-                  src={ldmSiteConstructionAssets[1]?.url || ldmArchitecturalAssets[1]?.url || ''} 
-                  alt="Construction Planning" 
+                <img
+                  src={ldmSiteConstructionAssets[1]?.url || ldmArchitecturalAssets[1]?.url || ''}
+                  alt="Construction Planning"
                   className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                   loading="lazy"
                   decoding="async"
@@ -765,7 +764,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
           </div>
 
           {/* Science & Architecture Highlight Callout - Auto-Rotating "Did You Know?" */}
-          <div 
+          <div
             className="mt-12 bg-slate-950 border border-slate-800 rounded-2xl p-6 sm:p-8 flex flex-col md:flex-row items-center gap-6 justify-between transition-all group relative overflow-hidden shadow-xl"
             onMouseEnter={() => setDykPaused(true)}
             onMouseLeave={() => setDykPaused(false)}
@@ -805,11 +804,10 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                       <button
                         key={idx}
                         onClick={() => handleSelectDykFact(idx)}
-                        className={`h-1.5 rounded-full transition-all duration-300 ${
-                          idx === dykIndex 
-                            ? 'w-6 bg-amber-400' 
+                        className={`h-1.5 rounded-full transition-all duration-300 ${idx === dykIndex
+                            ? 'w-6 bg-amber-400'
                             : 'w-1.5 bg-slate-700 hover:bg-slate-500'
-                        }`}
+                          }`}
                         aria-label={`Go to fact ${idx + 1}`}
                       />
                     ))}
@@ -829,9 +827,8 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                 </div>
               </div>
 
-              <div className={`min-h-[120px] sm:min-h-[96px] flex flex-col justify-center transition-all duration-400 ${
-                dykFade ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'
-              }`}>
+              <div className={`min-h-[120px] sm:min-h-[96px] flex flex-col justify-center transition-all duration-400 ${dykFade ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-1'
+                }`}>
                 <h4 className="font-sans font-bold text-white text-lg sm:text-xl leading-snug">
                   {DYK_FACTS[dykIndex].title}
                 </h4>
@@ -890,13 +887,12 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                     setPortfolioTab(tab.id as any);
                     setPortfolioVisibleCount(12);
                   }}
-                  className={`px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold cursor-pointer transition-all ${
-                    portfolioTab === tab.id
+                  className={`px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold cursor-pointer transition-all ${portfolioTab === tab.id
                       ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                       : isDark
                         ? 'bg-slate-900 border border-slate-800 text-slate-400 hover:border-slate-700 hover:text-white'
                         : 'bg-white border border-slate-200 text-slate-700 hover:border-slate-400 hover:text-slate-900 shadow-2xs'
-                  }`}
+                    }`}
                 >
                   {tab.label}
                 </button>
@@ -1038,11 +1034,10 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                         onClick={() => {
                           setActiveTourRoom(idx);
                         }}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-mono font-bold cursor-pointer transition-all ${
-                          activeTourRoom === idx
+                        className={`px-3.5 py-2 rounded-xl text-xs font-mono font-bold cursor-pointer transition-all ${activeTourRoom === idx
                             ? 'bg-amber-500 text-slate-950 shadow-md shadow-amber-500/20'
                             : 'bg-slate-950 border border-slate-800 text-slate-300 hover:border-amber-500/40'
-                        }`}
+                          }`}
                       >
                         {tour.tabLabel}
                       </button>
@@ -1126,7 +1121,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
       {/* 6. "AFTER CARE" PILLAR */}
       <section className="py-20 bg-slate-900/40 border-b border-slate-800" id="aftercare">
         <div className="max-w-7xl mx-auto px-6">
-          
+
           <div className="text-center space-y-3 max-w-2xl mx-auto mb-16">
             <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full px-4 py-1 text-xs font-mono font-bold uppercase inline-block">
               THE "AFTER CARE" PILLAR
@@ -1140,7 +1135,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-            
+
             {/* 01 Punch List */}
             <div className="bg-slate-950 border border-slate-800 rounded-2xl p-6 sm:p-8 space-y-4 relative shadow-xl hover:border-amber-500/40 transition-colors">
               <span className="font-mono text-4xl font-black text-amber-400/40 block">01</span>
@@ -1188,7 +1183,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
       {/* 7. INTERACTIVE COMMERCIAL FIT-OUT ESTIMATOR */}
       <section className="py-20 bg-slate-950 border-b border-slate-800" id="estimator">
         <div className="max-w-5xl mx-auto px-6">
-          
+
           <div className="text-center space-y-3 mb-12">
             <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full px-4 py-1 text-xs font-mono font-bold uppercase inline-block">
               COMMERCIAL TOOLS • ADMIN-CONFIGURED BENCHMARKS
@@ -1202,10 +1197,10 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
           </div>
 
           <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-2xl grid grid-cols-1 md:grid-cols-12 gap-8 items-center">
-            
+
             {/* Input Controls */}
             <div className="md:col-span-7 space-y-6">
-              
+
               {/* Space Type Selector */}
               <div className="space-y-2">
                 <label className="block text-xs font-mono text-slate-400 font-bold uppercase">
@@ -1224,28 +1219,26 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                       key={item.id}
                       type="button"
                       onClick={() => setEstimatorSpaceType(item.id)}
-                      className={`p-3 rounded-xl text-xs cursor-pointer transition-all text-left flex items-center justify-between ${
-                        estimatorSpaceType === item.id
+                      className={`p-3 rounded-xl text-xs cursor-pointer transition-all text-left flex items-center justify-between ${estimatorSpaceType === item.id
                           ? isDark
                             ? 'bg-amber-500/15 border-2 border-amber-500 text-white shadow-md'
                             : 'bg-[#FFFBEB] border-2 border-[#D97706] ring-3 ring-amber-600/12 text-[#0F172A] shadow-xs'
                           : isDark
                             ? 'bg-slate-950 border border-slate-800 text-slate-400 hover:border-slate-700'
                             : 'bg-[#F8FAFC] border border-[#CBD5E1] text-[#1E293B] hover:border-slate-400 shadow-2xs'
-                      }`}
+                        }`}
                     >
                       <span className={estimatorSpaceType === item.id ? (isDark ? 'font-bold text-white' : 'font-bold text-[#0F172A]') : (isDark ? 'text-slate-400' : 'text-[#1E293B] font-semibold')}>
                         {item.label}
                       </span>
-                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md ${
-                        estimatorSpaceType === item.id
+                      <span className={`text-[10px] font-mono px-2 py-0.5 rounded-md ${estimatorSpaceType === item.id
                           ? isDark
                             ? 'bg-emerald-950/60 text-[#34D399] border border-emerald-500/30 font-bold'
                             : 'bg-[#D1FAE5] text-[#065F46] border border-[#34D399] font-bold'
                           : isDark
                             ? 'text-slate-500 font-medium'
                             : 'text-[#64748B] font-medium'
-                      }`}>
+                        }`}>
                         ₱{Number(estimatorConfig.categories[item.id].baseRatePerSqm).toLocaleString()}/sqm
                       </span>
                     </button>
@@ -1317,28 +1310,26 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                       key={tier.id}
                       type="button"
                       onClick={() => setEstimatorTier(tier.id)}
-                      className={`p-2.5 rounded-xl text-[11px] font-mono cursor-pointer transition-all text-center flex flex-col items-center justify-center gap-0.5 ${
-                        estimatorTier === tier.id
+                      className={`p-2.5 rounded-xl text-[11px] font-mono cursor-pointer transition-all text-center flex flex-col items-center justify-center gap-0.5 ${estimatorTier === tier.id
                           ? isDark
                             ? 'bg-amber-500/15 border-2 border-amber-500 text-white shadow-md'
                             : 'bg-[#FFFBEB] border-2 border-[#D97706] ring-3 ring-amber-600/12 text-[#0F172A] shadow-xs'
                           : isDark
                             ? 'bg-slate-950 border border-slate-800 text-slate-400 hover:border-slate-700'
                             : 'bg-[#F8FAFC] border border-[#CBD5E1] text-[#1E293B] hover:border-slate-400 shadow-2xs'
-                      }`}
+                        }`}
                     >
                       <span className={estimatorTier === tier.id ? (isDark ? 'font-bold text-white' : 'font-bold text-[#0F172A]') : (isDark ? 'text-slate-400' : 'text-[#1E293B] font-semibold')}>
                         {tier.label}
                       </span>
-                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${
-                        estimatorTier === tier.id
+                      <span className={`text-[9px] px-1.5 py-0.5 rounded ${estimatorTier === tier.id
                           ? isDark
                             ? 'text-[#34D399] font-bold'
                             : 'text-[#065F46] font-bold'
                           : isDark
                             ? 'text-slate-500 font-medium'
                             : 'text-[#64748B] font-medium'
-                      }`}>
+                        }`}>
                         ₱{Number(currentRates[tier.id]).toLocaleString()}/sqm ({tier.mult}x)
                       </span>
                     </button>
@@ -1399,7 +1390,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
       {/* 8. TESTIMONIALS & DESIGN PARTNER ENDORSEMENTS (WITH MODERATED CLIENT REVIEWS) */}
       <section className="py-20 bg-slate-900/60 border-b border-slate-800" id="testimonials">
         <div className="max-w-7xl mx-auto px-6">
-          
+
           <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 max-w-5xl mx-auto mb-12">
             <div className="space-y-2 text-left">
               <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full px-4 py-1 text-xs font-mono font-bold uppercase inline-block">
@@ -1481,9 +1472,9 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
       <section className="py-20 bg-slate-950 border-b border-slate-800" id="contact">
         <div className="max-w-7xl mx-auto px-6">
           <div className="bg-gradient-to-tr from-slate-900 via-slate-950 to-slate-900 border border-slate-800 rounded-3xl p-8 sm:p-12 shadow-2xl">
-            
+
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 items-center">
-              
+
               <div className="lg:col-span-6 space-y-6">
                 <span className="bg-amber-500/10 border border-amber-500/30 text-amber-300 rounded-full px-3.5 py-1 text-xs font-mono font-bold uppercase inline-block">
                   DIRECT CONTACT & QUOTATIONS
@@ -1576,7 +1567,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                 <form onSubmit={handleQuoteSubmit} noValidate className="space-y-3.5 text-xs">
                   <div>
                     <label className="block text-slate-400 font-semibold mb-1">Company / Client Name *</label>
-                    <input 
+                    <input
                       type="text"
                       required
                       placeholder="e.g. Acme Tech Corporation"
@@ -1588,7 +1579,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-slate-400 font-semibold mb-1">Email Address (with domain) *</label>
-                      <input 
+                      <input
                         type="email"
                         required
                         placeholder="operations@acme.com"
@@ -1599,7 +1590,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                     </div>
                     <div>
                       <label className="block text-slate-400 font-semibold mb-1">Phone / Mobile *</label>
-                      <input 
+                      <input
                         type="tel"
                         required
                         placeholder="0917-000-0000"
@@ -1611,7 +1602,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                   </div>
                   <div>
                     <label className="block text-slate-400 font-semibold mb-1">Scope / Space Details *</label>
-                    <input 
+                    <input
                       type="text"
                       required
                       placeholder="e.g. 250 sqm Office Fit-Out, BGC Taguig"
@@ -1631,8 +1622,8 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                       {isSubmittingQuote
                         ? 'Validating & Dispatching...'
                         : quoteCooldownSec > 0
-                        ? `Request Sent • Cooldown (${quoteCooldownSec}s)`
-                        : 'Submit to Estimating Desk (ldmengineeringdesign@gmail.com)'}
+                          ? `Request Sent • Cooldown (${quoteCooldownSec}s)`
+                          : 'Submit to Estimating Desk (ldmengineeringdesign@gmail.com)'}
                     </span>
                   </button>
                 </form>
@@ -1648,7 +1639,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
       <footer className="preserve-dark-surface bg-[#0B0F19] text-slate-400 pt-16 pb-8 border-t border-slate-800 font-sans" id="corporate-footer" style={{ backgroundColor: '#0B0F19' }}>
         <div className="max-w-7xl mx-auto px-6">
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-10 pb-12 border-b border-slate-800">
-            
+
             {/* Brand Profile */}
             <div className="lg:col-span-4 space-y-4 text-left">
               <div className="flex items-center gap-3">
@@ -1798,7 +1789,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
               &copy; {new Date().getFullYear()} LDM Construction — Engineers • Architects • Builders. All rights reserved.
             </p>
             <div className="flex flex-wrap items-center justify-center md:justify-end gap-3 font-mono">
-              <a 
+              <a
                 href="mailto:ldmengineeringdesign@gmail.com?subject=Design%20%26%20Build%20Inquiry%20-%20LDM%20Construction"
                 className="hover:text-amber-400 transition-colors cursor-pointer"
                 title="Email LDM Construction"
@@ -1806,7 +1797,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                 ldmengineeringdesign@gmail.com
               </a>
               <span>•</span>
-              <a 
+              <a
                 href="https://ldmconstruction.my.canva.site/ldmportfolio/interior-designs"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -1815,7 +1806,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                 Design Portfolio
               </a>
               <span>•</span>
-              <button 
+              <button
                 type="button"
                 onClick={() => setShowPrivacyModal(true)}
                 className="hover:text-amber-400 transition-colors cursor-pointer text-slate-400 underline underline-offset-2 decoration-slate-700 hover:decoration-amber-400 bg-transparent border-0 p-0 text-[10px] font-mono"
@@ -1833,7 +1824,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
       {showQuoteModal && (
         <div className="fixed inset-0 bg-black/80 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-fadeIn overscroll-contain">
           <div className={`${isDark ? 'bg-slate-900 border-slate-800 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-2xl'} border rounded-3xl max-w-lg w-full p-6 sm:p-8 space-y-5 animate-slideUp transform-gpu [contain:paint]`}>
-            
+
             <div className={`flex items-center justify-between border-b ${isDark ? 'border-slate-800' : 'border-slate-200'} pb-3`}>
               <div className="flex items-center gap-2.5">
                 <div className="w-8 h-8 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-500">
@@ -1844,13 +1835,12 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                   <p className={`text-[10px] ${isDark ? 'text-slate-400' : 'text-slate-500'} font-mono`}>Direct to LDM Construction Estimating Desk</p>
                 </div>
               </div>
-              <button 
+              <button
                 onClick={() => setShowQuoteModal(false)}
-                className={`w-8 h-8 rounded-full ${
-                  isDark
+                className={`w-8 h-8 rounded-full ${isDark
                     ? 'bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700'
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
-                } flex items-center justify-center text-xs font-bold cursor-pointer transition-colors`}
+                  } flex items-center justify-center text-xs font-bold cursor-pointer transition-colors`}
               >
                 ✕
               </button>
@@ -1875,7 +1865,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                   </div>
                   <div className="flex items-center gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                    <span>Permanently logged into LDM Construction ERP System</span>
+                    <span>Permanently logged into LDM Construction Project Management System</span>
                   </div>
                 </div>
 
@@ -2013,11 +2003,10 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
               <button
                 type="button"
                 onClick={() => setShowReviewModal(false)}
-                className={`w-8 h-8 rounded-full ${
-                  isDark
+                className={`w-8 h-8 rounded-full ${isDark
                     ? 'bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700'
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
-                } flex items-center justify-center text-xs font-bold cursor-pointer transition-colors`}
+                  } flex items-center justify-center text-xs font-bold cursor-pointer transition-colors`}
               >
                 ✕
               </button>
@@ -2107,9 +2096,8 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                             onClick={() => setReviewRating(star)}
                             onMouseEnter={() => setReviewHoverRating(star)}
                             onMouseLeave={() => setReviewHoverRating(0)}
-                            className={`text-lg leading-none cursor-pointer transition-transform hover:scale-110 ${
-                              active ? 'text-amber-400' : 'text-slate-700'
-                            }`}
+                            className={`text-lg leading-none cursor-pointer transition-transform hover:scale-110 ${active ? 'text-amber-400' : 'text-slate-700'
+                              }`}
                             aria-label={`Rate ${star} stars`}
                           >
                             ★
@@ -2163,7 +2151,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
       {showPrivacyModal && (
         <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-6 z-50 animate-fadeIn overscroll-contain">
           <div className="bg-slate-900 border border-slate-800 rounded-3xl max-w-2xl w-full p-5 sm:p-7 space-y-5 shadow-2xl animate-slideUp max-h-[90vh] flex flex-col">
-            
+
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-slate-800 pb-4 shrink-0">
               <div className="flex items-center gap-2.5">
@@ -2182,11 +2170,10 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
               <button
                 type="button"
                 onClick={() => setShowPrivacyModal(false)}
-                className={`w-8 h-8 rounded-full ${
-                  isDark
+                className={`w-8 h-8 rounded-full ${isDark
                     ? 'bg-slate-800 hover:bg-slate-700 text-slate-100 border border-slate-700'
                     : 'bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300'
-                } flex items-center justify-center transition-colors cursor-pointer`}
+                  } flex items-center justify-center transition-colors cursor-pointer`}
                 title="Close Privacy Policy"
               >
                 <X className="w-4 h-4" />
@@ -2195,7 +2182,7 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
 
             {/* Modal Scrollable Body */}
             <div className="flex-1 overflow-y-auto pr-2 space-y-4 text-xs text-slate-300 leading-relaxed font-sans scrollbar-thin scrollbar-thumb-slate-800">
-              
+
               <div className="p-3.5 bg-slate-950/70 border border-slate-800 rounded-xl space-y-1.5">
                 <p className="font-semibold text-white">
                   Commitment to Confidentiality & Data Integrity
@@ -2342,12 +2329,12 @@ export default function LandingPage({ onEnterPortal, session }: LandingPageProps
                   portfolioTab === 'all'
                     ? allLdmPortfolioAssets
                     : portfolioTab === 'architectural'
-                    ? ldmArchitecturalAssets
-                    : portfolioTab === 'interior'
-                    ? ldmInteriorAssets
-                    : portfolioTab === 'construction'
-                    ? ldmSiteConstructionAssets
-                    : allLdmPortfolioAssets;
+                      ? ldmArchitecturalAssets
+                      : portfolioTab === 'interior'
+                        ? ldmInteriorAssets
+                        : portfolioTab === 'construction'
+                          ? ldmSiteConstructionAssets
+                          : allLdmPortfolioAssets;
                 const curIdx = currentList.findIndex((a) => a.id === lightboxAsset.id);
 
                 const handlePrev = () => {

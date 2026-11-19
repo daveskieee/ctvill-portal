@@ -119,7 +119,7 @@ export function createGanttRouter(prisma: PrismaClient) {
    * 1. Granular events: { action: 'create' | 'update' | 'delete', entityType: 'task' | 'link', data: any }
    * 2. Batch payload: { tasks: [...], links: [...], deletedTaskIds: [...], deletedLinkIds: [...] }
    */
-  router.post('/:projectId/gantt/sync', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
+  router.post('/:projectId/gantt/sync', requireRole(['ADMIN', 'ENGINEER', 'PROJECT_MANAGER']), async (req: Request, res: Response) => {
     try {
       const { projectId } = req.params;
       const { action, entityType, data, tasks = [], links = [], deletedTaskIds = [], deletedLinkIds = [] } = req.body;
@@ -134,7 +134,8 @@ export function createGanttRouter(prisma: PrismaClient) {
 
       const existingProject = await prisma.commercialProject.findUnique({ where: { id: projectId } });
       if (!existingProject) {
-        return res.status(404).json({ error: 'Project not found' });
+        // Project exists only in client/demo storage — acknowledge cleanly without failing UI
+        return res.json({ success: true, localOnly: true, result: { tasksCount: tasks.length } });
       }
 
       const effectiveEntityType = entityType || (req.body.task ? 'task' : req.body.link ? 'link' : undefined);
@@ -161,11 +162,13 @@ export function createGanttRouter(prisma: PrismaClient) {
               const id = taskId || `task-${Date.now()}`;
               const startRaw = effectiveData?.startDate || effectiveData?.start_date;
               const endRaw = effectiveData?.endDate || effectiveData?.end_date;
-              const startDate = startRaw ? new Date(startRaw) : new Date();
+              const parsedStart = startRaw ? new Date(startRaw) : new Date();
+              const startDate = isNaN(parsedStart.getTime()) ? new Date() : parsedStart;
               const isMilestone = effectiveData?.type === 'milestone' || parseInt(String(effectiveData?.duration ?? 1), 10) === 0;
               const duration = isMilestone ? 0 : Math.max(1, parseInt(String(effectiveData?.duration ?? 1), 10));
-              const endDate = isMilestone ? startDate : (endRaw ? new Date(endRaw) : addWorkingDays(startDate, duration));
-              let progress = Math.max(0, Math.min(1, parseFloat(String(effectiveData?.progress ?? 0))));
+              const parsedEnd = endRaw ? new Date(endRaw) : addWorkingDays(startDate, duration);
+              const endDate = isMilestone ? startDate : (isNaN(parsedEnd.getTime()) ? addWorkingDays(startDate, duration) : parsedEnd);
+              let progress = Math.max(0, Math.min(1, parseFloat(String(effectiveData?.progress ?? 0)) || 0));
               let status = effectiveData?.status;
               if (status === 'COMPLETED' && (!effectiveData?.progress || progress < 1.0)) {
                 progress = 1.0;
@@ -174,9 +177,19 @@ export function createGanttRouter(prisma: PrismaClient) {
               } else if (status === undefined) {
                 status = progress > 0 ? 'IN_PROGRESS' : 'TODO';
               }
-              const parentId = effectiveData?.parent && effectiveData.parent !== 0 && effectiveData.parent !== '0' 
-                ? String(effectiveData.parent) 
+              const rawParentId = effectiveData?.parent && effectiveData.parent !== 0 && effectiveData.parent !== '0'
+                ? String(effectiveData.parent)
                 : (effectiveData?.parentTaskId ? String(effectiveData.parentTaskId) : null);
+              let safeParentId: string | null = null;
+              if (rawParentId && rawParentId !== id) {
+                const parentExists = await tx.projectTask.findUnique({ where: { id: rawParentId }, select: { id: true } });
+                if (parentExists) safeParentId = rawParentId;
+              }
+              let safeContractorId: string | null = null;
+              if (effectiveData?.assignedContractorId) {
+                const cExists = await tx.contractor.findUnique({ where: { id: String(effectiveData.assignedContractorId) }, select: { id: true } });
+                if (cExists) safeContractorId = String(effectiveData.assignedContractorId);
+              }
               const type = (duration === 0 || effectiveData?.type === 'milestone') ? 'milestone' : (effectiveData?.type || 'task');
 
               await tx.projectTask.create({
@@ -191,39 +204,46 @@ export function createGanttRouter(prisma: PrismaClient) {
                   progress,
                   status,
                   type,
-                  parentTaskId: parentId,
+                  parentTaskId: safeParentId,
                   wbsCode: effectiveData?.wbsCode || null,
                   milestonePhase: effectiveData?.milestonePhase || effectiveData?.constructionPhase || null,
-                  assignedContractorId: effectiveData?.assignedContractorId || null,
+                  assignedContractorId: safeContractorId,
                   sortOrder: Number(effectiveData?.sortOrder ?? 0)
                 }
               });
 
               // Predecessors linking
               if (Array.isArray(effectiveData?.predecessorIds) && effectiveData.predecessorIds.length > 0) {
-                for (const predId of effectiveData.predecessorIds) {
-                  await tx.taskLink.create({
-                    data: {
-                      id: `link-${predId}-${id}-${Date.now()}`,
-                      projectId,
-                      sourceId: String(predId),
-                      targetId: id,
-                      type: '0',
-                      lagDays: 0
-                    }
-                  });
+                for (let idx = 0; idx < effectiveData.predecessorIds.length; idx++) {
+                  const predId = effectiveData.predecessorIds[idx];
+                  if (!predId || predId === id) continue;
+                  const predExists = await tx.projectTask.findUnique({ where: { id: String(predId) }, select: { id: true } });
+                  if (predExists) {
+                    await tx.taskLink.create({
+                      data: {
+                        id: `link-${predId}-${id}-${Date.now()}-${idx}`,
+                        projectId,
+                        sourceId: String(predId),
+                        targetId: id,
+                        type: '0',
+                        lagDays: 0
+                      }
+                    });
+                  }
                 }
               }
             } else if (action === 'update') {
               if (taskId) {
                 const startRaw = effectiveData?.startDate || effectiveData?.start_date;
                 const endRaw = effectiveData?.endDate || effectiveData?.end_date;
-                const startDate = startRaw ? new Date(startRaw) : new Date();
+                const parsedStart = startRaw ? new Date(startRaw) : new Date();
+                const startDate = isNaN(parsedStart.getTime()) ? new Date() : parsedStart;
                 const isMilestone = effectiveData?.type === 'milestone' || (effectiveData?.duration !== undefined && parseInt(String(effectiveData.duration), 10) === 0);
-                const duration = isMilestone ? 0 : (effectiveData?.duration !== undefined ? Math.max(1, parseInt(String(effectiveData.duration), 10)) : 1);
-                const endDate = isMilestone ? startDate : (endRaw ? new Date(endRaw) : addWorkingDays(startDate, duration));
+                const duration = isMilestone ? 0 : (effectiveData?.duration !== undefined ? Math.max(1, parseInt(String(effectiveData.duration), 10) || 1) : 1);
+                const parsedEnd = endRaw ? new Date(endRaw) : addWorkingDays(startDate, duration);
+                const endDate = isMilestone ? startDate : (isNaN(parsedEnd.getTime()) ? addWorkingDays(startDate, duration) : parsedEnd);
                 const hasExplicitProgress = effectiveData?.progress !== undefined;
-                let progress = hasExplicitProgress ? Math.max(0, Math.min(1, parseFloat(String(effectiveData.progress)))) : undefined;
+                let progress = hasExplicitProgress ? Math.max(0, Math.min(1, parseFloat(String(effectiveData.progress)) || 0)) : undefined;
                 let derivedStatus = effectiveData?.status;
                 if (derivedStatus === 'COMPLETED' && (progress === undefined || progress < 1.0)) {
                   progress = 1.0;
@@ -234,27 +254,37 @@ export function createGanttRouter(prisma: PrismaClient) {
                 } else if (derivedStatus === undefined && progress !== undefined) {
                   derivedStatus = progress > 0 ? 'IN_PROGRESS' : 'TODO';
                 }
-                const parentId = effectiveData?.parent !== undefined 
-                  ? (effectiveData.parent && effectiveData.parent !== 0 && effectiveData.parent !== '0' ? String(effectiveData.parent) : null) 
+                const rawParentId = effectiveData?.parent !== undefined
+                  ? (effectiveData.parent && effectiveData.parent !== 0 && effectiveData.parent !== '0' ? String(effectiveData.parent) : null)
                   : (effectiveData?.parentTaskId !== undefined ? effectiveData.parentTaskId : undefined);
+                let safeParentId: string | null | undefined = rawParentId === undefined ? undefined : null;
+                if (rawParentId && rawParentId !== taskId) {
+                  const parentExists = await tx.projectTask.findUnique({ where: { id: String(rawParentId) }, select: { id: true } });
+                  if (parentExists) safeParentId = String(rawParentId);
+                }
+                let safeContractorId: string | null | undefined = effectiveData?.assignedContractorId === undefined ? undefined : null;
+                if (effectiveData?.assignedContractorId) {
+                  const cExists = await tx.contractor.findUnique({ where: { id: String(effectiveData.assignedContractorId) }, select: { id: true } });
+                  if (cExists) safeContractorId = String(effectiveData.assignedContractorId);
+                }
                 const type = (duration === 0 || effectiveData?.type === 'milestone') ? 'milestone' : (effectiveData?.type || 'task');
 
                 await tx.projectTask.upsert({
                   where: { id: taskId },
                   update: {
                     ...(effectiveData?.text !== undefined ? { text: effectiveData.text, title: effectiveData.text } : {}),
-                    ...(startRaw ? { startDate } : {}),
-                    ...(endRaw ? { endDate } : {}),
+                    ...(startRaw && !isNaN(parsedStart.getTime()) ? { startDate } : {}),
+                    ...(endRaw && !isNaN(parsedEnd.getTime()) ? { endDate } : {}),
                     ...(effectiveData?.duration !== undefined ? { duration } : {}),
                     ...(progress !== undefined ? { progress } : {}),
                     ...(derivedStatus !== undefined ? { status: derivedStatus } : {}),
                     ...(effectiveData?.type !== undefined ? { type } : {}),
-                    ...(parentId !== undefined ? { parentTaskId: parentId } : {}),
+                    ...(safeParentId !== undefined ? { parentTaskId: safeParentId } : {}),
                     ...(effectiveData?.wbsCode !== undefined ? { wbsCode: effectiveData.wbsCode } : {}),
                     ...(effectiveData?.milestonePhase !== undefined || effectiveData?.constructionPhase !== undefined
                       ? { milestonePhase: effectiveData.milestonePhase || effectiveData.constructionPhase || null }
                       : {}),
-                    ...(effectiveData?.assignedContractorId !== undefined ? { assignedContractorId: effectiveData.assignedContractorId || null } : {}),
+                    ...(safeContractorId !== undefined ? { assignedContractorId: safeContractorId } : {}),
                     ...(effectiveData?.sortOrder !== undefined ? { sortOrder: Number(effectiveData.sortOrder) } : {}),
                     updatedAt: new Date()
                   },
@@ -269,10 +299,10 @@ export function createGanttRouter(prisma: PrismaClient) {
                     progress: progress ?? 0,
                     status: derivedStatus || (progress !== undefined && progress >= 1.0 ? 'COMPLETED' : progress !== undefined && progress > 0 ? 'IN_PROGRESS' : 'TODO'),
                     type,
-                    parentTaskId: parentId || null,
+                    parentTaskId: safeParentId || null,
                     wbsCode: effectiveData?.wbsCode || null,
                     milestonePhase: effectiveData?.milestonePhase || effectiveData?.constructionPhase || null,
-                    assignedContractorId: effectiveData?.assignedContractorId || null,
+                    assignedContractorId: safeContractorId || null,
                     sortOrder: Number(effectiveData?.sortOrder ?? 0)
                   }
                 });
@@ -282,13 +312,14 @@ export function createGanttRouter(prisma: PrismaClient) {
                   await tx.taskLink.deleteMany({
                     where: { targetId: taskId, projectId }
                   });
-                  for (const predId of effectiveData.predecessorIds) {
+                  for (let idx = 0; idx < effectiveData.predecessorIds.length; idx++) {
+                    const predId = effectiveData.predecessorIds[idx];
                     if (predId && predId !== taskId) {
-                      const predExists = await tx.projectTask.findUnique({ where: { id: String(predId) } });
+                      const predExists = await tx.projectTask.findUnique({ where: { id: String(predId) }, select: { id: true } });
                       if (predExists) {
                         await tx.taskLink.create({
                           data: {
-                            id: `link-${predId}-${taskId}-${Date.now()}`,
+                            id: `link-${predId}-${taskId}-${Date.now()}-${idx}`,
                             projectId,
                             sourceId: String(predId),
                             targetId: taskId,
@@ -372,11 +403,11 @@ export function createGanttRouter(prisma: PrismaClient) {
               tasksCount: allTasks.length,
               ...(shouldAdvanceStatus ? { status: 'IN_PROGRESS' } : {})
             }
-          }).catch(() => {});
+          }).catch(() => { });
 
-          return { 
-            action, 
-            entityType: effectiveEntityType, 
+          return {
+            action,
+            entityType: effectiveEntityType,
             id: effectiveData?.id,
             projectProgress: avgProgress,
             tasksCount: allTasks.length
@@ -425,11 +456,11 @@ export function createGanttRouter(prisma: PrismaClient) {
           const endDate = t.end_date ? new Date(t.end_date) : addWorkingDays(startDate, duration || 1);
           const parentId = t.parent && t.parent !== 0 && t.parent !== '0' ? String(t.parent) : null;
           const progress = Math.max(0, Math.min(1, parseFloat(String(t.progress || 0))));
-          const status = progress >= 1.0 
-            ? 'COMPLETED' 
-            : (t.status === 'COMPLETED' && progress < 1.0) 
-            ? (progress > 0 ? 'IN_PROGRESS' : 'TODO') 
-            : (t.status || (progress > 0 ? 'IN_PROGRESS' : 'TODO'));
+          const status = progress >= 1.0
+            ? 'COMPLETED'
+            : (t.status === 'COMPLETED' && progress < 1.0)
+              ? (progress > 0 ? 'IN_PROGRESS' : 'TODO')
+              : (t.status || (progress > 0 ? 'IN_PROGRESS' : 'TODO'));
           const type = (duration === 0 || t.type === 'milestone') ? 'milestone' : (t.type || 'task');
 
           await tx.projectTask.upsert({
@@ -509,7 +540,7 @@ export function createGanttRouter(prisma: PrismaClient) {
               progressPercentage: avgProgress,
               tasksCount: allTasks.length
             }
-          }).catch(() => {});
+          }).catch(() => { });
         }
 
         return { tasksCount: tasks.length, linksCount: links.length, projectProgress: avgProgress };

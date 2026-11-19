@@ -414,14 +414,14 @@ async function main() {
         body: { email: 'completely_unknown_user_99999@ctvill.internal', password: 'WrongPassword123!' }
       });
       assert.strictEqual(resNonExistent.status, 401);
-      assert.strictEqual(resNonExistent.json?.error, 'Invalid email or password.');
+      assert.strictEqual(resNonExistent.json?.error, 'Invalid Account Email ID or Password. Please verify your credentials and try again.');
 
       const resBadPass = await request(baseUrl, '/api/auth/login', {
         method: 'POST',
         body: { email: 'om@ldmconstruction.ph', password: 'DefinitelyWrongPassword999!' }
       });
       assert.strictEqual(resBadPass.status, 401);
-      assert.strictEqual(resBadPass.json?.error, 'Invalid email or password.');
+      assert.strictEqual(resBadPass.json?.error, 'Invalid Account Email ID or Password. Please verify your credentials and try again.');
       assert.strictEqual(resNonExistent.json?.error, resBadPass.json?.error);
     });
 

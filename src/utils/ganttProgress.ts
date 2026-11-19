@@ -74,7 +74,7 @@ const PHASE_KEYWORD_RULES: Array<{ phase: string; keywords: string[] }> = [
   { phase: 'Painting Works', keywords: ['paint', 'primer', 'coating', 'varnish', 'putty'] },
   { phase: 'Electrical Works', keywords: ['electric', 'wiring', 'conduit', 'panel', 'lighting', 'mep'] },
   { phase: 'Plumbing Works', keywords: ['plumb', 'sanitary', 'waterline', 'drainage', 'pipe'] },
-  { phase: 'Earthworks', keywords: ['earthwork', 'excavat', 'grubbing', 'clearing', 'grading', 'backfill', 'compaction', 'mobilization'] },
+  { phase: 'Earthworks', keywords: ['earthwork', 'substructure', 'foundation', 'excavat', 'grubbing', 'clearing', 'grading', 'backfill', 'compaction', 'mobilization'] },
 ];
 
 export function resolveTaskConstructionPhase(task: Partial<UnifiedGanttTaskLike>): string {

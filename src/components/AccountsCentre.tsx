@@ -15,6 +15,7 @@ import { updateStoredSession } from '../utils/session';
 import { ThemeMode } from '../context/ThemeContext';
 import { is2faEnrolled, set2faEnrolled, getAccountPasskey } from './LoginPortal';
 import { logAuditEvent } from '../utils/auditLogger';
+import { uploadFileToServer, compressImageToDataUrl } from '../utils/imageCompression';
 import {
   getOrCreateTotpSecret,
   formatTotpSecretDisplay,
@@ -148,21 +149,34 @@ export const AccountsCentre: React.FC<AccountsCentreProps> = ({
   };
 
   // Avatar Upload & Remove Handlers
-  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      notify('⚠️ Avatar file size must be under 2MB.');
+    if (file.size > 10 * 1024 * 1024) {
+      notify('⚠️ Avatar file size must be under 10MB.');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const base64 = reader.result as string;
-      setAvatarUrl(base64);
-      updateStoredSession({ avatarUrl: base64 });
-      notify('📷 Avatar updated successfully.');
-    };
-    reader.readAsDataURL(file);
+    try {
+      // Upload compressed avatar (<1600px, 0.8 quality) to disk storage
+      const uploadRes = await uploadFileToServer(file, true);
+      if (uploadRes?.url) {
+        setAvatarUrl(uploadRes.url);
+        updateStoredSession({ avatarUrl: uploadRes.url });
+        notify('📷 Avatar updated & saved to storage.');
+        return;
+      }
+    } catch {
+      // Fallback to client-side compressed data URL
+    }
+
+    const compressed = await compressImageToDataUrl(file, {
+      maxWidth: 400,
+      maxHeight: 400,
+      quality: 0.85,
+    });
+    setAvatarUrl(compressed);
+    updateStoredSession({ avatarUrl: compressed });
+    notify('📷 Avatar updated successfully.');
   };
 
   const handleRemoveAvatar = () => {

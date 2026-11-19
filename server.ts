@@ -6,6 +6,7 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { prisma, initializeDatabaseTables } from './server/db';
 import { cleanupExpiredSessions, validateProductionSecurityConfig } from './server/services/sessionService';
@@ -31,6 +32,7 @@ import { attendanceRouter } from './server/routes/attendance';
 import { payrollRouter } from './server/routes/payroll';
 import { workersRouter } from './server/routes/workers';
 import { documentsRouter } from './server/routes/documents';
+import { uploadRouter, UPLOADS_DIR } from './server/routes/upload';
 
 dotenv.config();
 
@@ -121,13 +123,20 @@ app.use('/api', workforceRouter);
 app.use('/api', legacyParcelsRouter);
 app.use('/api/attendance', attendanceRouter);
 app.use('/api/payroll', payrollRouter);
+app.use('/api', uploadRouter);
+
+// Serve persistent user-uploaded static files from disk
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+app.use('/uploads', express.static(UPLOADS_DIR));
 
 // Serve static frontend build in production
 const distPath = path.join(__dirname, 'dist');
 app.use(express.static(distPath));
 
 app.get('*', (req, res, next) => {
-  if (req.path.startsWith('/api') || req.path.startsWith('/events')) {
+  if (req.path.startsWith('/api') || req.path.startsWith('/events') || req.path.startsWith('/uploads')) {
     return next();
   }
   res.sendFile(path.join(distPath, 'index.html'), (err) => {

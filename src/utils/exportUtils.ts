@@ -77,7 +77,7 @@ export function printRegisterTable(
     kpiSummary: [
       { label: 'Total Records Printed', value: `${rows.length} Entries` },
       { label: 'Register Classification', value: title },
-      { label: 'Verification Status', value: 'Official ERP Ledger' },
+      { label: 'Verification Status', value: 'Official Project Management System Ledger' },
     ],
     bodyHtml,
   });

@@ -212,6 +212,34 @@ export default function ProjectScheduleCalendar({
     }
   };
 
+  const pushOverlapNotificationAlert = (
+    eventTitle: string,
+    dateStr: string,
+    startTime: string,
+    endTime: string,
+    overlaps: ScheduleEvent[]
+  ) => {
+    try {
+      const existingRaw = localStorage.getItem('ldm_schedule_conflict_alerts');
+      const existing = existingRaw ? JSON.parse(existingRaw) : [];
+      const firstConflict = overlaps[0];
+      const conflictSummary = firstConflict
+        ? `"${firstConflict.title}" (${firstConflict.startTime || '08:00'}–${firstConflict.endTime || '17:00'})`
+        : `${overlaps.length} scheduled event(s)`;
+      const newAlert = {
+        id: `sched-conflict-${Date.now()}`,
+        title: `Schedule Conflict: ${eventTitle}`,
+        description: `Overlaps with ${conflictSummary} on ${dateStr} (${startTime || '08:00'}–${endTime || '17:00'}).`,
+        time: new Date().toISOString(),
+      };
+      const updated = [newAlert, ...(Array.isArray(existing) ? existing : [])].slice(0, 15);
+      localStorage.setItem('ldm_schedule_conflict_alerts', JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('ldm-schedule-conflict-alert'));
+    } catch {
+      /* silent */
+    }
+  };
+
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim() || !newEventDate) return;
@@ -219,6 +247,7 @@ export default function ProjectScheduleCalendar({
     const overlaps = findOverlappingEvents(newEventDate, newStartTime, newEndTime);
     if (overlaps.length > 0 && detectedConflicts.length === 0) {
       setDetectedConflicts(overlaps);
+      pushOverlapNotificationAlert(newTitle.trim(), newEventDate, newStartTime, newEndTime, overlaps);
       return;
     }
 
@@ -305,6 +334,7 @@ export default function ProjectScheduleCalendar({
     const overlaps = findOverlappingEvents(editEventDate, editStartTime, editEndTime, editingEvent.id);
     if (overlaps.length > 0 && detectedConflicts.length === 0) {
       setDetectedConflicts(overlaps);
+      pushOverlapNotificationAlert(editTitle.trim(), editEventDate, editStartTime, editEndTime, overlaps);
       return;
     }
 

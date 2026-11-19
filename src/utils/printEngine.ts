@@ -83,13 +83,13 @@ export function openEnterprisePrintWindow(options: EnterprisePrintOptions): void
     kpiSummary && kpiSummary.length > 0
       ? `<div class="kpi-grid" style="grid-template-columns: repeat(${Math.min(kpiSummary.length, 5)}, 1fr);">
           ${kpiSummary
-            .map(
-              (k) => `<div class="kpi-card">
+        .map(
+          (k) => `<div class="kpi-card">
               <div class="kpi-lbl">${escapePrintHtml(k.label)}</div>
               <div class="kpi-val">${escapePrintHtml(k.value)}</div>
             </div>`
-            )
-            .join('')}
+        )
+        .join('')}
         </div>`
       : '';
 
@@ -97,16 +97,16 @@ export function openEnterprisePrintWindow(options: EnterprisePrintOptions): void
     signatures && signatures.length > 0
       ? `<div class="sig-grid" style="grid-template-columns: repeat(${signatures.length}, 1fr);">
           ${signatures
-            .map(
-              (s) => `<div class="sig-block">
+        .map(
+          (s) => `<div class="sig-block">
               <div class="sig-role">${escapePrintHtml(s.role)}:</div>
               <div class="sig-space"></div>
               <div class="sig-line">${escapePrintHtml(s.name)}</div>
               <div class="sig-title">${escapePrintHtml(s.title)}</div>
               <div class="sig-date">Date Signed: ____ / ____ / 2026</div>
             </div>`
-            )
-            .join('')}
+        )
+        .join('')}
         </div>`
       : '';
 
@@ -419,7 +419,7 @@ export function openEnterprisePrintWindow(options: EnterprisePrintOptions): void
         />
         <div>
           <div class="company-brand">LDM CONSTRUCTION</div>
-          <div class="company-sub">ENGINEERS &bull; ARCHITECTS &bull; BUILDERS | Design &amp; Build ERP</div>
+          <div class="company-sub">ENGINEERS &bull; ARCHITECTS &bull; BUILDERS | Design &amp; Build Project Management System</div>
           <div class="company-sub">${LDM_COMPANY_LOCATION} &bull; ldmengineeringdesign@gmail.com &bull; (+63) 945 681 0515</div>
           <div class="doc-title">${escapePrintHtml(title)}</div>
           <div class="doc-subtitle">${escapePrintHtml(subtitle)}</div>

@@ -15,6 +15,11 @@ import { exportToCsv } from '../utils/exportUtils';
 import { useTheme } from '../context/ThemeContext';
 import { GANTT_TASKS_STORAGE_PREFIX, GANTT_TASKS_UPDATED_EVENT } from '../utils/ganttProgress';
 import { logAuditEvent } from '../utils/auditLogger';
+import {
+  calculateProjectBomProfitSync,
+  BOM_PROFIT_SYNC_EVENT,
+  notifyBomProfitSync,
+} from '../utils/bomProfitSync';
 
 export type BomUnit = 'pcs' | 'days' | 'lot' | 'cu.m.' | 'sq.m.' | 'bags' | 'kg' | 'bd.ft.' | 'l.m.' | 'sets' | 'rolls' | 'sheets' | 'lengths';
 
@@ -411,13 +416,31 @@ export default function BillOfMaterialsManager({
     setPhases(generateDefaultBomPhases(projectType));
   }, [selectedProjectId]);
 
+  const [materialSyncTick, setMaterialSyncTick] = useState(0);
+
+  useEffect(() => {
+    const onSync = () => setMaterialSyncTick((t) => t + 1);
+    window.addEventListener(BOM_PROFIT_SYNC_EVENT, onSync);
+    return () => window.removeEventListener(BOM_PROFIT_SYNC_EVENT, onSync);
+  }, []);
+
   // Auto-save BOM changes to localStorage
   const saveBomToStorage = useCallback((newPhases: BomPhase[]) => {
     setPhases(newPhases);
     try {
       localStorage.setItem(`ldm_bom_${selectedProjectId}`, JSON.stringify(newPhases));
+      notifyBomProfitSync();
     } catch {}
   }, [selectedProjectId]);
+
+  const bomProfitSync = useMemo(() => {
+    void materialSyncTick;
+    return calculateProjectBomProfitSync({
+      projectId: selectedProjectId,
+      projectName: activeProject?.name || projectTitle,
+      phases,
+    });
+  }, [selectedProjectId, activeProject?.name, projectTitle, phases, materialSyncTick]);
 
   // Reset to default typology template
   const handleApplyTypology = (newType: ProjectTypology) => {
@@ -1198,12 +1221,25 @@ export default function BillOfMaterialsManager({
             <span className="text-[10px] text-slate-500 font-mono">Net Materials Base</span>
           </div>
 
-          <div className="bg-slate-900/80 border border-slate-800 p-3 rounded-xl">
-            <span className="text-[10px] font-mono text-amber-400 uppercase block font-bold">Total Profit Cost</span>
-            <span className="text-base font-bold font-mono text-amber-400 mt-1 block">
-              ₱{summaryCalculations.grandProfitCost.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+          <div className={`bg-slate-900/80 border p-3 rounded-xl ${bomProfitSync.isIntact ? 'border-emerald-500/30' : 'border-rose-500/40'}`}>
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-[10px] font-mono text-amber-400 uppercase block font-bold">Total Profit Pool</span>
+              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded border font-bold ${
+                bomProfitSync.isIntact
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+              }`}>
+                {bomProfitSync.profitMarginPct}% {bomProfitSync.isIntact ? 'Intact' : 'Impacted'}
+              </span>
+            </div>
+            <span className={`text-base font-bold font-mono mt-1 block ${bomProfitSync.isIntact ? 'text-amber-400' : 'text-rose-400'}`}>
+              ₱{bomProfitSync.remainingProfit.toLocaleString(undefined, { maximumFractionDigits: 0 })}
             </span>
-            <span className="text-[10px] text-slate-500 font-mono">Straight % Margin</span>
+            <span className="text-[10px] text-slate-400 font-mono">
+              {bomProfitSync.totalOverrun > 0
+                ? `Base ₱${bomProfitSync.baselineProfit.toLocaleString()} • -₱${bomProfitSync.totalOverrun.toLocaleString()} overrun`
+                : `Base ₱${bomProfitSync.baselineProfit.toLocaleString()} • 0 overruns`}
+            </span>
           </div>
 
           <div className="bg-slate-900/80 border border-slate-800 p-3 rounded-xl">
@@ -1395,6 +1431,7 @@ export default function BillOfMaterialsManager({
                           <tbody className="divide-y divide-slate-800/60 font-sans">
                             {sp.items.map((item) => {
                               const c = calculateLineItemCosts(item);
+                              const syncStatus = bomProfitSync.lineItemStatuses[item.id];
 
                               return (
                                 <tr key={item.id} className="hover:bg-slate-900/40 transition-colors">
@@ -1406,6 +1443,25 @@ export default function BillOfMaterialsManager({
                                       onChange={(e) => handleUpdateItem(phase.id, sp.id, item.id, 'scopeOfWork', e.target.value)}
                                       className="w-full bg-transparent border-0 text-white text-xs focus:ring-1 focus:ring-amber-500 rounded px-1 py-0.5"
                                     />
+                                    {syncStatus && (syncStatus.isBudgetFulfilled || syncStatus.overrunAmount > 0 || syncStatus.actualMaterialSpend > 0) && (
+                                      <div className="flex items-center gap-1.5 mt-1 px-1 flex-wrap">
+                                        {syncStatus.overrunAmount > 0 ? (
+                                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-rose-500/15 border border-rose-500/30 text-[10px] font-mono font-bold text-rose-300">
+                                            <AlertCircle className="w-2.5 h-2.5" />
+                                            Overrun: -₱{Math.round(syncStatus.overrunAmount).toLocaleString()} from Profit
+                                          </span>
+                                        ) : syncStatus.isBudgetFulfilled ? (
+                                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-500/15 border border-emerald-500/30 text-[10px] font-mono font-bold text-emerald-300">
+                                            <CheckCircle2 className="w-2.5 h-2.5" />
+                                            Budget Fulfilled
+                                          </span>
+                                        ) : (
+                                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-[10px] font-mono text-sky-300">
+                                            Mat. Spend: ₱{Math.round(syncStatus.actualMaterialSpend).toLocaleString()} / ₱{Math.round(syncStatus.allocatedCost).toLocaleString()}
+                                          </span>
+                                        )}
+                                      </div>
+                                    )}
                                   </td>
 
                                   {/* No of Units */}

@@ -32,6 +32,7 @@ import {
 } from '../types';
 import { updateStoredSession } from '../utils/session';
 import { secureFetch, getCsrfToken } from '../utils/apiClient';
+import { uploadFileToServer } from '../utils/imageCompression';
 import {
   CTVILL_ORGANIZATION_HIERARCHY, ALL_CTVILL_DEPARTMENTS,
   getRolesForDepartment, getDefaultDailyRate, getDepartmentBadge
@@ -66,6 +67,7 @@ import AuditTrailQaLogs from './AuditTrailQaLogs';
 import { useTheme } from '../context/ThemeContext';
 import { ThemeToggle } from './ThemeToggle';
 import Sidebar from './Sidebar';
+import BudgetsExpensesModal from './BudgetsExpensesModal';
 import {
   EstimatorConfig,
   SpaceCategoryKey,
@@ -879,9 +881,35 @@ export default function AdminPortal({
     prevQuotationsCountRef.current = quotations.length;
   }, [quotations]);
 
+  const [isBudgetsExpensesOpen, setIsBudgetsExpensesOpen] = useState<boolean>(false);
+  const [pushedScheduleAlerts, setPushedScheduleAlerts] = useState<Array<{
+    id: string;
+    title: string;
+    description: string;
+    time?: string;
+  }>>(() => {
+    try {
+      const saved = localStorage.getItem('ldm_schedule_conflict_alerts');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    const syncConflictAlerts = () => {
+      try {
+        const saved = localStorage.getItem('ldm_schedule_conflict_alerts');
+        setPushedScheduleAlerts(saved ? JSON.parse(saved) : []);
+      } catch { /* silent */ }
+    };
+    window.addEventListener('ldm-schedule-conflict-alert', syncConflictAlerts);
+    return () => window.removeEventListener('ldm-schedule-conflict-alert', syncConflictAlerts);
+  }, []);
+
   interface OperationalNotification {
     id: string;
-    type: 'LEAD' | 'CHANGE_ORDER' | 'RFI' | 'WEATHER' | 'DEFECT';
+    type: 'LEAD' | 'CHANGE_ORDER' | 'RFI' | 'WEATHER' | 'DEFECT' | 'SCHEDULE_CONFLICT';
     title: string;
     description: string;
     time?: string;
@@ -890,8 +918,61 @@ export default function AdminPortal({
     targetTab: string;
   }
 
+  // Detect live same-day overlapping events in scheduleEvents
+  const detectedScheduleOverlapNotifications: OperationalNotification[] = (() => {
+    const results: OperationalNotification[] = [];
+    const seenPairs = new Set<string>();
+    const parseMin = (t?: string, fallback = 480) => {
+      if (!t || !t.includes(':')) return fallback;
+      const [h, m] = t.split(':').map(Number);
+      return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : fallback;
+    };
+    const activeEvts = (scheduleEvents || []).filter((e: any) => e.status !== 'CANCELLED');
+    for (let i = 0; i < activeEvts.length; i++) {
+      for (let j = i + 1; j < activeEvts.length; j++) {
+        const a: any = activeEvts[i];
+        const b: any = activeEvts[j];
+        const dateA = String(a.eventDate || a.date || '').split('T')[0];
+        const dateB = String(b.eventDate || b.date || '').split('T')[0];
+        if (!dateA || dateA !== dateB) continue;
+        const aStart = parseMin(a.startTime, 480);
+        const aEnd = Math.max(aStart + 30, parseMin(a.endTime, 1020));
+        const bStart = parseMin(b.startTime, 480);
+        const bEnd = Math.max(bStart + 30, parseMin(b.endTime, 1020));
+        if (aStart < bEnd && aEnd > bStart) {
+          const pairKey = [a.id, b.id].sort().join('_');
+          if (seenPairs.has(pairKey)) continue;
+          seenPairs.add(pairKey);
+          results.push({
+            id: `sched-overlap-${pairKey}`,
+            type: 'SCHEDULE_CONFLICT',
+            title: `Schedule Overlap: ${a.title}`,
+            description: `Conflicts with "${b.title}" on ${dateA} (${a.startTime || '08:00'}–${a.endTime || '17:00'})`,
+            time: dateA,
+            badge: 'OVERLAP',
+            badgeColor: isDark ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-amber-100 text-amber-800 border-amber-300',
+            targetTab: 'schedule',
+          });
+        }
+      }
+    }
+    return results;
+  })();
+
   // Dynamically aggregate operational notifications from active modules
   const allNotifications: OperationalNotification[] = [
+    // 0. Schedule Overlap Conflict Alerts (live + pushed from Company Schedule)
+    ...pushedScheduleAlerts.map(alert => ({
+      id: alert.id,
+      type: 'SCHEDULE_CONFLICT' as const,
+      title: alert.title,
+      description: alert.description,
+      time: alert.time,
+      badge: 'OVERLAP',
+      badgeColor: isDark ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' : 'bg-amber-100 text-amber-800 border-amber-300',
+      targetTab: 'schedule',
+    })),
+    ...detectedScheduleOverlapNotifications,
     // 1. New Fit-out leads
     ...quotations
       .filter(q => q.status === 'NEW_INQUIRY')
@@ -1079,13 +1160,26 @@ export default function AdminPortal({
     }
   };
 
-  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
       alert('Please select a valid image file (JPG, PNG, WebP).');
       return;
+    }
+
+    try {
+      const uploadRes = await uploadFileToServer(file, true);
+      if (uploadRes?.url) {
+        setAvatarUrl(uploadRes.url);
+        notify('Avatar updated & saved successfully!');
+        persistSettingsToStorageAndDb({ avatarUrl: uploadRes.url });
+        e.target.value = '';
+        return;
+      }
+    } catch {
+      // Fallback to local canvas downscaling
     }
 
     const reader = new FileReader();
@@ -1482,14 +1576,22 @@ export default function AdminPortal({
   const [workforceFilter, setWorkforceFilter] = useState<'ALL' | 'INTERNAL' | 'OUTSOURCED'>('ALL');
   const [contSite, setContSite] = useState<string>('Unassigned');
 
-  const handleContAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleContAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (file.size > 2 * 1024 * 1024) {
-      notify('Photo is too large. Please select an image under 2MB.');
+    if (file.size > 10 * 1024 * 1024) {
+      notify('Photo is too large. Please select an image under 10MB.');
       return;
     }
-    // Lightweight object URL storage reference instead of multi-megabyte Base64 bloat
+    try {
+      const uploadRes = await uploadFileToServer(file, true);
+      if (uploadRes?.url) {
+        setContAvatar(uploadRes.url);
+        return;
+      }
+    } catch {
+      // Fallback to object URL reference
+    }
     const objectUrl = URL.createObjectURL(file);
     setContAvatar(objectUrl);
   };
@@ -2911,10 +3013,10 @@ export default function AdminPortal({
                             </div>
                           </div>
 
-                          {/* Project Budgets — Hover Breakdown per project + RBAC-gated Clickable to Finance/Budget view */}
+                          {/* Project Budgets — Hover Breakdown per project + Clickable to Budgets & Expenses View */}
                           <div
-                            onClick={canAccessModule(currentRole, 'payments') ? () => setActiveTab('payments') : undefined}
-                            className={`group relative ${canAccessModule(currentRole, 'payments') ? 'cursor-pointer' : 'cursor-default'} ${
+                            onClick={() => setIsBudgetsExpensesOpen(true)}
+                            className={`group relative cursor-pointer ${
                               isDark
                                 ? 'bg-slate-900/70 border-slate-800/80 hover:border-emerald-500/50'
                                 : 'bg-white border-slate-200/80 shadow-[0_1px_2px_rgba(0,0,0,0.04),0_1px_3px_rgba(0,0,0,0.02)] hover:shadow-md hover:border-emerald-400'
@@ -2963,12 +3065,10 @@ export default function AdminPortal({
                                   </div>
                                 ))}
                               </div>
-                              {canAccessModule(currentRole, 'payments') && (
-                                <div className="mt-2 pt-1.5 border-t border-slate-800/60 text-[10px] text-emerald-400 flex items-center justify-between font-medium">
-                                  <span>Click to open Finance & Billings View</span>
-                                  <ChevronRight className="w-3 h-3" />
-                                </div>
-                              )}
+                              <div className="mt-2 pt-1.5 border-t border-slate-800/60 text-[10px] text-emerald-400 flex items-center justify-between font-medium">
+                                <span>Click to open Budgets &amp; Expenses Overview</span>
+                                <ChevronRight className="w-3 h-3" />
+                              </div>
                             </div>
                           </div>
 
@@ -3214,35 +3314,32 @@ export default function AdminPortal({
                                     : (isDark ? 'bg-emerald-950/60 text-emerald-300 border-emerald-800/60' : 'bg-emerald-50 text-emerald-700 border-emerald-200');
 
                                   return (
-                                    <div key={item.id} className={`space-y-1.5 p-2 rounded-lg border transition-colors ${
-                                      isDark
-                                        ? 'bg-slate-900/40 border-slate-800/60 hover:border-slate-700/60'
-                                        : 'bg-slate-50/70 border-slate-200/80 hover:border-slate-300 shadow-xs'
-                                    }`}>
+                                    <div
+                                      key={item.id}
+                                      onClick={() => setIsBudgetsExpensesOpen(true)}
+                                      className={`space-y-1.5 p-2.5 rounded-lg border transition-colors cursor-pointer ${
+                                        isDark
+                                          ? 'bg-slate-900/40 border-slate-800/60 hover:border-emerald-500/40'
+                                          : 'bg-slate-50/70 border-slate-200/80 hover:border-emerald-400 shadow-xs'
+                                      }`}
+                                    >
                                       <div className="flex items-center justify-between text-xs gap-2">
                                         <div className="min-w-0 flex-1">
-                                          <div className="flex items-center gap-1.5">
-                                            <span className={`font-semibold truncate ${isDark ? 'text-slate-200' : 'text-slate-800'}`} title={item.fullName}>
-                                              {item.fullName}
-                                            </span>
-                                          </div>
-                                          <div className={`text-[11px] font-mono flex items-center gap-1.5 mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                                            <span>Physical: <span className={isDark ? "text-amber-400 font-medium" : "text-amber-600 font-medium"}>{item.physicalProgress}%</span></span>
-                                            <span className={isDark ? "text-slate-600" : "text-slate-300"}>|</span>
-                                            <span>Spend: <span className={isOverBudget ? (isDark ? 'text-rose-400 font-medium' : 'text-rose-600 font-medium') : isNearCap ? (isDark ? 'text-amber-300 font-medium' : 'text-amber-600 font-medium') : (isDark ? 'text-emerald-400 font-medium' : 'text-emerald-600 font-medium')}>{percentDisplay}</span></span>
+                                          <span className={`font-semibold truncate block ${isDark ? 'text-slate-200' : 'text-slate-800'}`} title={item.fullName}>
+                                            {item.fullName}
+                                          </span>
+                                          <div className={`text-[11px] font-mono mt-0.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                                            Physical: <span className={isDark ? 'text-amber-400 font-medium' : 'text-amber-600 font-medium'}>{item.physicalProgress}%</span>
+                                            <span className="mx-1.5 opacity-40">•</span>
+                                            <span>{formatCompactPeso(item.disbursed)} / {formatCompactPeso(item.budget)}</span>
                                           </div>
                                         </div>
-                                        <div className="flex items-center gap-1.5 shrink-0 font-mono text-[11px]">
-                                          <span className={`${isDark ? 'text-slate-300' : 'text-slate-700'} font-medium`}>
-                                            {formatCompactPeso(item.disbursed)} <span className={isDark ? "text-slate-500" : "text-slate-400"}>/</span> {formatCompactPeso(item.budget)}
-                                          </span>
-                                          <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${badgeClass}`}>
-                                            {percentDisplay}
-                                          </span>
-                                        </div>
+                                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded border font-semibold shrink-0 ${badgeClass}`}>
+                                          {percentDisplay} Burn Rate
+                                        </span>
                                       </div>
 
-                                      {/* Horizontal Progress Track - Clear Container */}
+                                      {/* Horizontal Progress Track */}
                                       <div className={`h-2 w-full rounded-full overflow-hidden border ${
                                         isDark
                                           ? 'bg-slate-800/80 border-slate-700/50'
@@ -3252,19 +3349,6 @@ export default function AdminPortal({
                                           className={`h-full rounded-full transition-all duration-500 ${barColor}`}
                                           style={{ width: `${Math.min(100, Math.max(item.disbursed > 0 ? 2 : 0, percent))}%` }}
                                         />
-                                      </div>
-
-                                      {/* Micro Cost-Breakdown Chips */}
-                                      <div className="flex items-center justify-between gap-1 text-[11px] font-mono">
-                                        <span className={`border px-1.5 py-0.5 rounded truncate ${isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
-                                          Labor: <span className={isDark ? "text-slate-200 font-medium" : "text-slate-800 font-medium"}>{formatCompactPeso(item.laborDisbursed)}</span>
-                                        </span>
-                                        <span className={`border px-1.5 py-0.5 rounded truncate ${isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
-                                          Subcon AP: <span className={isDark ? "text-slate-200 font-medium" : "text-slate-800 font-medium"}>{formatCompactPeso(item.subconDisbursed)}</span>
-                                        </span>
-                                        <span className={`border px-1.5 py-0.5 rounded truncate ${isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400' : 'bg-slate-50 border-slate-200 text-slate-600'}`}>
-                                          Remaining Buffer: <span className={isOverBudget ? (isDark ? 'text-rose-400 font-medium' : 'text-rose-600 font-medium') : (isDark ? 'text-slate-200 font-medium' : 'text-slate-800 font-medium')}>{formatCompactPeso(item.remaining)}</span>
-                                        </span>
                                       </div>
                                     </div>
                                   );
@@ -6065,6 +6149,19 @@ export default function AdminPortal({
         </div>,
         document.body
       )}
+
+      {/* Unified Budgets & Expenses Overview Modal */}
+      <BudgetsExpensesModal
+        isOpen={isBudgetsExpensesOpen}
+        onClose={() => setIsBudgetsExpensesOpen(false)}
+        projects={projects || []}
+        totalLaborFallback={(extendedPayroll || [])
+          .filter((pr: any) => pr.status === 'PAID' || pr.status === 'DISBURSED')
+          .reduce((sum: number, pr: any) => sum + (Number(pr.netPay || pr.totalAmount || pr.grossPay || 0) || 0), 0)}
+        totalSubconFallback={(contractors || [])
+          .filter((c: any) => c.employmentType === 'OUTSOURCED')
+          .reduce((sum: number, c: any) => sum + (Number(c.paidAmount || 0) || 0), 0)}
+      />
 
     </div>
   );

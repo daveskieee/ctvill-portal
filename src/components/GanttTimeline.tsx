@@ -750,8 +750,8 @@ export function computeCriticalPath(
 
           // Late Finish of successor
           const succLF = lateFinishMap.get(succId) || parseDate(succTask.endDate);
-          const succDur = (succTask.type === 'milestone' || succTask.duration === 0) 
-            ? 0 
+          const succDur = (succTask.type === 'milestone' || succTask.duration === 0)
+            ? 0
             : Math.max(1, succTask.duration);
 
           // Calculate successor's Late Start (LS)
@@ -938,12 +938,12 @@ export default function GanttTimeline({
   const toggleFullscreen = useCallback(() => {
     if (!isFullscreen) {
       if (ganttContainerRef.current?.requestFullscreen) {
-        ganttContainerRef.current.requestFullscreen().catch(() => {});
+        ganttContainerRef.current.requestFullscreen().catch(() => { });
       }
       setIsFullscreen(true);
     } else {
       if (document.fullscreenElement && document.exitFullscreen) {
-        document.exitFullscreen().catch(() => {});
+        document.exitFullscreen().catch(() => { });
       }
       setIsFullscreen(false);
     }
@@ -956,7 +956,7 @@ export default function GanttTimeline({
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && isFullscreen) {
         if (document.fullscreenElement && document.exitFullscreen) {
-          document.exitFullscreen().catch(() => {});
+          document.exitFullscreen().catch(() => { });
         }
         setIsFullscreen(false);
       }
@@ -1322,6 +1322,7 @@ export default function GanttTimeline({
             type: task.type,
             parentTaskId: task.parentTaskId,
             wbsCode: task.wbsCode,
+            sortOrder: task.sortOrder,
             assignedContractorId: task.assignedContractorId,
             predecessorIds: task.predecessorIds
           }
@@ -1455,26 +1456,50 @@ export default function GanttTimeline({
       getEffectiveStartTime(t.id);
     });
 
-    // Chronological WBS Sequence:
-    // Sort child tasks under parent milestones strictly by startDate ascending across all WBS levels
-    const sortByStartDate = (a: GanttTaskItem, b: GanttTaskItem) => {
-      const timeA = effectiveStartTimeMap.get(a.id) ?? getTaskDate(a).getTime();
-      const timeB = effectiveStartTimeMap.get(b.id) ?? getTaskDate(b).getTime();
-      if (timeA !== timeB) return timeA - timeB;
-      const directA = getTaskDate(a).getTime();
-      const directB = getTaskDate(b).getTime();
-      if (directA !== directB) return directA - directB;
-      return (a.sortOrder ?? 0) - (b.sortOrder ?? 0);
+    // WBS Hierarchy Lock:
+    // Keep parent WBS rows (e.g., 1.0 GENERAL / MOBILIZATION, 2.0 EARTHWORKS) strictly pinned
+    // above their child subtasks (1.1, 1.2, etc.) regardless of date edits or drag-and-drop.
+    const parseWbsNumericParts = (code?: string | null, text?: string): number[] | null => {
+      const candidate = (code && code.trim()) || (text ? (text.match(/^(\d+(?:\.\d+)*)/)?.[1] || '') : '');
+      if (!candidate) return null;
+      const parts = candidate
+        .split('.')
+        .map((seg) => parseInt(seg, 10))
+        .filter((n) => Number.isFinite(n));
+      return parts.length > 0 ? parts : null;
     };
 
-    rootTasks.sort(sortByStartDate);
+    const sortByWbsHierarchy = (a: GanttTaskItem, b: GanttTaskItem) => {
+      const wbsA = parseWbsNumericParts(a.wbsCode, a.text);
+      const wbsB = parseWbsNumericParts(b.wbsCode, b.text);
+      if (wbsA && wbsB) {
+        const len = Math.max(wbsA.length, wbsB.length);
+        for (let i = 0; i < len; i++) {
+          const valA = wbsA[i] ?? 0;
+          const valB = wbsB[i] ?? 0;
+          if (valA !== valB) return valA - valB;
+        }
+        // Shorter WBS code or .0 header stays strictly above deeper children
+        if (wbsA.length !== wbsB.length) return wbsA.length - wbsB.length;
+      }
+      // Lock explicit sortOrder next so date changes never reorder rows
+      const orderA = Number.isFinite(a.sortOrder) ? a.sortOrder : 0;
+      const orderB = Number.isFinite(b.sortOrder) ? b.sortOrder : 0;
+      if (orderA !== orderB) return orderA - orderB;
+      // Final deterministic tiebreaker
+      const directA = getTaskDate(a).getTime();
+      const directB = getTaskDate(b).getTime();
+      return directA - directB;
+    };
+
+    rootTasks.sort(sortByWbsHierarchy);
 
     // Traverse tree in depth-first order to construct properly nested list
     const ordered: { task: GanttTaskItem; depth: number }[] = [];
     const visited = new Set<string>();
 
     const traverse = (items: GanttTaskItem[], depth: number) => {
-      const sortedItems = items.slice().sort(sortByStartDate);
+      const sortedItems = items.slice().sort(sortByWbsHierarchy);
       sortedItems.forEach(item => {
         if (visited.has(item.id)) return;
         visited.add(item.id);
@@ -1482,7 +1507,7 @@ export default function GanttTimeline({
         ordered.push({ task: item, depth });
         const children = childMap.get(item.id) || [];
         if (children.length > 0) {
-          const sortedChildren = children.slice().sort(sortByStartDate);
+          const sortedChildren = children.slice().sort(sortByWbsHierarchy);
           traverse(sortedChildren, depth + 1);
         }
       });
@@ -1490,8 +1515,8 @@ export default function GanttTimeline({
 
     traverse(rootTasks, 0);
 
-    // Fallback for any unreachable tasks (e.g. self-referencing) sorted by startDate
-    const unreachable = tasks.filter(t => !visited.has(t.id)).sort(sortByStartDate);
+    // Fallback for any unreachable tasks (e.g. self-referencing) sorted by WBS hierarchy
+    const unreachable = tasks.filter(t => !visited.has(t.id)).sort(sortByWbsHierarchy);
     unreachable.forEach(t => {
       dMap.set(t.id, 0);
       ordered.push({ task: t, depth: 0 });
@@ -2307,36 +2332,31 @@ export default function GanttTimeline({
   }, [visibleTasks, dateToPixel]);
 
   return (
-    <div 
+    <div
       ref={ganttContainerRef}
-      className={`transition-all duration-300 ${
-        isFullscreen 
+      className={`transition-all duration-300 ${isFullscreen
           ? (isDark ? 'fixed inset-0 z-50 bg-slate-950 p-4 md:p-6 flex flex-col h-screen w-screen overflow-hidden' : 'fixed inset-0 z-50 bg-slate-100 p-4 md:p-6 flex flex-col h-screen w-screen overflow-hidden')
           : 'space-y-4 select-none'
-      }`}
+        }`}
     >
       {/* 1. Header Toolbar */}
-      <div className={`${
-        isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200/80 shadow-xs'
-      } border rounded-xl transition-all ${
-        isFullscreen ? 'p-3 mb-2 shrink-0' : 'p-4'
-      }`}>
+      <div className={`${isDark ? 'bg-slate-900 border-slate-800' : 'bg-white border-slate-200/80 shadow-xs'
+        } border rounded-xl transition-all ${isFullscreen ? 'p-3 mb-2 shrink-0' : 'p-4'
+        }`}>
         {!isFullscreen ? (
           <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 mb-1">
-                <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold tracking-wider uppercase border ${
-                  isDark ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-amber-50 text-amber-700 border-amber-200'
-                }`}>
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold tracking-wider uppercase border ${isDark ? 'bg-amber-500/10 text-amber-400 border-amber-500/20' : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}>
                   Critical Path Method
                 </span>
                 <span className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
                   React 19 Direct Manipulation • 6-Day Workweek
                 </span>
               </div>
-              <h2 className={`text-base font-bold tracking-tight flex items-center gap-2 ${
-                isDark ? 'text-white' : 'text-slate-900'
-              }`}>
+              <h2 className={`text-base font-bold tracking-tight flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'
+                }`}>
                 <Layers className={`w-5 h-5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
                 Construction CPM Scheduling & Task Management
               </h2>
@@ -2346,9 +2366,8 @@ export default function GanttTimeline({
             </div>
 
             {/* Metrics summary */}
-            <div className={`flex items-center gap-3 text-xs font-mono px-3.5 py-1.5 rounded-xl border self-start xl:self-auto ${
-              isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200/80 shadow-2xs'
-            }`}>
+            <div className={`flex items-center gap-3 text-xs font-mono px-3.5 py-1.5 rounded-xl border self-start xl:self-auto ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200/80 shadow-2xs'
+              }`}>
               <div className="text-center px-1">
                 <span className={`text-[10px] uppercase block tracking-wider ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>Total</span>
                 <span className={`font-bold text-xs ${isDark ? 'text-white' : 'text-slate-800'}`}>{metrics.total}</span>
@@ -2372,35 +2391,30 @@ export default function GanttTimeline({
           </div>
         ) : (
           /* Sleek Fullscreen Status Banner */
-          <div className={`flex items-center justify-between gap-4 text-xs font-mono pb-2 border-b ${
-            isDark ? 'border-slate-800/80' : 'border-slate-200'
-          }`}>
+          <div className={`flex items-center justify-between gap-4 text-xs font-mono pb-2 border-b ${isDark ? 'border-slate-800/80' : 'border-slate-200'
+            }`}>
             <div className="flex items-center gap-3">
               <span className="w-2 h-2 rounded-full bg-emerald-400" />
-              <span className={`font-bold text-sm tracking-tight flex items-center gap-2 ${
-                isDark ? 'text-white' : 'text-slate-900'
-              }`}>
+              <span className={`font-bold text-sm tracking-tight flex items-center gap-2 ${isDark ? 'text-white' : 'text-slate-900'
+                }`}>
                 <Layers className={`w-4 h-4 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
                 {activeProject?.name || 'Project Schedule'}
               </span>
-              <span className={`text-xs font-bold px-2 py-0.5 rounded border ${
-                isDark ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' : 'text-amber-700 bg-amber-50 border-amber-200'
-              }`}>
+              <span className={`text-xs font-bold px-2 py-0.5 rounded border ${isDark ? 'text-amber-400 bg-amber-500/10 border-amber-500/20' : 'text-amber-700 bg-amber-50 border-amber-200'
+                }`}>
                 {currentProjectProgress}% Done ({metrics.completed}/{metrics.total} Tasks • {metrics.milestones} Milestones)
               </span>
             </div>
             <div className={`flex items-center gap-2 text-[11px] ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-              <span>Press <kbd className={`px-1.5 py-0.5 rounded border ${
-                isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-100 border-slate-300 text-slate-700'
-              }`}>Esc</kbd> to exit full screen</span>
+              <span>Press <kbd className={`px-1.5 py-0.5 rounded border ${isDark ? 'bg-slate-800 border-slate-700 text-slate-200' : 'bg-slate-100 border-slate-300 text-slate-700'
+                }`}>Esc</kbd> to exit full screen</span>
             </div>
           </div>
         )}
 
         {/* Action Controls Bar */}
-        <div className={`mt-3 pt-3 border-t flex flex-wrap items-center justify-between gap-2.5 ${
-          isDark ? 'border-slate-800/80' : 'border-slate-200'
-        }`}>
+        <div className={`mt-3 pt-3 border-t flex flex-wrap items-center justify-between gap-2.5 ${isDark ? 'border-slate-800/80' : 'border-slate-200'
+          }`}>
           <div className="flex flex-wrap items-center gap-2">
             {/* Project Switcher */}
             {projects.length > 0 ? (
@@ -2408,11 +2422,10 @@ export default function GanttTimeline({
                 value={selectedProjectId}
                 onChange={(e) => setSelectedProjectId(e.target.value)}
                 aria-label="Select Commercial Project"
-                className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:border-amber-500 focus:outline-none cursor-pointer border ${
-                  isDark 
-                    ? 'bg-slate-950 border-slate-700 text-slate-200' 
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:border-amber-500 focus:outline-none cursor-pointer border ${isDark
+                    ? 'bg-slate-950 border-slate-700 text-slate-200'
                     : 'bg-white border-slate-300 text-slate-800 shadow-2xs'
-                }`}
+                  }`}
               >
                 {projects.map(p => (
                   <option key={p.id} value={p.id}>
@@ -2421,26 +2434,23 @@ export default function GanttTimeline({
                 ))}
               </select>
             ) : (
-              <span className={`text-xs font-mono px-2.5 py-1.5 rounded-lg border ${
-                isDark ? 'text-slate-400 bg-slate-950 border-slate-800' : 'text-slate-500 bg-slate-50 border-slate-200'
-              }`}>
+              <span className={`text-xs font-mono px-2.5 py-1.5 rounded-lg border ${isDark ? 'text-slate-400 bg-slate-950 border-slate-800' : 'text-slate-500 bg-slate-50 border-slate-200'
+                }`}>
                 No Commercial Sites Registered
               </span>
             )}
 
             {/* Active Project Physical Progress Bar Indicator */}
             {activeProject && (
-              <div className={`flex items-center gap-2.5 border rounded-xl px-3 py-1.5 ${
-                isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200 shadow-2xs'
-              }`}>
+              <div className={`flex items-center gap-2.5 border rounded-xl px-3 py-1.5 ${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-slate-50 border-slate-200 shadow-2xs'
+                }`}>
                 <div className="flex items-center gap-2 text-[10px] font-mono">
                   <span className={isDark ? 'text-slate-400 font-medium' : 'text-slate-500 font-medium'}>Progress:</span>
                   <span className={`font-bold ${isDark ? 'text-white' : 'text-slate-800'}`}>{currentProjectProgress}%</span>
                 </div>
-                <div className={`w-20 h-1.5 rounded-full overflow-hidden border ${
-                  isDark ? 'bg-slate-800 border-slate-700/50' : 'bg-slate-200 border-slate-300/80'
-                }`}>
-                  <div 
+                <div className={`w-20 h-1.5 rounded-full overflow-hidden border ${isDark ? 'bg-slate-800 border-slate-700/50' : 'bg-slate-200 border-slate-300/80'
+                  }`}>
+                  <div
                     className="h-full bg-amber-500 rounded-full transition-all duration-300"
                     style={{ width: `${Math.min(100, Math.max(0, currentProjectProgress))}%` }}
                   />
@@ -2452,11 +2462,10 @@ export default function GanttTimeline({
             <button
               type="button"
               onClick={toggleFullscreen}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${
-                isDark 
-                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' 
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${isDark
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
                   : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300/80 shadow-2xs'
-              }`}
+                }`}
               title={isFullscreen ? 'Exit Full Screen Mode (Esc)' : 'Open Full Screen Mode (Auto-fits entire schedule across monitor)'}
             >
               {isFullscreen ? (
@@ -2476,15 +2485,14 @@ export default function GanttTimeline({
             <button
               type="button"
               onClick={() => setIsLeftPaneCollapsed(prev => !prev)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
-                isLeftPaneCollapsed
-                  ? isDark 
-                    ? 'bg-indigo-950/70 text-indigo-300 border-indigo-700/60 hover:bg-indigo-900/60' 
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${isLeftPaneCollapsed
+                  ? isDark
+                    ? 'bg-indigo-950/70 text-indigo-300 border-indigo-700/60 hover:bg-indigo-900/60'
                     : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-2xs'
-                  : isDark 
-                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700' 
+                  : isDark
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
                     : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300/80 shadow-2xs'
-              }`}
+                }`}
               title={isLeftPaneCollapsed ? 'Show Task Grid' : 'Maximize Timeline (Hide Task Grid)'}
             >
               {isLeftPaneCollapsed ? <PanelLeftOpen className="w-3.5 h-3.5" /> : <PanelLeftClose className="w-3.5 h-3.5" />}
@@ -2492,33 +2500,29 @@ export default function GanttTimeline({
             </button>
 
             {/* Timescale Zoom Controls with Zoom In & Zoom Out */}
-            <div className={`flex items-center border rounded-lg p-0.5 gap-0.5 ${
-              isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100/90 border-slate-200'
-            }`}>
+            <div className={`flex items-center border rounded-lg p-0.5 gap-0.5 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100/90 border-slate-200'
+              }`}>
               <button
                 type="button"
                 onClick={handleZoomOut}
-                className={`p-1 rounded-md transition cursor-pointer ${
-                  isDark ? 'text-slate-400 hover:text-amber-300 hover:bg-slate-800' : 'text-slate-600 hover:text-amber-700 hover:bg-white'
-                }`}
+                className={`p-1 rounded-md transition cursor-pointer ${isDark ? 'text-slate-400 hover:text-amber-300 hover:bg-slate-800' : 'text-slate-600 hover:text-amber-700 hover:bg-white'
+                  }`}
                 title="Zoom Out Timeline (-)"
               >
                 <ZoomOut className="w-3.5 h-3.5" />
               </button>
 
-              <div className={`flex items-center gap-0.5 border-x px-1 ${
-                isDark ? 'border-slate-800/80' : 'border-slate-200'
-              }`}>
+              <div className={`flex items-center gap-0.5 border-x px-1 ${isDark ? 'border-slate-800/80' : 'border-slate-200'
+                }`}>
                 {(['year', 'quarter', 'month', 'week', 'day'] as ZoomLevel[]).map(z => (
                   <button
                     key={z}
                     type="button"
                     onClick={() => { setZoomLevel(z); setZoomFactor(1); }}
-                    className={`px-2 py-0.5 text-xs rounded font-mono font-medium transition cursor-pointer capitalize ${
-                      zoomLevel === z 
+                    className={`px-2 py-0.5 text-xs rounded font-mono font-medium transition cursor-pointer capitalize ${zoomLevel === z
                         ? (isDark ? 'bg-slate-800 text-amber-400 font-bold' : 'bg-white text-amber-700 font-bold shadow-2xs')
                         : (isDark ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900')
-                    }`}
+                      }`}
                   >
                     {z}
                   </button>
@@ -2528,9 +2532,8 @@ export default function GanttTimeline({
               <button
                 type="button"
                 onClick={handleZoomIn}
-                className={`p-1 rounded-md transition cursor-pointer ${
-                  isDark ? 'text-slate-400 hover:text-amber-300 hover:bg-slate-800' : 'text-slate-600 hover:text-amber-700 hover:bg-white'
-                }`}
+                className={`p-1 rounded-md transition cursor-pointer ${isDark ? 'text-slate-400 hover:text-amber-300 hover:bg-slate-800' : 'text-slate-600 hover:text-amber-700 hover:bg-white'
+                  }`}
                 title="Zoom In Timeline (+)"
               >
                 <ZoomIn className="w-3.5 h-3.5" />
@@ -2540,9 +2543,8 @@ export default function GanttTimeline({
               <button
                 type="button"
                 onClick={handleFitToScreen}
-                className={`p-1 rounded-md transition cursor-pointer ${
-                  isDark ? 'text-slate-400 hover:text-amber-300 hover:bg-slate-800' : 'text-slate-600 hover:text-amber-700 hover:bg-white'
-                }`}
+                className={`p-1 rounded-md transition cursor-pointer ${isDark ? 'text-slate-400 hover:text-amber-300 hover:bg-slate-800' : 'text-slate-600 hover:text-amber-700 hover:bg-white'
+                  }`}
                 title="Auto-Fit Timeline into current window width"
               >
                 <Scan className="w-3.5 h-3.5" />
@@ -2551,9 +2553,8 @@ export default function GanttTimeline({
               <button
                 type="button"
                 onClick={handleResetZoom}
-                className={`text-[10px] font-mono px-1.5 py-0.5 rounded transition cursor-pointer ${
-                  isDark ? 'text-slate-400 hover:text-amber-300' : 'text-slate-600 hover:text-amber-700'
-                }`}
+                className={`text-[10px] font-mono px-1.5 py-0.5 rounded transition cursor-pointer ${isDark ? 'text-slate-400 hover:text-amber-300' : 'text-slate-600 hover:text-amber-700'
+                  }`}
                 title="Reset Zoom to 100%"
               >
                 {Math.round(zoomFactor * 100)}%
@@ -2565,13 +2566,12 @@ export default function GanttTimeline({
               type="button"
               disabled={!selectedProjectId}
               onClick={() => handleAddNewTask()}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 font-bold rounded-lg text-xs transition cursor-pointer ${
-                !selectedProjectId
-                  ? isDark 
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 font-bold rounded-lg text-xs transition cursor-pointer ${!selectedProjectId
+                  ? isDark
                     ? 'bg-slate-800/60 text-slate-500 cursor-not-allowed border border-slate-800'
                     : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
                   : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-xs'
-              }`}
+                }`}
             >
               <Plus className="w-3.5 h-3.5" />
               <span>Add Task</span>
@@ -2580,15 +2580,14 @@ export default function GanttTimeline({
               type="button"
               disabled={!selectedProjectId}
               onClick={handleAddNewMilestone}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
-                !selectedProjectId
-                  ? isDark 
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${!selectedProjectId
+                  ? isDark
                     ? 'bg-slate-800/60 text-slate-500 cursor-not-allowed border-slate-800'
                     : 'bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200'
-                  : isDark 
+                  : isDark
                     ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
                     : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300/80 shadow-2xs'
-              }`}
+                }`}
             >
               <span className={isDark ? 'text-amber-400 text-xs' : 'text-amber-600 text-xs'}>◆</span>
               <span>Add Milestone</span>
@@ -2598,11 +2597,10 @@ export default function GanttTimeline({
                 type="button"
                 onClick={handleLoadStandardFitOutTemplate}
                 disabled={isSyncing}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${
-                  isDark 
-                    ? 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-amber-500/30' 
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${isDark
+                    ? 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-amber-500/30'
                     : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300 shadow-2xs'
-                }`}
+                  }`}
                 title="Load Standard Fit-Out Template (initialized at 0% progress)"
               >
                 <Sparkles className="w-3.5 h-3.5 text-amber-500" />
@@ -2613,15 +2611,13 @@ export default function GanttTimeline({
 
           <div className="flex items-center gap-2">
             {/* Tree Expand / Collapse All Quick Controls */}
-            <div className={`flex items-center gap-0.5 border rounded-lg p-0.5 ${
-              isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100/90 border-slate-200'
-            }`}>
+            <div className={`flex items-center gap-0.5 border rounded-lg p-0.5 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100/90 border-slate-200'
+              }`}>
               <button
                 type="button"
                 onClick={handleExpandAll}
-                className={`px-2 py-1 rounded text-xs font-mono transition flex items-center gap-1 cursor-pointer ${
-                  isDark ? 'text-slate-300 hover:text-white hover:bg-slate-800' : 'text-slate-600 hover:text-slate-900 hover:bg-white shadow-2xs'
-                }`}
+                className={`px-2 py-1 rounded text-xs font-mono transition flex items-center gap-1 cursor-pointer ${isDark ? 'text-slate-300 hover:text-white hover:bg-slate-800' : 'text-slate-600 hover:text-slate-900 hover:bg-white shadow-2xs'
+                  }`}
                 title="Expand All Subtasks"
               >
                 <ChevronsDown className={`w-3.5 h-3.5 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
@@ -2630,9 +2626,8 @@ export default function GanttTimeline({
               <button
                 type="button"
                 onClick={handleCollapseAll}
-                className={`px-2 py-1 rounded text-xs font-mono transition flex items-center gap-1 cursor-pointer ${
-                  isDark ? 'text-slate-300 hover:text-white hover:bg-slate-800' : 'text-slate-600 hover:text-slate-900 hover:bg-white shadow-2xs'
-                }`}
+                className={`px-2 py-1 rounded text-xs font-mono transition flex items-center gap-1 cursor-pointer ${isDark ? 'text-slate-300 hover:text-white hover:bg-slate-800' : 'text-slate-600 hover:text-slate-900 hover:bg-white shadow-2xs'
+                  }`}
                 title="Collapse All Subtasks"
               >
                 <ChevronsUp className={`w-3.5 h-3.5 ${isDark ? 'text-slate-400' : 'text-slate-500'}`} />
@@ -2641,15 +2636,13 @@ export default function GanttTimeline({
             </div>
 
             {/* Quick Timeline Scroll Jumper */}
-            <div className={`flex items-center gap-0.5 border rounded-lg p-0.5 ${
-              isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100/90 border-slate-200'
-            }`}>
+            <div className={`flex items-center gap-0.5 border rounded-lg p-0.5 ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-100/90 border-slate-200'
+              }`}>
               <button
                 type="button"
                 onClick={handleScrollToToday}
-                className={`px-2 py-1 rounded text-xs font-mono transition flex items-center gap-1 cursor-pointer ${
-                  isDark ? 'text-rose-400 hover:text-white hover:bg-slate-800' : 'text-rose-600 hover:text-rose-700 hover:bg-white font-semibold shadow-2xs'
-                }`}
+                className={`px-2 py-1 rounded text-xs font-mono transition flex items-center gap-1 cursor-pointer ${isDark ? 'text-rose-400 hover:text-white hover:bg-slate-800' : 'text-rose-600 hover:text-rose-700 hover:bg-white font-semibold shadow-2xs'
+                  }`}
                 title="Scroll Timeline View to Today"
               >
                 <span>Today</span>
@@ -2657,9 +2650,8 @@ export default function GanttTimeline({
               <button
                 type="button"
                 onClick={handleScrollToFirstTask}
-                className={`px-2 py-1 rounded text-xs font-mono transition flex items-center gap-1 cursor-pointer ${
-                  isDark ? 'text-amber-400 hover:text-white hover:bg-slate-800' : 'text-amber-700 hover:text-amber-900 hover:bg-white font-semibold shadow-2xs'
-                }`}
+                className={`px-2 py-1 rounded text-xs font-mono transition flex items-center gap-1 cursor-pointer ${isDark ? 'text-amber-400 hover:text-white hover:bg-slate-800' : 'text-amber-700 hover:text-amber-900 hover:bg-white font-semibold shadow-2xs'
+                  }`}
                 title="Scroll Timeline View to First Scheduled Task"
               >
                 <span>Jump to Tasks</span>
@@ -2669,9 +2661,8 @@ export default function GanttTimeline({
             {/* Sync status & Refresh */}
             <div className="flex items-center gap-2">
               {isSyncing && (
-                <span className={`text-[11px] font-mono px-2.5 py-1 rounded-lg flex items-center gap-1.5 animate-pulse border ${
-                  isDark ? 'text-indigo-400 bg-indigo-950/60 border-indigo-700' : 'text-indigo-700 bg-indigo-50 border-indigo-200'
-                }`}>
+                <span className={`text-[11px] font-mono px-2.5 py-1 rounded-lg flex items-center gap-1.5 animate-pulse border ${isDark ? 'text-indigo-400 bg-indigo-950/60 border-indigo-700' : 'text-indigo-700 bg-indigo-50 border-indigo-200'
+                  }`}>
                   <RefreshCw className="w-3 h-3 animate-spin" />
                   <span>Auto-syncing to DB...</span>
                 </span>
@@ -2681,11 +2672,10 @@ export default function GanttTimeline({
                 type="button"
                 onClick={() => loadGanttData(selectedProjectId)}
                 disabled={isLoading}
-                className={`p-1.5 rounded-lg text-xs border transition cursor-pointer ${
-                  isDark 
-                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700' 
+                className={`p-1.5 rounded-lg text-xs border transition cursor-pointer ${isDark
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
                     : 'bg-white hover:bg-slate-100 text-slate-600 border-slate-300/80 shadow-2xs'
-                }`}
+                  }`}
                 title="Reload from Server"
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-amber-500' : ''}`} />
@@ -2696,11 +2686,10 @@ export default function GanttTimeline({
 
         {/* Feedback Alert */}
         {syncFeedback && (
-          <div className={`mt-3 p-3 rounded-xl border text-xs font-mono flex items-center gap-2 animate-fadeIn ${
-            syncFeedback.type === 'success' 
+          <div className={`mt-3 p-3 rounded-xl border text-xs font-mono flex items-center gap-2 animate-fadeIn ${syncFeedback.type === 'success'
               ? isDark ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
               : isDark ? 'bg-rose-950/80 border-rose-700 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-800'
-          }`}>
+            }`}>
             {syncFeedback.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
             <span>{syncFeedback.message}</span>
           </div>
@@ -2709,9 +2698,8 @@ export default function GanttTimeline({
 
       {/* 2. Em Jay Construction CPM Gantt Toolbar & Legend */}
       {!isFullscreen && (
-        <div className={`border rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono select-none ${
-          isDark ? 'bg-slate-950/90 border-slate-800 text-slate-300' : 'bg-slate-900 border-slate-800 text-slate-200 shadow-md'
-        }`}>
+        <div className={`border rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono select-none ${isDark ? 'bg-slate-950/90 border-slate-800 text-slate-300' : 'bg-slate-900 border-slate-800 text-slate-200 shadow-md'
+          }`}>
           {/* Left: View Mode Pills & Action Tools */}
           <div className="flex flex-wrap items-center gap-2.5">
             {/* View Mode Pills: Day / Week / Month */}
@@ -2723,11 +2711,10 @@ export default function GanttTimeline({
                     key={z}
                     type="button"
                     onClick={() => { setZoomLevel(z); setZoomFactor(1); }}
-                    className={`px-3 py-1 text-xs rounded-md font-medium transition cursor-pointer capitalize ${
-                      isActive
+                    className={`px-3 py-1 text-xs rounded-md font-medium transition cursor-pointer capitalize ${isActive
                         ? 'bg-[#ea580c] text-white font-bold shadow-xs'
                         : 'text-slate-400 hover:text-white hover:bg-slate-800'
-                    }`}
+                      }`}
                   >
                     {z === 'day' ? 'Day' : z === 'week' ? 'Week' : 'Month'}
                   </button>
@@ -2879,46 +2866,38 @@ export default function GanttTimeline({
       )}
 
       {/* 3. Dual-Pane Synchronized Gantt Canvas */}
-      <div className={`border rounded-2xl overflow-hidden flex flex-col xl:flex-row ${
-        isDark ? 'bg-slate-950 border-slate-800 shadow-2xl' : 'bg-white border-slate-200/90 shadow-sm'
-      } ${
-        isFullscreen ? 'flex-1 min-h-0' : 'h-[520px] sm:h-[600px] xl:h-[660px]'
-      }`}>
-        {/* LEFT PANE: WBS Data Grid (Collapsible to maximize Timeline Canvas) */}
-        <div className={`${
-          isLeftPaneCollapsed ? 'w-14 shrink-0' : 'w-full xl:w-[480px] shrink-0'
-        } border-r flex flex-col transition-all duration-200 select-none ${
-          isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'
+      <div className={`border rounded-2xl overflow-hidden flex flex-col xl:flex-row ${isDark ? 'bg-slate-950 border-slate-800 shadow-2xl' : 'bg-white border-slate-200/90 shadow-sm'
+        } ${isFullscreen ? 'flex-1 min-h-0' : 'h-[520px] sm:h-[600px] xl:h-[660px]'
         }`}>
+        {/* LEFT PANE: WBS Data Grid (Collapsible to maximize Timeline Canvas) */}
+        <div className={`${isLeftPaneCollapsed ? 'w-14 shrink-0' : 'w-full xl:w-[480px] shrink-0'
+          } border-r flex flex-col transition-all duration-200 select-none ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-white'
+          }`}>
           {isLeftPaneCollapsed ? (
-            <div className={`flex flex-col items-center py-4 h-full justify-between ${
-              isDark ? 'bg-slate-950' : 'bg-slate-50'
-            }`}>
+            <div className={`flex flex-col items-center py-4 h-full justify-between ${isDark ? 'bg-slate-950' : 'bg-slate-50'
+              }`}>
               <div className="flex flex-col items-center gap-4">
                 <button
                   type="button"
                   onClick={() => setIsLeftPaneCollapsed(false)}
-                  className={`p-2 rounded-xl transition cursor-pointer border shadow-xs ${
-                    isDark 
-                      ? 'bg-slate-900 hover:bg-slate-800 text-amber-400 hover:text-amber-300 border-slate-800' 
+                  className={`p-2 rounded-xl transition cursor-pointer border shadow-xs ${isDark
+                      ? 'bg-slate-900 hover:bg-slate-800 text-amber-400 hover:text-amber-300 border-slate-800'
                       : 'bg-white hover:bg-slate-100 text-amber-700 hover:text-amber-800 border-slate-200'
-                  }`}
+                    }`}
                   title="Expand WBS Task Grid"
                 >
                   <PanelLeftOpen className="w-4 h-4" />
                 </button>
-                <div className={`[writing-mode:vertical-rl] rotate-180 text-[10px] font-mono tracking-widest uppercase font-bold py-2 ${
-                  isDark ? 'text-slate-400' : 'text-slate-500'
-                }`}>
+                <div className={`[writing-mode:vertical-rl] rotate-180 text-[10px] font-mono tracking-widest uppercase font-bold py-2 ${isDark ? 'text-slate-400' : 'text-slate-500'
+                  }`}>
                   Task Grid ({visibleTasks.length})
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setIsLeftPaneCollapsed(false)}
-                className={`p-2 rounded-lg transition cursor-pointer ${
-                  isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-700'
-                }`}
+                className={`p-2 rounded-lg transition cursor-pointer ${isDark ? 'text-slate-500 hover:text-slate-300' : 'text-slate-400 hover:text-slate-700'
+                  }`}
                 title="Open Task Details"
               >
                 <Layers className="w-4 h-4" />
@@ -2927,17 +2906,15 @@ export default function GanttTimeline({
           ) : (
             <>
               {/* Table Header: WBS, TASK, START, END, DUR, % */}
-              <div className={`h-[60px] flex items-center px-3 text-[11px] font-mono font-bold uppercase tracking-wider ${
-                isDark 
-                  ? 'bg-slate-900 border-b border-slate-800 text-slate-400' 
+              <div className={`h-[60px] flex items-center px-3 text-[11px] font-mono font-bold uppercase tracking-wider ${isDark
+                  ? 'bg-slate-900 border-b border-slate-800 text-slate-400'
                   : 'bg-[#f1f5f9] border-b border-[#cbd5e1] text-[#334155] font-bold text-xs'
-              }`}>
+                }`}>
                 <button
                   type="button"
                   onClick={() => setIsLeftPaneCollapsed(true)}
-                  className={`p-1 -ml-1 mr-1 rounded transition cursor-pointer ${
-                    isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-200 text-slate-400 hover:text-slate-700'
-                  }`}
+                  className={`p-1 -ml-1 mr-1 rounded transition cursor-pointer ${isDark ? 'hover:bg-slate-800 text-slate-400 hover:text-white' : 'hover:bg-slate-200 text-slate-400 hover:text-slate-700'
+                    }`}
                   title="Collapse Task Grid (Maximize Timeline Canvas)"
                 >
                   <PanelLeftClose className="w-3.5 h-3.5" />
@@ -2951,204 +2928,191 @@ export default function GanttTimeline({
                 <div className="w-10 text-center">EDIT</div>
               </div>
 
-          {/* Table Body (Synchronized Scroll) */}
-          <div 
-            ref={tableBodyRef}
-            onScroll={handleTableScroll}
-            className={`flex-1 overflow-y-auto overflow-x-hidden ${
-              isDark ? 'divide-y divide-slate-900' : 'divide-y divide-[#e2e8f0]'
-            }`}
-          >
-            {visibleTasks.map((task, taskIndex) => {
-              const isMilestone = task.type === 'milestone' || task.duration === 0;
-              const isCritical = criticalTaskIds.has(task.id);
-              const pct = Math.round(task.progress * 100);
-              const depth = depthMap.get(task.id) || 0;
-              const hasChildren = hasChildrenMap.get(task.id) || false;
-              const isCollapsed = collapsedTaskIds.has(task.id);
-              const hiddenCount = descendantCountMap.get(task.id) || 0;
-              const isParentSummary = depth === 0;
+              {/* Table Body (Synchronized Scroll) */}
+              <div
+                ref={tableBodyRef}
+                onScroll={handleTableScroll}
+                className={`flex-1 overflow-y-auto overflow-x-hidden ${isDark ? 'divide-y divide-slate-900' : 'divide-y divide-[#e2e8f0]'
+                  }`}
+              >
+                {visibleTasks.map((task, taskIndex) => {
+                  const isMilestone = task.type === 'milestone' || task.duration === 0;
+                  const isCritical = criticalTaskIds.has(task.id);
+                  const pct = Math.round(task.progress * 100);
+                  const depth = depthMap.get(task.id) || 0;
+                  const hasChildren = hasChildrenMap.get(task.id) || false;
+                  const isCollapsed = collapsedTaskIds.has(task.id);
+                  const hiddenCount = descendantCountMap.get(task.id) || 0;
+                  const isParentSummary = depth === 0;
 
-              const rowBgClass = isDark
-                ? (depth === 0 ? 'hover:bg-slate-900/80 bg-slate-950/40 border-t border-slate-900/80' : 'hover:bg-slate-900/50 bg-slate-950/80')
-                : (isParentSummary
-                    ? 'bg-amber-50/40 text-slate-800 font-bold hover:bg-amber-100/60 border-t border-amber-200/40'
-                    : (taskIndex % 2 === 0 ? 'bg-white hover:bg-slate-100/70' : 'bg-slate-50/40 hover:bg-slate-100/70')
-                  );
+                  const rowBgClass = isDark
+                    ? (depth === 0 ? 'hover:bg-slate-900/80 bg-slate-950/40 border-t border-slate-900/80' : 'hover:bg-slate-900/50 bg-slate-950/80')
+                    : (isParentSummary
+                      ? 'bg-amber-50/40 text-slate-800 font-bold hover:bg-amber-100/60 border-t border-amber-200/40'
+                      : (taskIndex % 2 === 0 ? 'bg-white hover:bg-slate-100/70' : 'bg-slate-50/40 hover:bg-slate-100/70')
+                    );
 
-              return (
-                <div
-                  key={task.id}
-                  style={{ height: `${ROW_HEIGHT}px` }}
-                  onDoubleClick={() => handleOpenEditModal(task)}
-                  className={`flex items-center px-3 text-xs font-mono transition group cursor-pointer ${rowBgClass}`}
-                >
-                  <div className={`w-12 text-center truncate ${
-                    isDark 
-                      ? (depth === 0 ? 'font-bold text-amber-400/90 text-[11px]' : 'text-slate-400 text-[10px]')
-                      : (depth === 0 ? 'font-bold text-amber-700 text-[11px]' : 'text-slate-500 text-[10px]')
-                  }`}>
-                    {task.wbsCode}
-                  </div>
+                  return (
+                    <div
+                      key={task.id}
+                      style={{ height: `${ROW_HEIGHT}px` }}
+                      onDoubleClick={() => handleOpenEditModal(task)}
+                      className={`flex items-center px-3 text-xs font-mono transition group cursor-pointer ${rowBgClass}`}
+                    >
+                      <div className={`w-12 text-center truncate ${isDark
+                          ? (depth === 0 ? 'font-bold text-amber-400/90 text-[11px]' : 'text-slate-400 text-[10px]')
+                          : (depth === 0 ? 'font-bold text-amber-700 text-[11px]' : 'text-slate-500 text-[10px]')
+                        }`}>
+                        {task.wbsCode}
+                      </div>
 
-                  {/* Hierarchical Tree Item */}
-                  <div 
-                    className="flex-1 px-2 truncate flex items-center min-w-[140px]"
-                    style={{ paddingLeft: `${depth * 16}px` }}
-                  >
-                    {hasChildren && (
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleTaskCollapse(task.id);
-                        }}
-                        className={`p-0.5 -ml-1 mr-1 rounded transition-colors flex items-center shrink-0 cursor-pointer ${
-                          isDark 
-                            ? 'hover:bg-slate-800 text-amber-400 hover:text-amber-300' 
-                            : 'hover:bg-amber-100/80 text-amber-700 hover:text-amber-800'
-                        }`}
-                        title={isCollapsed ? `Expand ${hiddenCount} subtask(s)` : 'Collapse subtasks'}
+                      {/* Hierarchical Tree Item */}
+                      <div
+                        className="flex-1 px-2 truncate flex items-center min-w-[140px]"
+                        style={{ paddingLeft: `${depth * 16}px` }}
                       >
-                        {isCollapsed ? (
-                          <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
-                        ) : (
-                          <ChevronDown className="w-3.5 h-3.5 stroke-[2.5]" />
+                        {hasChildren && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleTaskCollapse(task.id);
+                            }}
+                            className={`p-0.5 -ml-1 mr-1 rounded transition-colors flex items-center shrink-0 cursor-pointer ${isDark
+                                ? 'hover:bg-slate-800 text-amber-400 hover:text-amber-300'
+                                : 'hover:bg-amber-100/80 text-amber-700 hover:text-amber-800'
+                              }`}
+                            title={isCollapsed ? `Expand ${hiddenCount} subtask(s)` : 'Collapse subtasks'}
+                          >
+                            {isCollapsed ? (
+                              <ChevronRight className="w-3.5 h-3.5 stroke-[2.5]" />
+                            ) : (
+                              <ChevronDown className="w-3.5 h-3.5 stroke-[2.5]" />
+                            )}
+                          </button>
                         )}
-                      </button>
-                    )}
 
-                    {/* Left Table Critical Indicators & Milestone Diamond:
+                        {/* Left Table Critical Indicators & Milestone Diamond:
                         - Critical Tasks: Prepend small red dot indicator (`text-red-500 font-bold mr-1.5`)
                         - Milestone Rows: Prepend yellow milestone diamond icon `◆` (`text-amber-400 mr-1.5`)
                     */}
-                    {isMilestone ? (
-                      <span className="text-amber-400 font-bold mr-1.5 select-none shrink-0">◆</span>
-                    ) : isCritical ? (
-                      <span className="text-red-500 font-bold mr-1.5 select-none shrink-0">•</span>
-                    ) : null}
+                        {isMilestone ? (
+                          <span className="text-amber-400 font-bold mr-1.5 select-none shrink-0">◆</span>
+                        ) : isCritical ? (
+                          <span className="text-red-500 font-bold mr-1.5 select-none shrink-0">•</span>
+                        ) : null}
 
-                    <span 
-                      className={`truncate ${
-                        isDark
-                          ? (isMilestone ? 'font-bold text-amber-300' : isCritical ? 'font-semibold text-slate-100' : 'text-slate-300 font-medium')
-                          : (isMilestone ? 'font-bold text-amber-800' : isCritical ? 'font-bold text-[#0f172a]' : 'text-[#0f172a] font-semibold')
-                      }`}
-                      title={task.text}
-                    >
-                      {task.text}
-                    </span>
+                        <span
+                          className={`truncate ${isDark
+                              ? (isMilestone ? 'font-bold text-amber-300' : isCritical ? 'font-semibold text-slate-100' : 'text-slate-300 font-medium')
+                              : (isMilestone ? 'font-bold text-amber-800' : isCritical ? 'font-bold text-[#0f172a]' : 'text-[#0f172a] font-semibold')
+                            }`}
+                          title={task.text}
+                        >
+                          {task.text}
+                        </span>
 
-                    {/* Collapsed Hidden Subtask Counter Badge */}
-                    {isCollapsed && hiddenCount > 0 && (
-                      <span 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleTaskCollapse(task.id);
-                        }}
-                        className={`ml-1.5 px-1 py-0.2 text-[9px] font-mono font-bold rounded shrink-0 transition cursor-pointer border ${
-                          isDark 
-                            ? 'bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/25' 
-                            : 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200'
-                        }`}
-                        title={`Click to expand ${hiddenCount} hidden subtasks`}
+                        {/* Collapsed Hidden Subtask Counter Badge */}
+                        {isCollapsed && hiddenCount > 0 && (
+                          <span
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleTaskCollapse(task.id);
+                            }}
+                            className={`ml-1.5 px-1 py-0.2 text-[9px] font-mono font-bold rounded shrink-0 transition cursor-pointer border ${isDark
+                                ? 'bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/25'
+                                : 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200'
+                              }`}
+                            title={`Click to expand ${hiddenCount} hidden subtasks`}
+                          >
+                            +{hiddenCount}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className={`w-14 text-center text-[11px] truncate font-mono ${isDark ? 'text-slate-300' : 'text-slate-600'
+                        }`}>
+                        {formatDateMMDD(task.startDate)}
+                      </div>
+                      <div className={`w-14 text-center text-[11px] truncate font-mono ${isDark ? 'text-slate-300' : 'text-slate-600'
+                        }`}>
+                        {formatDateMMDD(isMilestone ? task.startDate : task.endDate)}
+                      </div>
+                      <div className={`w-10 text-center text-[11px] font-bold font-mono ${isDark ? 'text-slate-200' : 'text-slate-700'
+                        }`}>
+                        {isMilestone ? (
+                          <span className="text-amber-400 font-bold select-none">◆</span>
+                        ) : (
+                          task.duration
+                        )}
+                      </div>
+                      <div className={`w-10 text-center text-[11px] font-medium font-mono ${isDark ? 'text-slate-300' : 'text-slate-700'
+                        }`}>
+                        {pct}
+                      </div>
+                      <div className="w-10 flex items-center justify-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleOpenEditModal(task); }}
+                          className={`p-1 rounded transition cursor-pointer ${isDark
+                              ? 'text-amber-400 hover:text-white hover:bg-slate-800'
+                              : 'text-amber-600 hover:text-amber-800 hover:bg-amber-100'
+                            }`}
+                          title="Edit Task Scope & Dates"
+                        >
+                          <Edit3 className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); handleDeleteTask(task.id); }}
+                          className={`p-1 rounded transition cursor-pointer ${isDark
+                              ? 'text-slate-500 hover:text-rose-400 hover:bg-slate-800'
+                              : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                            }`}
+                          title="Delete Task"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+                {visibleTasks.length === 0 && !isLoading && (
+                  <div className="p-8 text-center flex flex-col items-center justify-center min-h-[340px]">
+                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-3 ${isDark ? 'bg-slate-900 text-amber-400 border border-slate-800' : 'bg-amber-50 text-amber-600 border border-amber-200'
+                      }`}>
+                      <Layers className="w-6 h-6" />
+                    </div>
+                    <h4 className={`text-sm font-bold mb-1 ${isDark ? 'text-white' : 'text-slate-800'}`}>
+                      No Tasks in Project Schedule
+                    </h4>
+                    <p className={`text-xs max-w-xs mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                      This commercial site has 0 tasks (0% complete). Start building the schedule manually or initialize from template.
+                    </p>
+                    <div className="flex flex-wrap items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleAddNewTask()}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition cursor-pointer shadow-xs"
                       >
-                        +{hiddenCount}
-                      </span>
-                    )}
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Add Task</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleLoadStandardFitOutTemplate}
+                        disabled={isSyncing}
+                        className={`flex items-center gap-1.5 px-3 py-1.5 font-medium rounded-lg text-xs transition cursor-pointer border ${isDark
+                            ? 'bg-slate-900 hover:bg-slate-800 text-amber-400 border-amber-500/30'
+                            : 'bg-white hover:bg-slate-50 text-amber-700 border-amber-200 shadow-2xs'
+                          }`}
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                        <span>Load Standard Fit-Out Template</span>
+                      </button>
+                    </div>
                   </div>
-
-                  <div className={`w-14 text-center text-[11px] truncate font-mono ${
-                    isDark ? 'text-slate-300' : 'text-slate-600'
-                  }`}>
-                    {formatDateMMDD(task.startDate)}
-                  </div>
-                  <div className={`w-14 text-center text-[11px] truncate font-mono ${
-                    isDark ? 'text-slate-300' : 'text-slate-600'
-                  }`}>
-                    {formatDateMMDD(isMilestone ? task.startDate : task.endDate)}
-                  </div>
-                  <div className={`w-10 text-center text-[11px] font-bold font-mono ${
-                    isDark ? 'text-slate-200' : 'text-slate-700'
-                  }`}>
-                    {isMilestone ? (
-                      <span className="text-amber-400 font-bold select-none">◆</span>
-                    ) : (
-                      task.duration
-                    )}
-                  </div>
-                  <div className={`w-10 text-center text-[11px] font-medium font-mono ${
-                    isDark ? 'text-slate-300' : 'text-slate-700'
-                  }`}>
-                    {pct}
-                  </div>
-                  <div className="w-10 flex items-center justify-center gap-1">
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleOpenEditModal(task); }}
-                      className={`p-1 rounded transition cursor-pointer ${
-                        isDark 
-                          ? 'text-amber-400 hover:text-white hover:bg-slate-800' 
-                          : 'text-amber-600 hover:text-amber-800 hover:bg-amber-100'
-                      }`}
-                      title="Edit Task Scope & Dates"
-                    >
-                      <Edit3 className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={(e) => { e.stopPropagation(); handleDeleteTask(task.id); }}
-                      className={`p-1 rounded transition cursor-pointer ${
-                        isDark 
-                          ? 'text-slate-500 hover:text-rose-400 hover:bg-slate-800' 
-                          : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
-                      }`}
-                      title="Delete Task"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-            {visibleTasks.length === 0 && !isLoading && (
-              <div className="p-8 text-center flex flex-col items-center justify-center min-h-[340px]">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center mb-3 ${
-                  isDark ? 'bg-slate-900 text-amber-400 border border-slate-800' : 'bg-amber-50 text-amber-600 border border-amber-200'
-                }`}>
-                  <Layers className="w-6 h-6" />
-                </div>
-                <h4 className={`text-sm font-bold mb-1 ${isDark ? 'text-white' : 'text-slate-800'}`}>
-                  No Tasks in Project Schedule
-                </h4>
-                <p className={`text-xs max-w-xs mb-4 ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
-                  This commercial site has 0 tasks (0% complete). Start building the schedule manually or initialize from template.
-                </p>
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleAddNewTask()}
-                    className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-lg text-xs transition cursor-pointer shadow-xs"
-                  >
-                    <Plus className="w-3.5 h-3.5" />
-                    <span>Add Task</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleLoadStandardFitOutTemplate}
-                    disabled={isSyncing}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 font-medium rounded-lg text-xs transition cursor-pointer border ${
-                      isDark 
-                        ? 'bg-slate-900 hover:bg-slate-800 text-amber-400 border-amber-500/30' 
-                        : 'bg-white hover:bg-slate-50 text-amber-700 border-amber-200 shadow-2xs'
-                    }`}
-                  >
-                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Load Standard Fit-Out Template</span>
-                  </button>
-                </div>
-              </div>
-            )}
+                )}
               </div>
             </>
           )}
@@ -3158,38 +3122,33 @@ export default function GanttTimeline({
         <div
           ref={timelineScrollRef}
           onScroll={handleTimelineScroll}
-          className={`flex-1 overflow-auto relative relative-timeline ${
-            isDark ? 'bg-slate-950/90' : 'bg-white'
-          }`}
+          className={`flex-1 overflow-auto relative relative-timeline ${isDark ? 'bg-slate-950/90' : 'bg-white'
+            }`}
         >
           <div style={{ width: `${timelineWidth}px`, height: `${totalGridHeight + 60}px` }} className="relative min-h-full">
             {/* Empty Timeline Watermark */}
             {visibleTasks.length === 0 && !isLoading && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10 pt-20">
-                <div className={`px-5 py-3 rounded-xl border text-center shadow-xs ${
-                  isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400' : 'bg-white/90 border-slate-200 text-slate-500'
-                }`}>
+                <div className={`px-5 py-3 rounded-xl border text-center shadow-xs ${isDark ? 'bg-slate-900/90 border-slate-800 text-slate-400' : 'bg-white/90 border-slate-200 text-slate-500'
+                  }`}>
                   <p className="text-xs font-mono font-medium">Timeline canvas empty • 0 tasks scheduled (0% complete)</p>
                 </div>
               </div>
             )}
             {/* Timeline Multi-Tier Header */}
-            <div className={`sticky top-0 z-30 border-b ${
-              isDark ? 'bg-slate-900 border-slate-800 shadow-md' : 'bg-[#f1f5f9] border-[#cbd5e1] shadow-2xs'
-            }`}>
-              {/* Tier 1: Month Groups */}
-              <div className={`h-7 border-b relative text-xs font-mono font-bold ${
-                isDark ? 'border-slate-800 text-slate-300' : 'border-[#cbd5e1] text-[#0f172a]'
+            <div className={`sticky top-0 z-30 border-b ${isDark ? 'bg-slate-900 border-slate-800 shadow-md' : 'bg-[#f1f5f9] border-[#cbd5e1] shadow-2xs'
               }`}>
+              {/* Tier 1: Month Groups */}
+              <div className={`h-7 border-b relative text-xs font-mono font-bold ${isDark ? 'border-slate-800 text-slate-300' : 'border-[#cbd5e1] text-[#0f172a]'
+                }`}>
                 {monthHeaders.map((m, idx) => {
                   const isNarrow = m.widthPixel < 65;
                   return (
                     <div
                       key={idx}
                       style={{ left: `${m.leftPixel}px`, width: `${m.widthPixel}px` }}
-                      className={`absolute top-0 bottom-0 flex items-center px-2 border-r truncate text-[11px] ${
-                        isDark ? 'border-slate-800' : 'border-[#cbd5e1]'
-                      }`}
+                      className={`absolute top-0 bottom-0 flex items-center px-2 border-r truncate text-[11px] ${isDark ? 'border-slate-800' : 'border-[#cbd5e1]'
+                        }`}
                       title={m.monthLabel}
                     >
                       {isNarrow ? m.shortLabel : m.monthLabel}
@@ -3204,13 +3163,11 @@ export default function GanttTimeline({
                   <div
                     key={idx}
                     style={{ width: `${columnWidth}px` }}
-                    className={`shrink-0 flex items-center justify-center border-r ${
-                      isDark ? 'border-slate-800/80' : 'border-[#cbd5e1]'
-                    } ${
-                      d.isSun ? (isDark ? 'bg-slate-950/70 text-slate-600 font-bold' : 'bg-slate-200/70 text-[#475569] font-bold') :
-                      d.isWeatherSuspended ? (isDark ? 'bg-amber-500/10 text-amber-400 font-bold' : 'bg-amber-100 text-amber-800 font-bold') :
-                      (isDark ? 'text-slate-400' : 'text-[#334155] font-semibold')
-                    }`}
+                    className={`shrink-0 flex items-center justify-center border-r ${isDark ? 'border-slate-800/80' : 'border-[#cbd5e1]'
+                      } ${d.isSun ? (isDark ? 'bg-slate-950/70 text-slate-600 font-bold' : 'bg-slate-200/70 text-[#475569] font-bold') :
+                        d.isWeatherSuspended ? (isDark ? 'bg-amber-500/10 text-amber-400 font-bold' : 'bg-amber-100 text-amber-800 font-bold') :
+                          (isDark ? 'text-slate-400' : 'text-[#334155] font-semibold')
+                      }`}
                   >
                     {columnWidth >= 32 ? (
                       <span>{d.date.getDate()}</span>
@@ -3227,7 +3184,7 @@ export default function GanttTimeline({
             </div>
 
             {/* Timeline Background Grid Columns */}
-            <div 
+            <div
               style={{ height: `${totalGridHeight}px` }}
               className="absolute top-[60px] left-0 right-0 flex pointer-events-none z-0"
             >
@@ -3235,12 +3192,10 @@ export default function GanttTimeline({
                 <div
                   key={idx}
                   style={{ width: `${columnWidth}px` }}
-                  className={`shrink-0 h-full ${
-                    isDark ? 'border-r border-slate-900/80' : 'border-r border-[#e2e8f0]'
-                  } ${
-                    d.isSun ? (isDark ? 'bg-slate-950/40 opacity-70' : 'bg-slate-100/70') :
-                    d.isWeatherSuspended ? (isDark ? 'bg-amber-500/5' : 'bg-amber-50/40') : ''
-                  }`}
+                  className={`shrink-0 h-full ${isDark ? 'border-r border-slate-900/80' : 'border-r border-[#e2e8f0]'
+                    } ${d.isSun ? (isDark ? 'bg-slate-950/40 opacity-70' : 'bg-slate-100/70') :
+                      d.isWeatherSuspended ? (isDark ? 'bg-amber-500/5' : 'bg-amber-50/40') : ''
+                    }`}
                 />
               ))}
             </div>
@@ -3348,7 +3303,7 @@ export default function GanttTimeline({
             </svg>
 
             {/* Timeline Task Rows & Double-Bars */}
-            <div 
+            <div
               style={{ height: `${totalGridHeight}px` }}
               className="absolute top-[60px] left-0 right-0 z-20 pointer-events-none"
             >
@@ -3377,9 +3332,8 @@ export default function GanttTimeline({
                   <div
                     key={task.id}
                     style={{ height: `${ROW_HEIGHT}px` }}
-                    className={`relative group pointer-events-none ${
-                      isDark ? 'border-b border-slate-900/90' : 'border-b border-[#e2e8f0]'
-                    }`}
+                    className={`relative group pointer-events-none ${isDark ? 'border-b border-slate-900/90' : 'border-b border-[#e2e8f0]'
+                      }`}
                   >
                     {/* Baseline Underline Track (Clearly visible 3px slate-400 track directly beneath each task bar) */}
                     <div
@@ -3399,8 +3353,8 @@ export default function GanttTimeline({
                         className="absolute top-[18px] flex items-center gap-2 cursor-grab active:cursor-grabbing group/ms z-30 pointer-events-auto select-none"
                         title={`Milestone: ${task.text} (${formatDateShort(task.startDate)}) • 0d Duration (Drag to reschedule)`}
                       >
-                        <div 
-                          className="w-4 h-4 rotate-45 rounded-2xs transition-transform hover:scale-125 shrink-0 bg-[#eab308] border border-amber-200 shadow-md shadow-amber-500/40" 
+                        <div
+                          className="w-4 h-4 rotate-45 rounded-2xs transition-transform hover:scale-125 shrink-0 bg-[#eab308] border border-amber-200 shadow-md shadow-amber-500/40"
                         />
                         <span className={`text-xs whitespace-nowrap select-none ${isDark ? 'font-medium text-slate-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]' : 'font-semibold text-[#0f172a]'}`}>
                           {task.text}
@@ -3423,15 +3377,14 @@ export default function GanttTimeline({
                           onDoubleClick={() => handleOpenEditModal(task)}
                           onPointerDown={(e) => handlePointerDown(e, task.id, 'move')}
                           onMouseDown={(e) => handlePointerDown(e, task.id, 'move')}
-                          className={`absolute top-[17px] h-[22px] rounded-sm shadow-md overflow-hidden flex items-center transition-shadow select-none group/bar pointer-events-auto cursor-grab active:cursor-grabbing z-20 ${
-                            isCritical
+                          className={`absolute top-[17px] h-[22px] rounded-sm shadow-md overflow-hidden flex items-center transition-shadow select-none group/bar pointer-events-auto cursor-grab active:cursor-grabbing z-20 ${isCritical
                               ? isDark
                                 ? 'bg-red-950/80 border border-red-700/60 shadow-red-950/40'
                                 : 'bg-red-200 border border-red-500 shadow-xs'
                               : isDark
                                 ? 'bg-emerald-950/80 border border-emerald-700/60 shadow-emerald-950/40'
                                 : 'bg-emerald-200 border border-emerald-500 shadow-xs'
-                          } hover:ring-1 hover:ring-white/40`}
+                            } hover:ring-1 hover:ring-white/40`}
                           title={`${task.text}: ${pct}% complete • ${isCritical ? 'Critical Path (0 Float)' : `Non-Critical (Float: ${taskFloat}d)`}`}
                         >
                           {/* Completed progress portion */}
@@ -3441,9 +3394,8 @@ export default function GanttTimeline({
                                 width: `${Math.min(100, Math.max(0, pct))}%`,
                                 minWidth: '34px'
                               }}
-                              className={`h-full flex items-center justify-center shrink-0 pointer-events-none select-none ${
-                                isCritical ? 'bg-red-600' : 'bg-emerald-600'
-                              }`}
+                              className={`h-full flex items-center justify-center shrink-0 pointer-events-none select-none ${isCritical ? 'bg-red-600' : 'bg-emerald-600'
+                                }`}
                             >
                               <span className="font-mono font-bold text-[10px] sm:text-[11px] text-white px-1 whitespace-nowrap drop-shadow select-none">
                                 {pct}%
@@ -3453,9 +3405,8 @@ export default function GanttTimeline({
 
                           {/* 0% progress indicator */}
                           {pct === 0 && (
-                            <div className={`h-full px-2 flex items-center justify-center shrink-0 pointer-events-none select-none ${
-                              isCritical ? 'bg-red-600' : 'bg-emerald-600'
-                            }`}>
+                            <div className={`h-full px-2 flex items-center justify-center shrink-0 pointer-events-none select-none ${isCritical ? 'bg-red-600' : 'bg-emerald-600'
+                              }`}>
                               <span className="font-mono font-bold text-[10px] text-white select-none">
                                 0%
                               </span>
@@ -3482,11 +3433,10 @@ export default function GanttTimeline({
                         {/* Task title label immediately to the right of each bar (left + width + 8px) */}
                         <div
                           style={{ left: `${barLeft + barWidth + 8}px` }}
-                          className={`absolute top-[17px] h-[22px] flex items-center text-xs whitespace-nowrap pointer-events-none select-none z-20 ${
-                            isDark
+                          className={`absolute top-[17px] h-[22px] flex items-center text-xs whitespace-nowrap pointer-events-none select-none z-20 ${isDark
                               ? 'font-medium text-slate-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]'
                               : 'font-semibold text-[#0f172a]'
-                          }`}
+                            }`}
                         >
                           {task.text}
                         </div>
@@ -3502,20 +3452,18 @@ export default function GanttTimeline({
 
       {/* 4. Quick-Edit & Dependency Modal */}
       {editingTask && (
-        <div 
+        <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-fadeIn"
           onClick={() => setEditingTask(null)}
         >
-          <div 
-            className={`border rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden font-mono text-xs ${
-              isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
-            }`}
+          <div
+            className={`border rounded-2xl w-full max-w-xl shadow-2xl overflow-hidden font-mono text-xs ${isDark ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
+              }`}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className={`flex items-center justify-between px-5 py-4 border-b ${
-              isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'
-            }`}>
+            <div className={`flex items-center justify-between px-5 py-4 border-b ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'
+              }`}>
               <div className="flex items-center gap-2">
                 <Edit3 className={`w-4 h-4 ${isDark ? 'text-amber-400' : 'text-amber-600'}`} />
                 <span className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>Edit Task Scope & Dependencies</span>
@@ -3523,9 +3471,8 @@ export default function GanttTimeline({
               <button
                 type="button"
                 onClick={() => setEditingTask(null)}
-                className={`p-1 rounded-lg transition cursor-pointer ${
-                  isDark ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200'
-                }`}
+                className={`p-1 rounded-lg transition cursor-pointer ${isDark ? 'text-slate-400 hover:text-white hover:bg-slate-800' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200'
+                  }`}
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3535,9 +3482,8 @@ export default function GanttTimeline({
             <div className="p-5 space-y-4 max-h-[80vh] overflow-y-auto">
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className={`uppercase tracking-wider text-[10px] font-bold ${
-                    isDark ? 'text-slate-400' : 'text-slate-600'
-                  }`}>
+                  <label className={`uppercase tracking-wider text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'
+                    }`}>
                     Task Name & Scope {isNewTaskDraft && '(Supports Comma-Separated Bulk Input)'}
                   </label>
                   {isNewTaskDraft && editFormData.text.includes(',') && (
@@ -3550,9 +3496,8 @@ export default function GanttTimeline({
                   type="text"
                   value={editFormData.text}
                   onChange={(e) => setEditFormData(prev => ({ ...prev, text: e.target.value }))}
-                  className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none border ${
-                    isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
-                  }`}
+                  className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none border ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
+                    }`}
                   placeholder={isNewTaskDraft ? 'e.g. Excavation, Land clearing, Land paving' : 'e.g. Reinforced Footing Concreting'}
                 />
                 {isNewTaskDraft && (
@@ -3564,9 +3509,8 @@ export default function GanttTimeline({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold ${
-                    isDark ? 'text-slate-400' : 'text-slate-600'
-                  }`}>
+                  <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'
+                    }`}>
                     Start Date
                   </label>
                   <input
@@ -3582,16 +3526,14 @@ export default function GanttTimeline({
                         endDate: formatDateISO(eDate)
                       }));
                     }}
-                    className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none border ${
-                      isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
-                    }`}
+                    className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none border ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
                   />
                 </div>
 
                 <div>
-                  <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold ${
-                    isDark ? 'text-slate-400' : 'text-slate-600'
-                  }`}>
+                  <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'
+                    }`}>
                     End Date
                   </label>
                   <input
@@ -3606,18 +3548,16 @@ export default function GanttTimeline({
                         duration: Math.max(1, dur)
                       }));
                     }}
-                    className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none border ${
-                      isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
-                    }`}
+                    className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none border ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
                   />
                 </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold ${
-                    isDark ? 'text-slate-400' : 'text-slate-600'
-                  }`}>
+                  <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'
+                    }`}>
                     Duration (Working Days, Mon-Sat)
                   </label>
                   <input
@@ -3636,17 +3576,15 @@ export default function GanttTimeline({
                         type: dur === 0 ? 'milestone' : prev.type
                       }));
                     }}
-                    className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none border ${
-                      isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
-                    }`}
+                    className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none border ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
                   />
                 </div>
 
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className={`uppercase tracking-wider text-[10px] font-bold ${
-                      isDark ? 'text-slate-400' : 'text-slate-600'
-                    }`}>
+                    <label className={`uppercase tracking-wider text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'
+                      }`}>
                       Construction Phase
                     </label>
                     <button
@@ -3661,9 +3599,8 @@ export default function GanttTimeline({
                   <select
                     value={editFormData.constructionPhase}
                     onChange={(e) => setEditFormData(prev => ({ ...prev, constructionPhase: e.target.value }))}
-                    className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none cursor-pointer border ${
-                      isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
-                    }`}
+                    className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none cursor-pointer border ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
                   >
                     {constructionPhases.map(phase => (
                       <option key={phase} value={phase}>{phase}</option>
@@ -3676,9 +3613,8 @@ export default function GanttTimeline({
                         value={newCustomPhaseName}
                         onChange={(e) => setNewCustomPhaseName(e.target.value)}
                         placeholder="Custom phase name..."
-                        className={`flex-1 rounded-lg px-2.5 py-1 text-xs border focus:border-amber-500 focus:outline-none ${
-                          isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
-                        }`}
+                        className={`flex-1 rounded-lg px-2.5 py-1 text-xs border focus:border-amber-500 focus:outline-none ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
+                          }`}
                       />
                       <button
                         type="button"
@@ -3705,9 +3641,8 @@ export default function GanttTimeline({
               {/* Subtask / Phase Weight (%) */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className={`uppercase tracking-wider text-[10px] font-bold ${
-                    isDark ? 'text-slate-400' : 'text-slate-600'
-                  }`}>
+                  <label className={`uppercase tracking-wider text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'
+                    }`}>
                     Phase / Subtask Weight (%) — Weighted Progress Share (e.g. Footing = 80%, Prep = 10%, Pouring = 10%)
                   </label>
                   <span className="font-bold text-emerald-400">{editFormData.weight}% Weight</span>
@@ -3727,9 +3662,8 @@ export default function GanttTimeline({
                     max="100"
                     value={editFormData.weight}
                     onChange={(e) => setEditFormData(prev => ({ ...prev, weight: Math.max(1, Math.min(100, parseInt(e.target.value, 10) || 10)) }))}
-                    className={`w-16 rounded-xl px-2 py-1 text-center font-bold border ${
-                      isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
-                    }`}
+                    className={`w-16 rounded-xl px-2 py-1 text-center font-bold border ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
                   />
                 </div>
               </div>
@@ -3737,9 +3671,8 @@ export default function GanttTimeline({
               {/* Progress Slider + Numeric Input */}
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className={`uppercase tracking-wider text-[10px] font-bold ${
-                    isDark ? 'text-slate-400' : 'text-slate-600'
-                  }`}>
+                  <label className={`uppercase tracking-wider text-[10px] font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'
+                    }`}>
                     Progress Completion (%)
                   </label>
                   <span className={`font-bold ${isDark ? 'text-amber-400' : 'text-amber-600'}`}>{editFormData.progress}%</span>
@@ -3759,26 +3692,23 @@ export default function GanttTimeline({
                     max="100"
                     value={editFormData.progress}
                     onChange={(e) => setEditFormData(prev => ({ ...prev, progress: Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0)) }))}
-                    className={`w-16 rounded-xl px-2 py-1 text-center font-bold border ${
-                      isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
-                    }`}
+                    className={`w-16 rounded-xl px-2 py-1 text-center font-bold border ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
+                      }`}
                   />
                 </div>
               </div>
 
               {/* Contractor Assignment */}
               <div>
-                <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold ${
-                  isDark ? 'text-slate-400' : 'text-slate-600'
-                }`}>
+                <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold ${isDark ? 'text-slate-400' : 'text-slate-600'
+                  }`}>
                   Assigned Contractor / Trade Crew
                 </label>
                 <select
                   value={editFormData.assignedContractorId}
                   onChange={(e) => setEditFormData(prev => ({ ...prev, assignedContractorId: e.target.value }))}
-                  className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none cursor-pointer border ${
-                    isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
-                  }`}
+                  className={`w-full rounded-xl px-3 py-2 font-medium focus:border-amber-500 focus:outline-none cursor-pointer border ${isDark ? 'bg-slate-950 border-slate-700 text-white' : 'bg-white border-slate-300 text-slate-800'
+                    }`}
                 >
                   <option value="">LDM In-House Crew</option>
                   {contractors.map(c => (
@@ -3791,15 +3721,13 @@ export default function GanttTimeline({
 
               {/* Predecessors / Dependencies */}
               <div>
-                <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold flex items-center justify-between ${
-                  isDark ? 'text-slate-400' : 'text-slate-600'
-                }`}>
+                <label className={`block uppercase tracking-wider text-[10px] mb-1 font-bold flex items-center justify-between ${isDark ? 'text-slate-400' : 'text-slate-600'
+                  }`}>
                   <span>Predecessors (Finish-to-Start Dependencies)</span>
                   <span className={`${isDark ? 'text-slate-500' : 'text-slate-400'} font-normal`}>Successor starts after predecessor finishes</span>
                 </label>
-                <div className={`rounded-xl p-3 max-h-36 overflow-y-auto space-y-1.5 border ${
-                  isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
-                }`}>
+                <div className={`rounded-xl p-3 max-h-36 overflow-y-auto space-y-1.5 border ${isDark ? 'bg-slate-950 border-slate-800' : 'bg-slate-50 border-slate-200'
+                  }`}>
                   {tasks
                     .filter(t => {
                       if (t.id === editingTask.id) return false;
@@ -3808,59 +3736,54 @@ export default function GanttTimeline({
                       return true;
                     })
                     .map(t => {
-                    const isChecked = editFormData.predecessorIds.includes(t.id);
-                    return (
-                      <label 
-                        key={t.id} 
-                        className={`flex items-center gap-2 p-1 rounded cursor-pointer transition ${
-                          isDark ? 'hover:bg-slate-900 text-slate-300' : 'hover:bg-slate-200/60 text-slate-700'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isChecked}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setEditFormData(prev => ({
-                                ...prev,
-                                predecessorIds: [...prev.predecessorIds, t.id]
-                              }));
-                            } else {
-                              setEditFormData(prev => ({
-                                ...prev,
-                                predecessorIds: prev.predecessorIds.filter(id => id !== t.id)
-                              }));
-                            }
-                          }}
-                          className="accent-amber-500 rounded cursor-pointer"
-                        />
-                        <span className={`text-[11px] font-mono font-bold ${
-                          isDark ? 'text-amber-400' : 'text-amber-700'
-                        }`}>{t.wbsCode}</span>
-                        <span className="text-xs truncate">{t.text}</span>
-                        <span className={`text-[10px] ml-auto ${
-                          isDark ? 'text-slate-500' : 'text-slate-400'
-                        }`}>({formatDateShort(t.endDate)})</span>
-                      </label>
-                    );
-                  })}
+                      const isChecked = editFormData.predecessorIds.includes(t.id);
+                      return (
+                        <label
+                          key={t.id}
+                          className={`flex items-center gap-2 p-1 rounded cursor-pointer transition ${isDark ? 'hover:bg-slate-900 text-slate-300' : 'hover:bg-slate-200/60 text-slate-700'
+                            }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setEditFormData(prev => ({
+                                  ...prev,
+                                  predecessorIds: [...prev.predecessorIds, t.id]
+                                }));
+                              } else {
+                                setEditFormData(prev => ({
+                                  ...prev,
+                                  predecessorIds: prev.predecessorIds.filter(id => id !== t.id)
+                                }));
+                              }
+                            }}
+                            className="accent-amber-500 rounded cursor-pointer"
+                          />
+                          <span className={`text-[11px] font-mono font-bold ${isDark ? 'text-amber-400' : 'text-amber-700'
+                            }`}>{t.wbsCode}</span>
+                          <span className="text-xs truncate">{t.text}</span>
+                          <span className={`text-[10px] ml-auto ${isDark ? 'text-slate-500' : 'text-slate-400'
+                            }`}>({formatDateShort(t.endDate)})</span>
+                        </label>
+                      );
+                    })}
                 </div>
               </div>
             </div>
 
             {/* Modal Actions */}
-            <div className={`px-5 py-4 border-t flex items-center justify-between gap-3 ${
-              isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'
-            }`}>
+            <div className={`px-5 py-4 border-t flex items-center justify-between gap-3 ${isDark ? 'border-slate-800 bg-slate-950' : 'border-slate-200 bg-slate-50'
+              }`}>
               {isNewTaskDraft ? (
                 <button
                   type="button"
                   onClick={() => { setEditingTask(null); setIsNewTaskDraft(false); }}
-                  className={`px-3 py-2 font-medium rounded-xl text-xs border transition cursor-pointer ${
-                    isDark 
-                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border-slate-700' 
+                  className={`px-3 py-2 font-medium rounded-xl text-xs border transition cursor-pointer ${isDark
+                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border-slate-700'
                       : 'bg-white hover:bg-slate-100 text-slate-600 border-slate-300 shadow-2xs'
-                  }`}
+                    }`}
                 >
                   Discard Draft
                 </button>
@@ -3868,11 +3791,10 @@ export default function GanttTimeline({
                 <button
                   type="button"
                   onClick={() => handleDeleteTask(editingTask.id)}
-                  className={`px-3 py-2 font-bold rounded-xl text-xs border transition cursor-pointer flex items-center gap-1.5 ${
-                    isDark 
-                      ? 'bg-rose-950/80 hover:bg-rose-900 text-rose-300 border-rose-800' 
+                  className={`px-3 py-2 font-bold rounded-xl text-xs border transition cursor-pointer flex items-center gap-1.5 ${isDark
+                      ? 'bg-rose-950/80 hover:bg-rose-900 text-rose-300 border-rose-800'
                       : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 shadow-2xs'
-                  }`}
+                    }`}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>Delete Task</span>
@@ -3883,11 +3805,10 @@ export default function GanttTimeline({
                 <button
                   type="button"
                   onClick={() => { setEditingTask(null); setIsNewTaskDraft(false); }}
-                  className={`px-4 py-2 font-medium rounded-xl text-xs border transition cursor-pointer ${
-                    isDark 
-                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700' 
+                  className={`px-4 py-2 font-medium rounded-xl text-xs border transition cursor-pointer ${isDark
+                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
                       : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 shadow-2xs'
-                  }`}
+                    }`}
                 >
                   Cancel
                 </button>

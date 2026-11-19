@@ -142,7 +142,7 @@ export default function LoadingScreen({ session, mode, onComplete }: LoadingScre
           <div className={`flex justify-between text-[10px] font-mono ${
             isLight ? 'text-slate-500' : 'text-slate-500'
           }`}>
-            <span>LDM Construction ERP · Enterprise Cloud</span>
+            <span>LDM Construction · Project Management System</span>
             <span className="font-bold">{progress}%</span>
           </div>
         </div>
