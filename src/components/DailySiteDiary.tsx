@@ -538,36 +538,52 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
   const [simTemp, setSimTemp] = useState<number>(31);
   const [simHumidity, setSimHumidity] = useState<number>(65);
 
-  // Device GPS Location Handler
+  // Device GPS Location Handler (with silent Cabuyao HQ fallback)
+  const applyCabuyaoHqFallback = () => {
+    setSelectedLocation({
+      id: `cabuyao-hq-${Date.now()}`,
+      name: 'Cabuyao HQ',
+      region: 'Cabuyao, Laguna (14.2785, 121.1235)',
+      lat: 14.2785,
+      lon: 121.1235,
+      projectId: selectedLocation.projectId
+    });
+    setNotification('Centered on Cabuyao HQ — Drag pin or search to set project site');
+    setTimeout(() => setNotification(null), 4500);
+  };
+
   const handleUseDeviceGPS = () => {
     if (!navigator.geolocation) {
-      setNotification('⚠️ Geolocation is not supported in this browser.');
-      setTimeout(() => setNotification(null), 3500);
+      applyCabuyaoHqFallback();
       return;
     }
     setIsGpsLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const { latitude, longitude } = pos.coords;
-        setSelectedLocation({
-          id: `gps-${Date.now()}`,
-          name: 'Device GPS Site',
-          region: `Coordinates: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
-          lat: latitude,
-          lon: longitude,
-          projectId: selectedLocation.projectId
-        });
-        setIsGpsLocating(false);
-        setNotification(`📍 Detected site GPS coordinates (${latitude.toFixed(4)}, ${longitude.toFixed(4)}). Fetching weather...`);
-        setTimeout(() => setNotification(null), 3500);
-      },
-      (err) => {
-        setIsGpsLocating(false);
-        setNotification(`⚠️ GPS detection failed: ${err.message}. Using default location.`);
-        setTimeout(() => setNotification(null), 3500);
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    );
+    try {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const { latitude, longitude } = pos.coords;
+          setSelectedLocation({
+            id: `gps-${Date.now()}`,
+            name: 'Device GPS Site',
+            region: `Coordinates: ${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+            lat: latitude,
+            lon: longitude,
+            projectId: selectedLocation.projectId
+          });
+          setIsGpsLocating(false);
+          setNotification(`Detected site GPS coordinates (${latitude.toFixed(4)}, ${longitude.toFixed(4)}). Fetching weather...`);
+          setTimeout(() => setNotification(null), 3500);
+        },
+        () => {
+          setIsGpsLocating(false);
+          applyCabuyaoHqFallback();
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    } catch {
+      setIsGpsLocating(false);
+      applyCabuyaoHqFallback();
+    }
   };
 
   // Custom Geocoding Search via Open-Meteo API
@@ -2745,36 +2761,38 @@ export default function DailySiteDiary({ logs, projects = [], contractors = [], 
                 type="button"
                 disabled={isGpsLocating}
                 onClick={() => {
-                  if (!navigator.geolocation) {
-                    handleSelectPresetOrSuggestion(14.244357, 121.136757, 'Cabuyao, Laguna HQ Fallback');
-                    setNotification(
-                      '⚠️ Location permission denied or unavailable on this device — centered on Cabuyao HQ fallback'
-                    );
+                  const fallbackToCabuyao = () => {
+                    handleSelectPresetOrSuggestion(14.2785, 121.1235, 'Cabuyao HQ, Laguna');
+                    setNotification('Centered on Cabuyao HQ — Drag pin or search to set project site');
                     setTimeout(() => setNotification(null), 4500);
+                  };
+                  if (!navigator.geolocation) {
+                    fallbackToCabuyao();
                     return;
                   }
                   setIsGpsLocating(true);
-                  navigator.geolocation.getCurrentPosition(
-                    (pos) => {
-                      setIsGpsLocating(false);
-                      const nextLat = Number(pos.coords.latitude.toFixed(6));
-                      const nextLon = Number(pos.coords.longitude.toFixed(6));
-                      handleSelectPresetOrSuggestion(
-                        nextLat,
-                        nextLon,
-                        `Device GPS (${nextLat.toFixed(6)}, ${nextLon.toFixed(6)})`
-                      );
-                    },
-                    () => {
-                      setIsGpsLocating(false);
-                      handleSelectPresetOrSuggestion(14.244357, 121.136757, 'Cabuyao, Laguna HQ Fallback');
-                      setNotification(
-                        '⚠️ Location permission denied or unavailable on this device — centered on Cabuyao HQ fallback'
-                      );
-                      setTimeout(() => setNotification(null), 4500);
-                    },
-                    { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-                  );
+                  try {
+                    navigator.geolocation.getCurrentPosition(
+                      (pos) => {
+                        setIsGpsLocating(false);
+                        const nextLat = Number(pos.coords.latitude.toFixed(6));
+                        const nextLon = Number(pos.coords.longitude.toFixed(6));
+                        handleSelectPresetOrSuggestion(
+                          nextLat,
+                          nextLon,
+                          `Device GPS (${nextLat.toFixed(6)}, ${nextLon.toFixed(6)})`
+                        );
+                      },
+                      () => {
+                        setIsGpsLocating(false);
+                        fallbackToCabuyao();
+                      },
+                      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+                    );
+                  } catch {
+                    setIsGpsLocating(false);
+                    fallbackToCabuyao();
+                  }
                 }}
                 className="px-3.5 py-2 rounded-xl bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-700 text-xs font-medium cursor-pointer flex items-center gap-1.5 transition disabled:opacity-60"
               >

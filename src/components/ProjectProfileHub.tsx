@@ -162,16 +162,16 @@ export default function ProjectProfileHub({
   const [detectedCoords, setDetectedCoords] = useState<GeocodedLocation | null>(null);
   const [isGeocoding, setIsGeocoding] = useState<boolean>(false);
   const [isMapPinModalOpen, setIsMapPinModalOpen] = useState<boolean>(false);
-  const [mapPinLat, setMapPinLat] = useState<number>(14.244357);
-  const [mapPinLon, setMapPinLon] = useState<number>(121.136757);
+  const [mapPinLat, setMapPinLat] = useState<number>(14.2785);
+  const [mapPinLon, setMapPinLon] = useState<number>(121.1235);
   const [mapPinFlyTrigger, setMapPinFlyTrigger] = useState<number>(0);
   const [mapPinSearchQuery, setMapPinSearchQuery] = useState<string>('');
   const [mapPinSuggestions, setMapPinSuggestions] = useState<LocationSuggestion[]>([]);
   const [hasCustomPinnedCoords, setHasCustomPinnedCoords] = useState<boolean>(false);
 
   const openMapPinpointModal = () => {
-    const startLat = detectedCoords?.lat ?? 14.244357;
-    const startLon = detectedCoords?.lon ?? 121.136757;
+    const startLat = detectedCoords?.lat ?? 14.2785;
+    const startLon = detectedCoords?.lon ?? 121.1235;
     setMapPinLat(Number(startLat.toFixed(6)));
     setMapPinLon(Number(startLon.toFixed(6)));
     setMapPinSearchQuery('');

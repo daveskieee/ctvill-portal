@@ -20,8 +20,10 @@ import {
   resolveTaskConstructionPhase,
   loadProjectGanttTasksFromStorage,
   saveProjectGanttTasks,
+  getGanttStorageKey,
   createDefaultWbsTasksForProject,
   GANTT_SELECT_PROJECT_EVENT,
+  GANTT_TASKS_UPDATED_EVENT,
 } from '../utils/ganttProgress';
 
 // ==========================================
@@ -1133,8 +1135,84 @@ export default function GanttTimeline({
   }, [siteLogs]);
 
   // ==========================================
-  // 5. Load Project Gantt Data from API
+  // 5. Load Project Gantt Data from API (DB-First + Auto-Migration)
   // ==========================================
+
+  const parseDbGanttPayload = useCallback((
+    projectId: string,
+    rawTasks: any[],
+    rawLinks: any[]
+  ): { parsedTasks: GanttTaskItem[]; parsedLinks: GanttLinkItem[] } => {
+    const predMap = new Map<string, string[]>();
+    rawLinks.forEach((l: any) => {
+      const targetId = String(l.target);
+      const sourceId = String(l.source);
+      if (!predMap.has(targetId)) predMap.set(targetId, []);
+      predMap.get(targetId)!.push(sourceId);
+    });
+
+    const parsedTasks: GanttTaskItem[] = rawTasks.map((t: any, idx: number) => {
+      const sDate = parseDate(t.start_date || t.startDate);
+      const eDate = parseDate(t.end_date || t.endDate);
+      const rawDuration = t.duration !== undefined ? Number(t.duration) : countWorkingDays(sDate, eDate);
+      const isMilestone = (rawDuration === 0 || t.type === 'milestone');
+      const duration = isMilestone ? 0 : Math.max(1, rawDuration);
+      const startDateStr = formatDateISO(sDate);
+      const endDateStr = isMilestone ? startDateStr : formatDateISO(eDate);
+      const resolvedPhase = resolveTaskConstructionPhase({
+        text: t.text || t.title,
+        milestonePhase: t.milestonePhase,
+        constructionPhase: t.constructionPhase
+      });
+
+      return {
+        id: String(t.id),
+        projectId,
+        wbsCode: t.wbsCode || `${idx + 1}.0`,
+        text: t.text || t.title || 'Construction Task',
+        startDate: startDateStr,
+        endDate: endDateStr,
+        duration,
+        progress: typeof t.progress === 'number' ? Math.max(0, Math.min(1, t.progress)) : 0,
+        weight: typeof t.weight === 'number' ? t.weight : undefined,
+        constructionPhase: resolvedPhase,
+        baselineStart: t.baselineStart ? formatDateISO(parseDate(t.baselineStart)) : null,
+        baselineEnd: t.baselineEnd ? formatDateISO(parseDate(t.baselineEnd)) : null,
+        type: isMilestone ? 'milestone' : (t.type || 'task'),
+        parentTaskId: t.parent && t.parent !== 0 && t.parent !== '0' ? String(t.parent) : (t.parentTaskId || null),
+        sortOrder: typeof t.sortOrder === 'number' ? t.sortOrder : idx,
+        assignedContractorId: t.assignedContractorId || null,
+        contractorName: t.contractor || 'LDM Construction Crew',
+        predecessorIds: predMap.get(String(t.id)) || []
+      };
+    });
+
+    const parsedLinks: GanttLinkItem[] = rawLinks.map((l: any) => ({
+      id: String(l.id),
+      source: String(l.source),
+      target: String(l.target),
+      type: String(l.type ?? '0'),
+      lag: Number(l.lag ?? 0)
+    }));
+
+    return {
+      parsedTasks: parsedTasks.filter(t => !isTaskTombstoned(t.id)),
+      parsedLinks: parsedLinks.filter(l => !isTaskTombstoned(l.source) && !isTaskTombstoned(l.target)),
+    };
+  }, [isTaskTombstoned]);
+
+  const purgeStaleLocalGanttCache = useCallback((projectId: string, authoritativeTasks?: GanttTaskItem[]) => {
+    try {
+      window.localStorage.removeItem(getGanttStorageKey(projectId));
+    } catch { /* silent */ }
+    if (authoritativeTasks && typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent(GANTT_TASKS_UPDATED_EVENT, {
+          detail: { projectId, tasks: authoritativeTasks },
+        })
+      );
+    }
+  }, []);
 
   const loadGanttData = useCallback(async (projectId: string) => {
     if (!projectId) {
@@ -1150,105 +1228,86 @@ export default function GanttTimeline({
 
       const rawTasks = Array.isArray(json.data) ? json.data : [];
       const rawLinks = Array.isArray(json.links) ? json.links : [];
-
-      // Link mapping: map links into predecessorIds
-      const predMap = new Map<string, string[]>();
-      rawLinks.forEach((l: any) => {
-        const targetId = String(l.target);
-        const sourceId = String(l.source);
-        if (!predMap.has(targetId)) predMap.set(targetId, []);
-        predMap.get(targetId)!.push(sourceId);
-      });
-
-      const cachedTasks = loadProjectGanttTasksFromStorage(projectId) || [];
-      const cachedById = new Map(cachedTasks.map(ct => [String(ct.id), ct]));
-
-      const parsedTasks: GanttTaskItem[] = rawTasks.map((t: any, idx: number) => {
-        const sDate = parseDate(t.start_date || t.startDate);
-        const eDate = parseDate(t.end_date || t.endDate);
-        const rawDuration = t.duration !== undefined ? Number(t.duration) : countWorkingDays(sDate, eDate);
-        const isMilestone = (rawDuration === 0 || t.type === 'milestone');
-        const duration = isMilestone ? 0 : Math.max(1, rawDuration);
-        const startDateStr = formatDateISO(sDate);
-        const endDateStr = isMilestone ? startDateStr : formatDateISO(eDate);
-        const cachedMatch = cachedById.get(String(t.id));
-        const resolvedPhase = resolveTaskConstructionPhase({
-          text: t.text || t.title,
-          milestonePhase: t.milestonePhase,
-          constructionPhase: t.constructionPhase || cachedMatch?.constructionPhase
-        });
-
-        return {
-          id: String(t.id),
-          projectId,
-          wbsCode: t.wbsCode || `${idx + 1}.0`,
-          text: t.text || t.title || 'Construction Task',
-          startDate: startDateStr,
-          endDate: endDateStr,
-          duration,
-          progress: typeof t.progress === 'number' ? Math.max(0, Math.min(1, t.progress)) : 0,
-          weight: typeof t.weight === 'number' ? t.weight : (typeof cachedMatch?.weight === 'number' ? cachedMatch.weight : undefined),
-          constructionPhase: resolvedPhase,
-          baselineStart: t.baselineStart ? formatDateISO(parseDate(t.baselineStart)) : null,
-          baselineEnd: t.baselineEnd ? formatDateISO(parseDate(t.baselineEnd)) : null,
-          type: isMilestone ? 'milestone' : (t.type || 'task'),
-          parentTaskId: t.parent && t.parent !== 0 && t.parent !== '0' ? String(t.parent) : (t.parentTaskId || null),
-          sortOrder: typeof t.sortOrder === 'number' ? t.sortOrder : idx,
-          assignedContractorId: t.assignedContractorId || null,
-          contractorName: t.contractor || 'LDM Construction Crew',
-          predecessorIds: predMap.get(String(t.id)) || []
-        };
-      });
-
-      const parsedLinks: GanttLinkItem[] = rawLinks.map((l: any) => ({
-        id: String(l.id),
-        source: String(l.source),
-        target: String(l.target),
-        type: String(l.type ?? '0'),
-        lag: Number(l.lag ?? 0)
-      }));
-
-      // Filter out any recently deleted tasks that might still be returned due to race conditions
-      const validTasks = parsedTasks.filter(t => !isTaskTombstoned(t.id));
-      const validLinks = parsedLinks.filter(l => !isTaskTombstoned(l.source) && !isTaskTombstoned(l.target));
+      const { parsedTasks: validTasks, parsedLinks: validLinks } = parseDbGanttPayload(projectId, rawTasks, rawLinks);
 
       if (validTasks.length > 0) {
+        // Authoritative PostgreSQL records — render directly and purge any stale localStorage cache
         setTasks(validTasks);
         setLinks(validLinks);
-        saveProjectGanttTasks(projectId, validTasks);
-      } else if (tasksProp && tasksProp.length > 0 && tasksProp.some(t => t.projectId === projectId)) {
-        const mappedPropTasks: GanttTaskItem[] = tasksProp
-          .filter(t => t.projectId === projectId && !isTaskTombstoned(t.id))
-          .map((t: any, idx: number) => ({
-            id: String(t.id),
-            projectId,
-            wbsCode: t.wbsCode || `${idx + 1}.0`,
-            text: t.title || t.text || 'Construction Task',
-            startDate: formatDateISO(parseDate(t.startDate)),
-            endDate: formatDateISO(parseDate(t.dueDate || t.endDate || t.startDate)),
-            duration: Math.max(1, Number(t.duration || 1)),
-            progress: typeof t.progress === 'number' ? (t.progress > 1 ? t.progress / 100 : t.progress) : 0,
-            weight: typeof t.weight === 'number' ? t.weight : cachedById.get(String(t.id))?.weight,
-            constructionPhase: resolveTaskConstructionPhase(t),
-            type: 'task',
-            parentTaskId: null,
-            sortOrder: idx,
-            predecessorIds: []
-          }));
-        setTasks(mappedPropTasks);
-        setLinks(validLinks);
-        saveProjectGanttTasks(projectId, mappedPropTasks);
-      } else if (projectId === 'default') {
-        // Fallback seed tasks strictly for default demo project
-        setTasks(DEFAULT_EM_JAY_TASKS);
-        setLinks(DEFAULT_EM_JAY_LINKS);
-        saveProjectGanttTasks(projectId, DEFAULT_EM_JAY_TASKS);
+        purgeStaleLocalGanttCache(projectId, validTasks);
       } else {
-        // Initialize 14-phase WBS tasks so Master Gantt and Progress Reports are 100% synced
-        const defaultWbs = createDefaultWbsTasksForProject(projectId);
-        setTasks(defaultWbs as GanttTaskItem[]);
-        setLinks([]);
-        saveProjectGanttTasks(projectId, defaultWbs);
+        // PostgreSQL returned 0 tasks: gather valid local/seed tasks and auto-migrate to PostgreSQL in background
+        const cachedTasks = (loadProjectGanttTasksFromStorage(projectId) || [])
+          .filter(t => !isTaskTombstoned(t.id)) as GanttTaskItem[];
+
+        let seedTasks: GanttTaskItem[] = [];
+        let seedLinks: GanttLinkItem[] = [];
+
+        if (cachedTasks.length > 0) {
+          seedTasks = cachedTasks;
+        } else if (tasksProp && tasksProp.length > 0 && tasksProp.some(t => t.projectId === projectId)) {
+          seedTasks = tasksProp
+            .filter(t => t.projectId === projectId && !isTaskTombstoned(t.id))
+            .map((t: any, idx: number) => ({
+              id: String(t.id),
+              projectId,
+              wbsCode: t.wbsCode || `${idx + 1}.0`,
+              text: t.title || t.text || 'Construction Task',
+              startDate: formatDateISO(parseDate(t.startDate)),
+              endDate: formatDateISO(parseDate(t.dueDate || t.endDate || t.startDate)),
+              duration: Math.max(1, Number(t.duration || 1)),
+              progress: typeof t.progress === 'number' ? (t.progress > 1 ? t.progress / 100 : t.progress) : 0,
+              weight: typeof t.weight === 'number' ? t.weight : undefined,
+              constructionPhase: resolveTaskConstructionPhase(t),
+              type: 'task',
+              parentTaskId: null,
+              sortOrder: idx,
+              predecessorIds: []
+            }));
+        } else if (projectId === 'default') {
+          seedTasks = DEFAULT_EM_JAY_TASKS;
+          seedLinks = DEFAULT_EM_JAY_LINKS;
+        } else {
+          seedTasks = createDefaultWbsTasksForProject(projectId) as GanttTaskItem[];
+        }
+
+        setTasks(seedTasks);
+        setLinks(seedLinks);
+
+        // Seamless background Auto-Migration into Neon PostgreSQL (zero manual buttons)
+        if (seedTasks.length > 0 && projectId !== 'default') {
+          try {
+            const migrateRes = await fetch(`/api/projects/${projectId}/gantt/sync`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                tasks: seedTasks.map((t, idx) => ({
+                  ...t,
+                  sortOrder: typeof t.sortOrder === 'number' ? t.sortOrder : idx,
+                  milestonePhase: t.constructionPhase || resolveTaskConstructionPhase(t),
+                })),
+                links: seedLinks,
+              }),
+            });
+            if (migrateRes.ok) {
+              const migratedJson = await migrateRes.json().catch(() => null);
+              if (Array.isArray(migratedJson?.data) && migratedJson.data.length > 0) {
+                const { parsedTasks: dbTasks, parsedLinks: dbLinks } = parseDbGanttPayload(
+                  projectId,
+                  migratedJson.data,
+                  Array.isArray(migratedJson.links) ? migratedJson.links : []
+                );
+                setTasks(dbTasks);
+                setLinks(dbLinks);
+                purgeStaleLocalGanttCache(projectId, dbTasks);
+              } else {
+                purgeStaleLocalGanttCache(projectId, seedTasks);
+              }
+            }
+          } catch (migrateErr) {
+            console.warn('Auto-migration to PostgreSQL deferred:', migrateErr);
+          }
+        }
       }
     } catch (err) {
       console.error('Failed to load project gantt data:', err);
@@ -1286,14 +1345,14 @@ export default function GanttTimeline({
     } finally {
       setIsLoading(false);
     }
-  }, [isTaskTombstoned, tasksProp]);
+  }, [isTaskTombstoned, tasksProp, parseDbGanttPayload, purgeStaleLocalGanttCache]);
 
   useEffect(() => {
     loadGanttData(selectedProjectId);
   }, [selectedProjectId, loadGanttData]);
 
   // ==========================================
-  // 6. Backend Synchronization Helper
+  // 6. Backend Synchronization Helper (Immediate Auto-Save + DB Hydration)
   // ==========================================
 
   const syncBackend = useCallback(async (
@@ -1331,26 +1390,39 @@ export default function GanttTimeline({
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const resData = await res.json().catch(() => null);
-      if (resData?.result?.projectProgress !== undefined) {
-        const storedLatest = loadProjectGanttTasksFromStorage(selectedProjectId);
-        const unifiedProg = storedLatest
-          ? computeUnifiedProjectProgress(storedLatest)
-          : resData.result.projectProgress;
+
+      // Hydrate state directly from authoritative PostgreSQL response & purge stale cache
+      if (Array.isArray(resData?.data)) {
+        const { parsedTasks: dbTasks, parsedLinks: dbLinks } = parseDbGanttPayload(
+          selectedProjectId,
+          resData.data,
+          Array.isArray(resData.links) ? resData.links : []
+        );
+        setTasks(dbTasks);
+        setLinks(dbLinks);
+        purgeStaleLocalGanttCache(selectedProjectId, dbTasks);
+        const unifiedProg = computeUnifiedProjectProgress(dbTasks);
         onUpdateProject?.(selectedProjectId, {
           progressPercentage: unifiedProg,
           cpmProgress: unifiedProg,
-          tasksCount: storedLatest ? storedLatest.length : resData.result.tasksCount
+          tasksCount: dbTasks.length
+        });
+      } else if (resData?.result?.projectProgress !== undefined) {
+        onUpdateProject?.(selectedProjectId, {
+          progressPercentage: resData.result.projectProgress,
+          cpmProgress: resData.result.projectProgress,
+          tasksCount: resData.result.tasksCount
         });
       }
-      setSyncFeedback({ type: 'success', message: 'Schedule synchronized with database.' });
-      setTimeout(() => setSyncFeedback(null), 3000);
+      setSyncFeedback({ type: 'success', message: 'Schedule saved to PostgreSQL.' });
+      setTimeout(() => setSyncFeedback(null), 2500);
     } catch (err) {
       console.error('syncBackend error:', err);
       setSyncFeedback({ type: 'error', message: 'Failed to save changes to database.' });
     } finally {
       setIsSyncing(false);
     }
-  }, [selectedProjectId, onUpdateProject]);
+  }, [selectedProjectId, onUpdateProject, parseDbGanttPayload, purgeStaleLocalGanttCache]);
 
   const queueDebouncedSync = useCallback((
     action: 'create' | 'update' | 'delete',
@@ -1361,7 +1433,7 @@ export default function GanttTimeline({
     }
     pendingSyncTimerRef.current = setTimeout(() => {
       syncBackend(action, task);
-    }, 400);
+    }, 150);
   }, [syncBackend]);
 
   // ==========================================
@@ -2335,8 +2407,8 @@ export default function GanttTimeline({
     <div
       ref={ganttContainerRef}
       className={`transition-all duration-300 ${isFullscreen
-          ? (isDark ? 'fixed inset-0 z-50 bg-slate-950 p-4 md:p-6 flex flex-col h-screen w-screen overflow-hidden' : 'fixed inset-0 z-50 bg-slate-100 p-4 md:p-6 flex flex-col h-screen w-screen overflow-hidden')
-          : 'space-y-4 select-none'
+        ? (isDark ? 'fixed inset-0 z-50 bg-slate-950 p-4 md:p-6 flex flex-col h-screen w-screen overflow-hidden' : 'fixed inset-0 z-50 bg-slate-100 p-4 md:p-6 flex flex-col h-screen w-screen overflow-hidden')
+        : 'space-y-4 select-none'
         }`}
     >
       {/* 1. Header Toolbar */}
@@ -2423,8 +2495,8 @@ export default function GanttTimeline({
                 onChange={(e) => setSelectedProjectId(e.target.value)}
                 aria-label="Select Commercial Project"
                 className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold focus:border-amber-500 focus:outline-none cursor-pointer border ${isDark
-                    ? 'bg-slate-950 border-slate-700 text-slate-200'
-                    : 'bg-white border-slate-300 text-slate-800 shadow-2xs'
+                  ? 'bg-slate-950 border-slate-700 text-slate-200'
+                  : 'bg-white border-slate-300 text-slate-800 shadow-2xs'
                   }`}
               >
                 {projects.map(p => (
@@ -2463,8 +2535,8 @@ export default function GanttTimeline({
               type="button"
               onClick={toggleFullscreen}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer border ${isDark
-                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300/80 shadow-2xs'
+                ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300/80 shadow-2xs'
                 }`}
               title={isFullscreen ? 'Exit Full Screen Mode (Esc)' : 'Open Full Screen Mode (Auto-fits entire schedule across monitor)'}
             >
@@ -2486,12 +2558,12 @@ export default function GanttTimeline({
               type="button"
               onClick={() => setIsLeftPaneCollapsed(prev => !prev)}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${isLeftPaneCollapsed
-                  ? isDark
-                    ? 'bg-indigo-950/70 text-indigo-300 border-indigo-700/60 hover:bg-indigo-900/60'
-                    : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-2xs'
-                  : isDark
-                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300/80 shadow-2xs'
+                ? isDark
+                  ? 'bg-indigo-950/70 text-indigo-300 border-indigo-700/60 hover:bg-indigo-900/60'
+                  : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 shadow-2xs'
+                : isDark
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300/80 shadow-2xs'
                 }`}
               title={isLeftPaneCollapsed ? 'Show Task Grid' : 'Maximize Timeline (Hide Task Grid)'}
             >
@@ -2520,8 +2592,8 @@ export default function GanttTimeline({
                     type="button"
                     onClick={() => { setZoomLevel(z); setZoomFactor(1); }}
                     className={`px-2 py-0.5 text-xs rounded font-mono font-medium transition cursor-pointer capitalize ${zoomLevel === z
-                        ? (isDark ? 'bg-slate-800 text-amber-400 font-bold' : 'bg-white text-amber-700 font-bold shadow-2xs')
-                        : (isDark ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900')
+                      ? (isDark ? 'bg-slate-800 text-amber-400 font-bold' : 'bg-white text-amber-700 font-bold shadow-2xs')
+                      : (isDark ? 'text-slate-400 hover:text-white' : 'text-slate-600 hover:text-slate-900')
                       }`}
                   >
                     {z}
@@ -2567,10 +2639,10 @@ export default function GanttTimeline({
               disabled={!selectedProjectId}
               onClick={() => handleAddNewTask()}
               className={`flex items-center gap-1.5 px-3.5 py-1.5 font-bold rounded-lg text-xs transition cursor-pointer ${!selectedProjectId
-                  ? isDark
-                    ? 'bg-slate-800/60 text-slate-500 cursor-not-allowed border border-slate-800'
-                    : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
-                  : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-xs'
+                ? isDark
+                  ? 'bg-slate-800/60 text-slate-500 cursor-not-allowed border border-slate-800'
+                  : 'bg-slate-100 text-slate-400 cursor-not-allowed border border-slate-200'
+                : 'bg-amber-500 hover:bg-amber-400 text-slate-950 shadow-xs'
                 }`}
             >
               <Plus className="w-3.5 h-3.5" />
@@ -2581,12 +2653,12 @@ export default function GanttTimeline({
               disabled={!selectedProjectId}
               onClick={handleAddNewMilestone}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${!selectedProjectId
-                  ? isDark
-                    ? 'bg-slate-800/60 text-slate-500 cursor-not-allowed border-slate-800'
-                    : 'bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200'
-                  : isDark
-                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
-                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300/80 shadow-2xs'
+                ? isDark
+                  ? 'bg-slate-800/60 text-slate-500 cursor-not-allowed border-slate-800'
+                  : 'bg-slate-100 text-slate-400 cursor-not-allowed border-slate-200'
+                : isDark
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-200 border-slate-700'
+                  : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300/80 shadow-2xs'
                 }`}
             >
               <span className={isDark ? 'text-amber-400 text-xs' : 'text-amber-600 text-xs'}>◆</span>
@@ -2598,8 +2670,8 @@ export default function GanttTimeline({
                 onClick={handleLoadStandardFitOutTemplate}
                 disabled={isSyncing}
                 className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition cursor-pointer ${isDark
-                    ? 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-amber-500/30'
-                    : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300 shadow-2xs'
+                  ? 'bg-slate-800 hover:bg-slate-700 text-amber-400 border-amber-500/30'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-300 shadow-2xs'
                   }`}
                 title="Load Standard Fit-Out Template (initialized at 0% progress)"
               >
@@ -2673,8 +2745,8 @@ export default function GanttTimeline({
                 onClick={() => loadGanttData(selectedProjectId)}
                 disabled={isLoading}
                 className={`p-1.5 rounded-lg text-xs border transition cursor-pointer ${isDark
-                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
-                    : 'bg-white hover:bg-slate-100 text-slate-600 border-slate-300/80 shadow-2xs'
+                  ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border-slate-700'
+                  : 'bg-white hover:bg-slate-100 text-slate-600 border-slate-300/80 shadow-2xs'
                   }`}
                 title="Reload from Server"
               >
@@ -2687,8 +2759,8 @@ export default function GanttTimeline({
         {/* Feedback Alert */}
         {syncFeedback && (
           <div className={`mt-3 p-3 rounded-xl border text-xs font-mono flex items-center gap-2 animate-fadeIn ${syncFeedback.type === 'success'
-              ? isDark ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
-              : isDark ? 'bg-rose-950/80 border-rose-700 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-800'
+            ? isDark ? 'bg-emerald-950/80 border-emerald-700 text-emerald-300' : 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            : isDark ? 'bg-rose-950/80 border-rose-700 text-rose-300' : 'bg-rose-50 border-rose-200 text-rose-800'
             }`}>
             {syncFeedback.type === 'success' ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertTriangle className="w-4 h-4 shrink-0" />}
             <span>{syncFeedback.message}</span>
@@ -2712,8 +2784,8 @@ export default function GanttTimeline({
                     type="button"
                     onClick={() => { setZoomLevel(z); setZoomFactor(1); }}
                     className={`px-3 py-1 text-xs rounded-md font-medium transition cursor-pointer capitalize ${isActive
-                        ? 'bg-[#ea580c] text-white font-bold shadow-xs'
-                        : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                      ? 'bg-[#ea580c] text-white font-bold shadow-xs'
+                      : 'text-slate-400 hover:text-white hover:bg-slate-800'
                       }`}
                   >
                     {z === 'day' ? 'Day' : z === 'week' ? 'Week' : 'Month'}
@@ -2881,8 +2953,8 @@ export default function GanttTimeline({
                   type="button"
                   onClick={() => setIsLeftPaneCollapsed(false)}
                   className={`p-2 rounded-xl transition cursor-pointer border shadow-xs ${isDark
-                      ? 'bg-slate-900 hover:bg-slate-800 text-amber-400 hover:text-amber-300 border-slate-800'
-                      : 'bg-white hover:bg-slate-100 text-amber-700 hover:text-amber-800 border-slate-200'
+                    ? 'bg-slate-900 hover:bg-slate-800 text-amber-400 hover:text-amber-300 border-slate-800'
+                    : 'bg-white hover:bg-slate-100 text-amber-700 hover:text-amber-800 border-slate-200'
                     }`}
                   title="Expand WBS Task Grid"
                 >
@@ -2907,8 +2979,8 @@ export default function GanttTimeline({
             <>
               {/* Table Header: WBS, TASK, START, END, DUR, % */}
               <div className={`h-[60px] flex items-center px-3 text-[11px] font-mono font-bold uppercase tracking-wider ${isDark
-                  ? 'bg-slate-900 border-b border-slate-800 text-slate-400'
-                  : 'bg-[#f1f5f9] border-b border-[#cbd5e1] text-[#334155] font-bold text-xs'
+                ? 'bg-slate-900 border-b border-slate-800 text-slate-400'
+                : 'bg-[#f1f5f9] border-b border-[#cbd5e1] text-[#334155] font-bold text-xs'
                 }`}>
                 <button
                   type="button"
@@ -2960,8 +3032,8 @@ export default function GanttTimeline({
                       className={`flex items-center px-3 text-xs font-mono transition group cursor-pointer ${rowBgClass}`}
                     >
                       <div className={`w-12 text-center truncate ${isDark
-                          ? (depth === 0 ? 'font-bold text-amber-400/90 text-[11px]' : 'text-slate-400 text-[10px]')
-                          : (depth === 0 ? 'font-bold text-amber-700 text-[11px]' : 'text-slate-500 text-[10px]')
+                        ? (depth === 0 ? 'font-bold text-amber-400/90 text-[11px]' : 'text-slate-400 text-[10px]')
+                        : (depth === 0 ? 'font-bold text-amber-700 text-[11px]' : 'text-slate-500 text-[10px]')
                         }`}>
                         {task.wbsCode}
                       </div>
@@ -2979,8 +3051,8 @@ export default function GanttTimeline({
                               toggleTaskCollapse(task.id);
                             }}
                             className={`p-0.5 -ml-1 mr-1 rounded transition-colors flex items-center shrink-0 cursor-pointer ${isDark
-                                ? 'hover:bg-slate-800 text-amber-400 hover:text-amber-300'
-                                : 'hover:bg-amber-100/80 text-amber-700 hover:text-amber-800'
+                              ? 'hover:bg-slate-800 text-amber-400 hover:text-amber-300'
+                              : 'hover:bg-amber-100/80 text-amber-700 hover:text-amber-800'
                               }`}
                             title={isCollapsed ? `Expand ${hiddenCount} subtask(s)` : 'Collapse subtasks'}
                           >
@@ -3004,8 +3076,8 @@ export default function GanttTimeline({
 
                         <span
                           className={`truncate ${isDark
-                              ? (isMilestone ? 'font-bold text-amber-300' : isCritical ? 'font-semibold text-slate-100' : 'text-slate-300 font-medium')
-                              : (isMilestone ? 'font-bold text-amber-800' : isCritical ? 'font-bold text-[#0f172a]' : 'text-[#0f172a] font-semibold')
+                            ? (isMilestone ? 'font-bold text-amber-300' : isCritical ? 'font-semibold text-slate-100' : 'text-slate-300 font-medium')
+                            : (isMilestone ? 'font-bold text-amber-800' : isCritical ? 'font-bold text-[#0f172a]' : 'text-[#0f172a] font-semibold')
                             }`}
                           title={task.text}
                         >
@@ -3020,8 +3092,8 @@ export default function GanttTimeline({
                               toggleTaskCollapse(task.id);
                             }}
                             className={`ml-1.5 px-1 py-0.2 text-[9px] font-mono font-bold rounded shrink-0 transition cursor-pointer border ${isDark
-                                ? 'bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/25'
-                                : 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200'
+                              ? 'bg-amber-500/15 text-amber-400 border-amber-500/30 hover:bg-amber-500/25'
+                              : 'bg-amber-100 text-amber-800 border-amber-200 hover:bg-amber-200'
                               }`}
                             title={`Click to expand ${hiddenCount} hidden subtasks`}
                           >
@@ -3055,8 +3127,8 @@ export default function GanttTimeline({
                           type="button"
                           onClick={(e) => { e.stopPropagation(); handleOpenEditModal(task); }}
                           className={`p-1 rounded transition cursor-pointer ${isDark
-                              ? 'text-amber-400 hover:text-white hover:bg-slate-800'
-                              : 'text-amber-600 hover:text-amber-800 hover:bg-amber-100'
+                            ? 'text-amber-400 hover:text-white hover:bg-slate-800'
+                            : 'text-amber-600 hover:text-amber-800 hover:bg-amber-100'
                             }`}
                           title="Edit Task Scope & Dates"
                         >
@@ -3066,8 +3138,8 @@ export default function GanttTimeline({
                           type="button"
                           onClick={(e) => { e.stopPropagation(); handleDeleteTask(task.id); }}
                           className={`p-1 rounded transition cursor-pointer ${isDark
-                              ? 'text-slate-500 hover:text-rose-400 hover:bg-slate-800'
-                              : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
+                            ? 'text-slate-500 hover:text-rose-400 hover:bg-slate-800'
+                            : 'text-slate-400 hover:text-rose-600 hover:bg-rose-50'
                             }`}
                           title="Delete Task"
                         >
@@ -3103,8 +3175,8 @@ export default function GanttTimeline({
                         onClick={handleLoadStandardFitOutTemplate}
                         disabled={isSyncing}
                         className={`flex items-center gap-1.5 px-3 py-1.5 font-medium rounded-lg text-xs transition cursor-pointer border ${isDark
-                            ? 'bg-slate-900 hover:bg-slate-800 text-amber-400 border-amber-500/30'
-                            : 'bg-white hover:bg-slate-50 text-amber-700 border-amber-200 shadow-2xs'
+                          ? 'bg-slate-900 hover:bg-slate-800 text-amber-400 border-amber-500/30'
+                          : 'bg-white hover:bg-slate-50 text-amber-700 border-amber-200 shadow-2xs'
                           }`}
                       >
                         <Sparkles className="w-3.5 h-3.5 text-amber-500" />
@@ -3378,12 +3450,12 @@ export default function GanttTimeline({
                           onPointerDown={(e) => handlePointerDown(e, task.id, 'move')}
                           onMouseDown={(e) => handlePointerDown(e, task.id, 'move')}
                           className={`absolute top-[17px] h-[22px] rounded-sm shadow-md overflow-hidden flex items-center transition-shadow select-none group/bar pointer-events-auto cursor-grab active:cursor-grabbing z-20 ${isCritical
-                              ? isDark
-                                ? 'bg-red-950/80 border border-red-700/60 shadow-red-950/40'
-                                : 'bg-red-200 border border-red-500 shadow-xs'
-                              : isDark
-                                ? 'bg-emerald-950/80 border border-emerald-700/60 shadow-emerald-950/40'
-                                : 'bg-emerald-200 border border-emerald-500 shadow-xs'
+                            ? isDark
+                              ? 'bg-red-950/80 border border-red-700/60 shadow-red-950/40'
+                              : 'bg-red-200 border border-red-500 shadow-xs'
+                            : isDark
+                              ? 'bg-emerald-950/80 border border-emerald-700/60 shadow-emerald-950/40'
+                              : 'bg-emerald-200 border border-emerald-500 shadow-xs'
                             } hover:ring-1 hover:ring-white/40`}
                           title={`${task.text}: ${pct}% complete • ${isCritical ? 'Critical Path (0 Float)' : `Non-Critical (Float: ${taskFloat}d)`}`}
                         >
@@ -3434,8 +3506,8 @@ export default function GanttTimeline({
                         <div
                           style={{ left: `${barLeft + barWidth + 8}px` }}
                           className={`absolute top-[17px] h-[22px] flex items-center text-xs whitespace-nowrap pointer-events-none select-none z-20 ${isDark
-                              ? 'font-medium text-slate-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]'
-                              : 'font-semibold text-[#0f172a]'
+                            ? 'font-medium text-slate-100 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]'
+                            : 'font-semibold text-[#0f172a]'
                             }`}
                         >
                           {task.text}
@@ -3781,8 +3853,8 @@ export default function GanttTimeline({
                   type="button"
                   onClick={() => { setEditingTask(null); setIsNewTaskDraft(false); }}
                   className={`px-3 py-2 font-medium rounded-xl text-xs border transition cursor-pointer ${isDark
-                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border-slate-700'
-                      : 'bg-white hover:bg-slate-100 text-slate-600 border-slate-300 shadow-2xs'
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white border-slate-700'
+                    : 'bg-white hover:bg-slate-100 text-slate-600 border-slate-300 shadow-2xs'
                     }`}
                 >
                   Discard Draft
@@ -3792,8 +3864,8 @@ export default function GanttTimeline({
                   type="button"
                   onClick={() => handleDeleteTask(editingTask.id)}
                   className={`px-3 py-2 font-bold rounded-xl text-xs border transition cursor-pointer flex items-center gap-1.5 ${isDark
-                      ? 'bg-rose-950/80 hover:bg-rose-900 text-rose-300 border-rose-800'
-                      : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 shadow-2xs'
+                    ? 'bg-rose-950/80 hover:bg-rose-900 text-rose-300 border-rose-800'
+                    : 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-200 shadow-2xs'
                     }`}
                 >
                   <Trash2 className="w-3.5 h-3.5" />
@@ -3806,8 +3878,8 @@ export default function GanttTimeline({
                   type="button"
                   onClick={() => { setEditingTask(null); setIsNewTaskDraft(false); }}
                   className={`px-4 py-2 font-medium rounded-xl text-xs border transition cursor-pointer ${isDark
-                      ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
-                      : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 shadow-2xs'
+                    ? 'bg-slate-800 hover:bg-slate-700 text-slate-300 border-slate-700'
+                    : 'bg-white hover:bg-slate-100 text-slate-700 border-slate-300 shadow-2xs'
                     }`}
                 >
                   Cancel

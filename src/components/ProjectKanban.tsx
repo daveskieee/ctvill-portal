@@ -225,12 +225,6 @@ export default function ProjectKanban({
       return;
     }
 
-    // Immediate read from shared Gantt localStorage for zero-lag updates
-    const cached = loadProjectGanttTasksFromStorage(projectId);
-    if (cached !== null) {
-      setLiveGanttTasks(cached);
-    }
-
     setIsLoadingGantt(true);
     try {
       const res = await fetch(`/api/projects/${projectId}/gantt`);
@@ -238,41 +232,31 @@ export default function ProjectKanban({
         const json = await res.json().catch(() => null);
         const rawTasks = Array.isArray(json?.data) ? json.data : [];
         if (rawTasks.length > 0) {
-          const cachedLatest = loadProjectGanttTasksFromStorage(projectId) || [];
-          const cachedById = new Map(cachedLatest.map(ct => [String(ct.id), ct]));
-
-          const normalized: UnifiedGanttTaskLike[] = rawTasks.map((t: any, idx: number) => {
-            const cachedMatch = cachedById.get(String(t.id));
-            return {
-              id: String(t.id),
-              projectId,
-              wbsCode: t.wbsCode || `${idx + 1}.0`,
-              text: t.text || t.title || 'Construction Task',
-              title: t.text || t.title || 'Construction Task',
-              startDate: t.start_date || t.startDate,
-              endDate: t.end_date || t.endDate,
-              duration: t.duration !== undefined ? Number(t.duration) : 1,
-              progress: typeof t.progress === 'number' ? t.progress : 0,
-              weight:
-                typeof t.weight === 'number'
-                  ? t.weight
-                  : typeof cachedMatch?.weight === 'number'
-                  ? cachedMatch.weight
-                  : undefined,
-              status: t.status,
-              type: t.type || 'task',
-              parentTaskId:
-                t.parent && t.parent !== 0 && t.parent !== '0'
-                  ? String(t.parent)
-                  : t.parentTaskId || null,
-              milestonePhase: t.milestonePhase || '',
-              constructionPhase: resolveTaskConstructionPhase({
-                text: t.text || t.title,
-                milestonePhase: t.milestonePhase,
-                constructionPhase: t.constructionPhase || cachedMatch?.constructionPhase,
-              }),
-            };
-          });
+          // Database-first hydration: never let stale localStorage override PostgreSQL records
+          const normalized: UnifiedGanttTaskLike[] = rawTasks.map((t: any, idx: number) => ({
+            id: String(t.id),
+            projectId,
+            wbsCode: t.wbsCode || `${idx + 1}.0`,
+            text: t.text || t.title || 'Construction Task',
+            title: t.text || t.title || 'Construction Task',
+            startDate: t.start_date || t.startDate,
+            endDate: t.end_date || t.endDate,
+            duration: t.duration !== undefined ? Number(t.duration) : 1,
+            progress: typeof t.progress === 'number' ? t.progress : 0,
+            weight: typeof t.weight === 'number' ? t.weight : undefined,
+            status: t.status,
+            type: t.type || 'task',
+            parentTaskId:
+              t.parent && t.parent !== 0 && t.parent !== '0'
+                ? String(t.parent)
+                : t.parentTaskId || null,
+            milestonePhase: t.milestonePhase || '',
+            constructionPhase: resolveTaskConstructionPhase({
+              text: t.text || t.title,
+              milestonePhase: t.milestonePhase,
+              constructionPhase: t.constructionPhase,
+            }),
+          }));
           setLiveGanttTasks(normalized);
           setIsLoadingGantt(false);
           return;

@@ -405,12 +405,47 @@ export function createGanttRouter(prisma: PrismaClient) {
             }
           }).catch(() => { });
 
+          const freshTasks = await tx.projectTask.findMany({
+            where: { projectId },
+            include: { assignedContractor: true },
+            orderBy: { sortOrder: 'asc' }
+          });
+          const freshLinks = await tx.taskLink.findMany({ where: { projectId } });
+
           return {
             action,
             entityType: effectiveEntityType,
             id: effectiveData?.id,
             projectProgress: avgProgress,
-            tasksCount: allTasks.length
+            tasksCount: freshTasks.length,
+            data: freshTasks.map(t => {
+              const isMilestone = t.type === 'milestone' || t.duration === 0;
+              return {
+                id: t.id,
+                text: t.text,
+                start_date: formatGanttDate(t.startDate),
+                end_date: formatGanttDate(t.endDate),
+                duration: t.duration,
+                progress: typeof t.progress === 'number' ? t.progress : 0,
+                status: t.status || ((typeof t.progress === 'number' && t.progress >= 1.0) ? 'COMPLETED' : (typeof t.progress === 'number' && t.progress > 0) ? 'IN_PROGRESS' : 'TODO'),
+                parent: t.parentTaskId || 0,
+                type: isMilestone ? 'milestone' : t.type || 'task',
+                wbsCode: t.wbsCode || '',
+                milestonePhase: t.milestonePhase || '',
+                assignedContractorId: t.assignedContractorId || '',
+                contractor: t.assignedContractor?.name || (t.assignedContractorId ? 'Assigned Contractor' : 'LDM Construction Crew'),
+                baselineStart: t.baselineStart ? formatGanttDate(t.baselineStart) : null,
+                baselineEnd: t.baselineEnd ? formatGanttDate(t.baselineEnd) : null,
+                sortOrder: t.sortOrder
+              };
+            }),
+            links: freshLinks.map(l => ({
+              id: l.id,
+              source: l.sourceId,
+              target: l.targetId,
+              type: l.type || '0',
+              lag: l.lagDays || 0
+            }))
           };
         });
 
@@ -422,11 +457,13 @@ export function createGanttRouter(prisma: PrismaClient) {
           success: true,
           message: `Successfully processed ${action} on ${effectiveEntityType}.`,
           result: opResult,
+          data: opResult.data,
+          links: opResult.links,
           syncedAt: new Date().toISOString()
         });
       }
 
-      // Handle Bulk / Full State Batch Sync
+      // Handle Bulk / Full State Batch Sync (Auto-Migration & Full Schedule Save)
       const result = await prisma.$transaction(async (tx) => {
         // 1. Delete removed links
         if (Array.isArray(deletedLinkIds) && deletedLinkIds.length > 0) {
@@ -448,14 +485,45 @@ export function createGanttRouter(prisma: PrismaClient) {
           });
         }
 
-        // 3. Upsert tasks
-        for (const t of tasks) {
+        // 3. Upsert tasks — insert root/parent tasks first so parentTaskId FK references always exist
+        const orderedIncomingTasks = [...tasks].sort((a: any, b: any) => {
+          const aHasParent = Boolean(a.parentTaskId || (a.parent && a.parent !== 0 && a.parent !== '0'));
+          const bHasParent = Boolean(b.parentTaskId || (b.parent && b.parent !== 0 && b.parent !== '0'));
+          if (aHasParent !== bHasParent) return aHasParent ? 1 : -1;
+          return Number(a.sortOrder ?? 0) - Number(b.sortOrder ?? 0);
+        });
+
+        for (let idx = 0; idx < orderedIncomingTasks.length; idx++) {
+          const t = orderedIncomingTasks[idx];
           if (!t.id) continue;
-          const startDate = t.start_date ? new Date(t.start_date) : new Date();
-          const duration = Math.max(0, parseInt(String(t.duration || 0), 10));
-          const endDate = t.end_date ? new Date(t.end_date) : addWorkingDays(startDate, duration || 1);
-          const parentId = t.parent && t.parent !== 0 && t.parent !== '0' ? String(t.parent) : null;
-          const progress = Math.max(0, Math.min(1, parseFloat(String(t.progress || 0))));
+          const startRaw = t.start_date || t.startDate;
+          const endRaw = t.end_date || t.endDate;
+          const parsedStart = startRaw ? new Date(startRaw) : new Date();
+          const startDate = isNaN(parsedStart.getTime()) ? new Date() : parsedStart;
+          const duration = Math.max(0, parseInt(String(t.duration ?? 1), 10) || 0);
+          const parsedEnd = endRaw ? new Date(endRaw) : addWorkingDays(startDate, duration || 1);
+          const endDate = isNaN(parsedEnd.getTime()) ? addWorkingDays(startDate, duration || 1) : parsedEnd;
+
+          const rawParentId =
+            t.parent && t.parent !== 0 && t.parent !== '0'
+              ? String(t.parent)
+              : t.parentTaskId
+                ? String(t.parentTaskId)
+                : null;
+          let safeParentId: string | null = null;
+          if (rawParentId && rawParentId !== String(t.id)) {
+            const pExists = await tx.projectTask.findUnique({ where: { id: rawParentId }, select: { id: true } });
+            if (pExists) safeParentId = rawParentId;
+          }
+
+          let safeContractorId: string | null = null;
+          if (t.assignedContractorId) {
+            const cExists = await tx.contractor.findUnique({ where: { id: String(t.assignedContractorId) }, select: { id: true } });
+            if (cExists) safeContractorId = String(t.assignedContractorId);
+          }
+
+          const rawProg = parseFloat(String(t.progress ?? 0)) || 0;
+          const progress = Math.max(0, Math.min(1, rawProg > 1 ? rawProg / 100 : rawProg));
           const status = progress >= 1.0
             ? 'COMPLETED'
             : (t.status === 'COMPLETED' && progress < 1.0)
@@ -466,84 +534,154 @@ export function createGanttRouter(prisma: PrismaClient) {
           await tx.projectTask.upsert({
             where: { id: String(t.id) },
             update: {
-              text: t.text || 'Untitled Construction Task',
-              title: t.text || 'Untitled Construction Task',
+              text: t.text || t.title || 'Untitled Construction Task',
+              title: t.text || t.title || 'Untitled Construction Task',
               startDate,
               endDate,
               duration,
               progress,
               status,
               type,
-              parentTaskId: parentId,
+              parentTaskId: safeParentId,
               wbsCode: t.wbsCode || null,
               milestonePhase: t.milestonePhase || t.constructionPhase || null,
-              assignedContractorId: t.assignedContractorId || null,
-              sortOrder: typeof t.sortOrder === 'number' ? t.sortOrder : 0,
+              assignedContractorId: safeContractorId,
+              sortOrder: typeof t.sortOrder === 'number' ? t.sortOrder : idx,
               updatedAt: new Date()
             },
             create: {
               id: String(t.id),
               projectId,
-              text: t.text || 'Untitled Construction Task',
-              title: t.text || 'Untitled Construction Task',
+              text: t.text || t.title || 'Untitled Construction Task',
+              title: t.text || t.title || 'Untitled Construction Task',
               startDate,
               endDate,
               duration,
               progress,
               status,
               type,
-              parentTaskId: parentId,
+              parentTaskId: safeParentId,
               wbsCode: t.wbsCode || null,
               milestonePhase: t.milestonePhase || t.constructionPhase || null,
-              assignedContractorId: t.assignedContractorId || null,
-              sortOrder: typeof t.sortOrder === 'number' ? t.sortOrder : 0
+              assignedContractorId: safeContractorId,
+              sortOrder: typeof t.sortOrder === 'number' ? t.sortOrder : idx
             }
           });
         }
 
-        // 4. Upsert links
+        // 4. Upsert explicit links & task predecessorIds
+        const normalizedLinks: Array<{ id: string; source: string; target: string; type: string; lag: number }> = [];
         for (const l of links) {
-          if (!l.id || !l.source || !l.target) continue;
+          if (!l.source || !l.target) continue;
+          normalizedLinks.push({
+            id: String(l.id || `link-${l.source}-${l.target}`),
+            source: String(l.source),
+            target: String(l.target),
+            type: String(l.type !== undefined ? l.type : '0'),
+            lag: parseInt(String(l.lag ?? l.lagDays ?? 0), 10) || 0,
+          });
+        }
+        for (const t of orderedIncomingTasks) {
+          if (Array.isArray(t.predecessorIds)) {
+            for (const predId of t.predecessorIds) {
+              if (!predId || String(predId) === String(t.id)) continue;
+              const linkKey = `link-${predId}-${t.id}`;
+              if (!normalizedLinks.some(nl => nl.source === String(predId) && nl.target === String(t.id))) {
+                normalizedLinks.push({
+                  id: linkKey,
+                  source: String(predId),
+                  target: String(t.id),
+                  type: '0',
+                  lag: 0,
+                });
+              }
+            }
+          }
+        }
+        for (const l of normalizedLinks) {
+          const [srcExists, tgtExists] = await Promise.all([
+            tx.projectTask.findUnique({ where: { id: l.source }, select: { id: true } }),
+            tx.projectTask.findUnique({ where: { id: l.target }, select: { id: true } }),
+          ]);
+          if (!srcExists || !tgtExists) continue;
           await tx.taskLink.upsert({
-            where: { id: String(l.id) },
+            where: { id: l.id },
             update: {
-              sourceId: String(l.source),
-              targetId: String(l.target),
-              type: String(l.type !== undefined ? l.type : '0'),
-              lagDays: parseInt(String(l.lag || 0), 10)
+              sourceId: l.source,
+              targetId: l.target,
+              type: l.type,
+              lagDays: l.lag
             },
             create: {
-              id: String(l.id),
+              id: l.id,
               projectId,
-              sourceId: String(l.source),
-              targetId: String(l.target),
-              type: String(l.type !== undefined ? l.type : '0'),
-              lagDays: parseInt(String(l.lag || 0), 10)
+              sourceId: l.source,
+              targetId: l.target,
+              type: l.type,
+              lagDays: l.lag
             }
           });
         }
 
-        // 5. Recalculate average progress for commercial_projects
-        const allTasks = await tx.projectTask.findMany({
-          where: { projectId }
+        // 5. Recalculate average progress & return fresh DB state
+        const freshTasks = await tx.projectTask.findMany({
+          where: { projectId },
+          include: { assignedContractor: true },
+          orderBy: { sortOrder: 'asc' }
         });
+        const freshLinks = await tx.taskLink.findMany({ where: { projectId } });
 
         let avgProgress = 0;
-        if (allTasks.length > 0) {
-          const totalDuration = allTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
-          const weightedProgress = allTasks.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, curr.duration || 1), 0);
+        if (freshTasks.length > 0) {
+          const parentIds = new Set(freshTasks.map(t => t.parentTaskId).filter(Boolean));
+          const leafTasks = freshTasks.filter(t => !parentIds.has(t.id));
+          const targetTasks = leafTasks.length > 0 ? leafTasks : freshTasks;
+          const totalDuration = targetTasks.reduce((acc, curr) => acc + Math.max(1, curr.duration || 1), 0);
+          const weightedProgress = targetTasks.reduce((acc, curr) => acc + (curr.progress || 0) * Math.max(1, curr.duration || 1), 0);
           avgProgress = totalDuration > 0 ? Math.round((weightedProgress / totalDuration) * 100) : 0;
 
           await tx.commercialProject.update({
             where: { id: projectId },
             data: {
               progressPercentage: avgProgress,
-              tasksCount: allTasks.length
+              tasksCount: freshTasks.length
             }
           }).catch(() => { });
         }
 
-        return { tasksCount: tasks.length, linksCount: links.length, projectProgress: avgProgress };
+        return {
+          tasksCount: freshTasks.length,
+          linksCount: freshLinks.length,
+          projectProgress: avgProgress,
+          data: freshTasks.map(t => {
+            const isMilestone = t.type === 'milestone' || t.duration === 0;
+            return {
+              id: t.id,
+              text: t.text,
+              start_date: formatGanttDate(t.startDate),
+              end_date: formatGanttDate(t.endDate),
+              duration: t.duration,
+              progress: typeof t.progress === 'number' ? t.progress : 0,
+              status: t.status || ((typeof t.progress === 'number' && t.progress >= 1.0) ? 'COMPLETED' : (typeof t.progress === 'number' && t.progress > 0) ? 'IN_PROGRESS' : 'TODO'),
+              parent: t.parentTaskId || 0,
+              type: isMilestone ? 'milestone' : t.type || 'task',
+              wbsCode: t.wbsCode || '',
+              milestonePhase: t.milestonePhase || '',
+              assignedContractorId: t.assignedContractorId || '',
+              contractor: t.assignedContractor?.name || (t.assignedContractorId ? 'Assigned Contractor' : 'LDM Construction Crew'),
+              baselineStart: t.baselineStart ? formatGanttDate(t.baselineStart) : null,
+              baselineEnd: t.baselineEnd ? formatGanttDate(t.baselineEnd) : null,
+              sortOrder: t.sortOrder
+            };
+          }),
+          links: freshLinks.map(l => ({
+            id: l.id,
+            source: l.sourceId,
+            target: l.targetId,
+            type: l.type || '0',
+            lag: l.lagDays || 0
+          }))
+        };
       });
 
       broadcastChange('tasks');
@@ -554,6 +692,8 @@ export function createGanttRouter(prisma: PrismaClient) {
         success: true,
         message: `Successfully synchronized ${result.tasksCount} tasks and ${result.linksCount} links.`,
         result,
+        data: result.data,
+        links: result.links,
         syncedAt: new Date().toISOString()
       });
     } catch (error) {

@@ -202,9 +202,9 @@ export const InteractiveLeafletPinMap: React.FC<InteractiveLeafletPinMapProps> =
     }
   };
 
-  const applyFallbackCabuyaoHq = (reasonText: string) => {
-    const fallbackLat = 14.244357;
-    const fallbackLon = 121.136757;
+  const applyFallbackCabuyaoHq = () => {
+    const fallbackLat = 14.2785;
+    const fallbackLon = 121.1235;
     isInternalDragRef.current = true;
     onChangeRef.current(fallbackLat, fallbackLon);
     if (markerRef.current && mapRef.current) {
@@ -215,8 +215,8 @@ export const InteractiveLeafletPinMap: React.FC<InteractiveLeafletPinMapProps> =
       isInternalDragRef.current = false;
     }, 100);
     setGpsStatusMessage({
-      text: reasonText,
-      type: 'warning'
+      text: 'Centered on Cabuyao HQ — Drag pin or search to set project site',
+      type: 'info'
     });
     setTimeout(() => {
       setGpsStatusMessage(null);
@@ -229,43 +229,44 @@ export const InteractiveLeafletPinMap: React.FC<InteractiveLeafletPinMapProps> =
       e.stopPropagation();
     }
     if (!navigator.geolocation) {
-      applyFallbackCabuyaoHq(
-        'Location permission denied or unavailable on this device — centered on Cabuyao HQ fallback'
-      );
+      applyFallbackCabuyaoHq();
       return;
     }
     setIsLocatingGps(true);
     setGpsStatusMessage(null);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setIsLocatingGps(false);
-        const nextLat = Number(pos.coords.latitude.toFixed(6));
-        const nextLon = Number(pos.coords.longitude.toFixed(6));
-        isInternalDragRef.current = true;
-        onChangeRef.current(nextLat, nextLon);
-        if (markerRef.current && mapRef.current) {
-          markerRef.current.setLatLng([nextLat, nextLon]);
-          mapRef.current.flyTo([nextLat, nextLon], 17, { animate: true, duration: 0.75 });
-        }
-        setTimeout(() => {
-          isInternalDragRef.current = false;
-        }, 100);
-        setGpsStatusMessage({
-          text: `Centered on current device GPS (${nextLat.toFixed(6)}° N, ${nextLon.toFixed(6)}° E)`,
-          type: 'info'
-        });
-        setTimeout(() => {
-          setGpsStatusMessage(null);
-        }, 4000);
-      },
-      () => {
-        setIsLocatingGps(false);
-        applyFallbackCabuyaoHq(
-          'Location permission denied or unavailable on this device — centered on Cabuyao HQ fallback'
-        );
-      },
-      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-    );
+    try {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setIsLocatingGps(false);
+          const nextLat = Number(pos.coords.latitude.toFixed(6));
+          const nextLon = Number(pos.coords.longitude.toFixed(6));
+          isInternalDragRef.current = true;
+          onChangeRef.current(nextLat, nextLon);
+          if (markerRef.current && mapRef.current) {
+            markerRef.current.setLatLng([nextLat, nextLon]);
+            mapRef.current.flyTo([nextLat, nextLon], 17, { animate: true, duration: 0.75 });
+          }
+          setTimeout(() => {
+            isInternalDragRef.current = false;
+          }, 100);
+          setGpsStatusMessage({
+            text: `Centered on current device GPS (${nextLat.toFixed(6)}° N, ${nextLon.toFixed(6)}° E)`,
+            type: 'info'
+          });
+          setTimeout(() => {
+            setGpsStatusMessage(null);
+          }, 4000);
+        },
+        () => {
+          setIsLocatingGps(false);
+          applyFallbackCabuyaoHq();
+        },
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+      );
+    } catch {
+      setIsLocatingGps(false);
+      applyFallbackCabuyaoHq();
+    }
   };
 
   return (
@@ -343,16 +344,13 @@ export const InteractiveLeafletPinMap: React.FC<InteractiveLeafletPinMapProps> =
         </button>
       </div>
 
-      {/* Inline GPS Feedback / Fallback Toast */}
+      {/* Clean Neutral Status Pill */}
       {gpsStatusMessage && (
         <div
-          className={`absolute bottom-3 left-3 right-14 z-[1000] pointer-events-none px-3 py-2 rounded-xl border text-[11px] font-mono shadow-xl backdrop-blur-md ${
-            gpsStatusMessage.type === 'warning'
-              ? 'bg-amber-950/95 border-amber-500/50 text-amber-200'
-              : 'bg-emerald-950/95 border-emerald-500/50 text-emerald-200'
-          }`}
+          className="absolute bottom-3 left-3 right-14 z-[1000] pointer-events-none px-3 py-1.5 rounded-full border border-slate-700/90 bg-slate-900/95 text-slate-200 text-[11px] font-mono shadow-xl backdrop-blur-md flex items-center gap-2 w-fit max-w-[calc(100%-5rem)]"
         >
-          {gpsStatusMessage.text}
+          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0" />
+          <span className="truncate">{gpsStatusMessage.text}</span>
         </div>
       )}
     </div>
