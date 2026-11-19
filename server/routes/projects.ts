@@ -7,7 +7,7 @@ import { Router, Request, Response } from 'express';
 import { prisma, pool } from '../db';
 import { broadcastChange, invalidateAllDataCache } from '../events';
 import { resolveProjectCoordinates, resolveLocalGeocoding } from '../services/geocoding';
-import { requireAuth, requireRole, checkUserProjectAccess } from '../middleware/auth';
+import { requireAuth, requireRole, checkUserProjectAccess, hasProjectManagementAccess } from '../middleware/auth';
 
 export const projectsRouter = Router();
 
@@ -369,10 +369,10 @@ projectsRouter.post('/projects', requireRole(['ADMIN', 'ENGINEER']), async (req:
 });
 
 // PATCH /api/projects/:id — Restricted to ADMIN and ENGINEER
-projectsRouter.patch('/projects/:id', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
+projectsRouter.patch('/projects/:id', requireRole(['ADMIN', 'OPERATIONS_MANAGER', 'PROJECT_MANAGER', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    if (!checkUserProjectAccess(req.user, id)) {
+    if (!hasProjectManagementAccess(req.user) && !checkUserProjectAccess(req.user, id)) {
       return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
     }
     const {
@@ -555,10 +555,10 @@ projectsRouter.patch('/projects/:id', requireRole(['ADMIN', 'ENGINEER']), async 
 });
 
 // PUT /api/projects/:id/workers — Add or remove a worker from a project (ADMIN and ENGINEER)
-projectsRouter.put('/projects/:id/workers', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
+projectsRouter.put('/projects/:id/workers', requireRole(['ADMIN', 'OPERATIONS_MANAGER', 'PROJECT_MANAGER', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id: projectId } = req.params;
-    if (!checkUserProjectAccess(req.user, projectId)) {
+    if (!hasProjectManagementAccess(req.user) && !checkUserProjectAccess(req.user, projectId)) {
       return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
     }
     const { workerId, action } = req.body;
@@ -641,10 +641,10 @@ projectsRouter.put('/projects/:id/workers', requireRole(['ADMIN', 'ENGINEER']), 
 });
 
 // PATCH /api/projects/:id/weather-suspension (ADMIN and ENGINEER)
-projectsRouter.patch('/projects/:id/weather-suspension', requireRole(['ADMIN', 'ENGINEER']), async (req: Request, res: Response) => {
+projectsRouter.patch('/projects/:id/weather-suspension', requireRole(['ADMIN', 'OPERATIONS_MANAGER', 'PROJECT_MANAGER', 'ENGINEER']), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    if (!checkUserProjectAccess(req.user, id)) {
+    if (!hasProjectManagementAccess(req.user) && !checkUserProjectAccess(req.user, id)) {
       return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
     }
     const { suspended, reason } = req.body;

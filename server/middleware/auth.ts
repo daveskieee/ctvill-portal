@@ -32,13 +32,24 @@ declare global {
  */
 export function normalizeAppRole(rawRole: string | undefined | null): AllowedAppRole | null {
   if (!rawRole || typeof rawRole !== 'string') return null;
-  const upper = rawRole.toUpperCase().trim();
-  if (upper === 'ADMIN' || upper === 'OM' || upper === 'OPERATIONS' || upper === 'OPERATIONS_MANAGER' || upper === 'OPERATIONS DIRECTOR' || upper === 'OPERATIONS_DIRECTOR') return 'ADMIN';
-  if (upper === 'FINANCE') return 'FINANCE';
-  if (upper === 'ENGINEER' || upper === 'PROJECT_MANAGER' || upper === 'PM') return 'ENGINEER';
-  if (upper === 'TIMEKEEPER') return 'TIMEKEEPER';
+  const upper = rawRole.toUpperCase().trim().replace(/\s+/g, '_');
+  if (upper === 'ADMIN' || upper === 'OM' || upper === 'OPERATIONS' || upper === 'OPERATIONS_MANAGER' || upper === 'OPERATIONS_DIRECTOR') return 'ADMIN';
+  if (upper === 'FINANCE' || upper === 'FINANCE_OFFICER') return 'FINANCE';
+  if (upper === 'ENGINEER' || upper === 'SITE_ENGINEER' || upper === 'PROJECT_MANAGER' || upper === 'PM') return 'ENGINEER';
+  if (upper === 'TIMEKEEPER' || upper === 'SITE_TIMEKEEPER') return 'TIMEKEEPER';
   if (upper === 'CLIENT') return 'CLIENT';
   return null;
+}
+
+/**
+ * Returns true if the authenticated user holds an executive or project management role
+ * (ADMIN, OPERATIONS_MANAGER, PROJECT_MANAGER, ENGINEER) authorized to view and manage
+ * project schedules, Gantt charts, and project profiles across the portfolio.
+ */
+export function hasProjectManagementAccess(user: AuthenticatedUser | undefined): boolean {
+  if (!user) return false;
+  const norm = normalizeAppRole(user.role);
+  return norm === 'ADMIN' || norm === 'ENGINEER';
 }
 
 /**

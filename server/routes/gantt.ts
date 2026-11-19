@@ -6,7 +6,7 @@
 import { Router, Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { broadcastChange, invalidateAllDataCache } from '../events';
-import { requireAuth, requireRole, checkUserProjectAccess } from '../middleware/auth';
+import { requireAuth, requireRole, checkUserProjectAccess, hasProjectManagementAccess } from '../middleware/auth';
 
 export function createGanttRouter(prisma: PrismaClient) {
   const router = Router();
@@ -50,7 +50,7 @@ export function createGanttRouter(prisma: PrismaClient) {
         return res.json({ data: [], links: [] });
       }
 
-      if (!checkUserProjectAccess(req.user, projectId)) {
+      if (!hasProjectManagementAccess(req.user) && !checkUserProjectAccess(req.user, projectId)) {
         return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
       }
 
@@ -119,7 +119,7 @@ export function createGanttRouter(prisma: PrismaClient) {
    * 1. Granular events: { action: 'create' | 'update' | 'delete', entityType: 'task' | 'link', data: any }
    * 2. Batch payload: { tasks: [...], links: [...], deletedTaskIds: [...], deletedLinkIds: [...] }
    */
-  router.post('/:projectId/gantt/sync', requireRole(['ADMIN', 'ENGINEER', 'PROJECT_MANAGER']), async (req: Request, res: Response) => {
+  router.post('/:projectId/gantt/sync', requireRole(['ADMIN', 'OPERATIONS_MANAGER', 'PROJECT_MANAGER', 'ENGINEER']), async (req: Request, res: Response) => {
     try {
       const { projectId } = req.params;
       const { action, entityType, data, tasks = [], links = [], deletedTaskIds = [], deletedLinkIds = [] } = req.body;
@@ -128,7 +128,7 @@ export function createGanttRouter(prisma: PrismaClient) {
         return res.status(400).json({ error: 'Project ID is required' });
       }
 
-      if (!checkUserProjectAccess(req.user, projectId)) {
+      if (!hasProjectManagementAccess(req.user) && !checkUserProjectAccess(req.user, projectId)) {
         return res.status(403).json({ error: 'Forbidden: You do not have access to this project.' });
       }
 

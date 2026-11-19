@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { ProjectProfile, Contractor, DailySiteLog } from '../types';
 import { useTheme } from '../context/ThemeContext';
+import { getCsrfToken } from '../utils/apiClient';
+import { getStoredSession } from '../utils/session';
 import {
   STANDARD_CONSTRUCTION_PHASES as SHARED_STANDARD_CONSTRUCTION_PHASES,
   computeUnifiedProjectProgress,
@@ -1214,6 +1216,23 @@ export default function GanttTimeline({
     }
   }, []);
 
+  const buildGanttAuthHeaders = useCallback((includeJson = false): Record<string, string> => {
+    const headers: Record<string, string> = {};
+    if (includeJson) {
+      headers['Content-Type'] = 'application/json';
+    }
+    const csrf = getCsrfToken();
+    if (csrf) {
+      headers['x-csrf-token'] = csrf;
+    }
+    const stored = getStoredSession() as any;
+    const bearer = stored?.sessionToken || stored?.token;
+    if (typeof bearer === 'string' && bearer.trim().length >= 16) {
+      headers['Authorization'] = `Bearer ${bearer.trim()}`;
+    }
+    return headers;
+  }, []);
+
   const loadGanttData = useCallback(async (projectId: string) => {
     if (!projectId) {
       setTasks([]);
@@ -1222,7 +1241,10 @@ export default function GanttTimeline({
     }
     setIsLoading(true);
     try {
-      const res = await fetch(`/api/projects/${projectId}/gantt`);
+      const res = await fetch(`/api/projects/${projectId}/gantt`, {
+        credentials: 'include',
+        headers: buildGanttAuthHeaders(false),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
 
@@ -1279,7 +1301,8 @@ export default function GanttTimeline({
           try {
             const migrateRes = await fetch(`/api/projects/${projectId}/gantt/sync`, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              headers: buildGanttAuthHeaders(true),
               body: JSON.stringify({
                 tasks: seedTasks.map((t, idx) => ({
                   ...t,
@@ -1364,7 +1387,8 @@ export default function GanttTimeline({
       const resolvedPhase = task.constructionPhase || resolveTaskConstructionPhase(task);
       const res = await fetch(`/api/projects/${selectedProjectId}/gantt/sync`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        headers: buildGanttAuthHeaders(true),
         body: JSON.stringify({
           action,
           entityType: 'task',

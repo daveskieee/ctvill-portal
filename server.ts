@@ -11,10 +11,10 @@ import { fileURLToPath } from 'url';
 import { prisma, initializeDatabaseTables } from './server/db';
 import { cleanupExpiredSessions, validateProductionSecurityConfig } from './server/services/sessionService';
 import { cookieParserMiddleware } from './server/middleware/cookies';
-import { 
-  corsMiddleware, 
-  securityHeadersMiddleware, 
-  preventSensitiveFileExposure 
+import {
+  corsMiddleware,
+  securityHeadersMiddleware,
+  preventSensitiveFileExposure
 } from './server/middleware/security';
 import { ensureCsrfCookieMiddleware, verifyCsrfMiddleware } from './server/middleware/csrf';
 import { authenticateRequest } from './server/middleware/auth';
@@ -45,10 +45,10 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-// Configure explicit trusted proxy resolution to prevent X-Forwarded-For spoofing
-const trustProxySetting = process.env.TRUST_PROXY 
-  ? (process.env.TRUST_PROXY === 'true' ? true : process.env.TRUST_PROXY === 'false' ? false : process.env.TRUST_PROXY)
-  : (process.env.NODE_ENV === 'production' ? 'loopback' : false);
+// Trust Render / cloud HTTPS reverse proxy (1 hop) so Express properly reads/sets Secure cookies
+const trustProxySetting = process.env.TRUST_PROXY
+  ? (process.env.TRUST_PROXY === 'true' ? 1 : process.env.TRUST_PROXY === 'false' ? false : Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY)
+  : 1;
 app.set('trust proxy', trustProxySetting);
 
 // 1. Security Headers (OWASP recommendations)
@@ -95,7 +95,7 @@ initializeDatabaseTables().catch(err => {
 
 // Periodic session cleanup (every 1 hour)
 const sessionCleanupTimer = setInterval(() => {
-  cleanupExpiredSessions().catch(() => {});
+  cleanupExpiredSessions().catch(() => { });
 }, 60 * 60 * 1000);
 sessionCleanupTimer.unref();
 
@@ -159,7 +159,7 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
 });
 
 const isDirectExecution = process.argv[1] && (
-  process.argv[1].endsWith('server.ts') || 
+  process.argv[1].endsWith('server.ts') ||
   process.argv[1].endsWith('server.js')
 );
 
