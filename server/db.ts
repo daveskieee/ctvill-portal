@@ -16,10 +16,16 @@ const isCloudDb = connectionString.includes('sslmode=') || connectionString.incl
 
 export const pool = new Pool({
   connectionString,
-  max: 50,
+  max: 20,
   idleTimeoutMillis: 10000,
-  connectionTimeoutMillis: 5000,
+  connectionTimeoutMillis: 15000,
+  keepAlive: true,
   ...(isCloudDb ? { ssl: { rejectUnauthorized: false } } : {})
+});
+
+// Prevent unhandled 'error' events when Neon/cloud PostgreSQL closes idle pooled sockets
+pool.on('error', (err) => {
+  console.warn('[DB Pool] Idle PostgreSQL client disconnected (will reconnect on next query):', err?.message || err);
 });
 
 export const adapter = new PrismaPg(pool);
