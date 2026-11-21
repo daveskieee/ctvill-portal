@@ -577,9 +577,10 @@ financeRouter.post('/payroll/disburse', requireRole(['FINANCE', 'ADMIN']), async
 // POST /api/payments/record
 financeRouter.post('/payments/record', requireRole(['FINANCE', 'ADMIN']), async (req: Request, res: Response) => {
   try {
-    const { clientId, amount, paymentMethod, reference } = req.body;
-    if (!clientId || !amount) {
-      return res.status(400).json({ error: 'Missing clientId or amount' });
+    const { clientId, amount, paymentMethod, reference, depositSlipUrl } = req.body;
+    const exactAmount = Math.round(Number(amount) * 100) / 100;
+    if (!clientId || !exactAmount || exactAmount <= 0) {
+      return res.status(400).json({ error: 'Missing clientId or valid positive amount' });
     }
 
     let clientUser = await prisma.user.findUnique({
@@ -616,8 +617,8 @@ financeRouter.post('/payments/record', requireRole(['FINANCE', 'ADMIN']), async 
       targetProject = targetProjectRes.rows?.[0] || null;
       if (targetProject) {
         await pool.query(
-          'UPDATE commercial_projects SET funds_collected = COALESCE(funds_collected, 0) + $1 WHERE id = $2',
-          [Number(amount), targetProject.id]
+          'UPDATE commercial_projects SET funds_collected = ROUND((COALESCE(funds_collected, 0) + $1)::numeric, 2) WHERE id = $2',
+          [exactAmount, targetProject.id]
         );
         broadcastChange('projects');
       }
@@ -658,7 +659,7 @@ financeRouter.post('/payments/record', requireRole(['FINANCE', 'ADMIN']), async 
       return res.status(404).json({ error: 'Client user not found' });
     }
 
-    const paymentAmount = Number(amount);
+    const paymentAmount = exactAmount;
     let packageId = clientUser.clientPackage?.id;
     if (!packageId) {
       const newPkg = await prisma.clientPackage.create({

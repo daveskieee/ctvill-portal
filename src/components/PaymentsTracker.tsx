@@ -7,11 +7,12 @@ import React, { useState, useMemo, useEffect } from 'react';
 import {
   DollarSign, CheckCircle2, Clock, AlertTriangle, Filter,
   Search, Plus, ArrowUpRight, ShieldAlert, CreditCard, Building2,
-  Receipt, Calendar, X, Check, FileText, Printer, Trash2, Edit3
+  Receipt, Calendar, X, Check, FileText, Printer, Trash2, Edit3, Upload, ExternalLink, Camera, Loader2
 } from 'lucide-react';
 import { Client, ProjectProfile } from '../types';
 import { useTheme } from '../context/ThemeContext';
 import { openEnterprisePrintWindow, escapePrintHtml } from '../utils/printEngine';
+import { uploadFileToServer } from '../utils/imageCompression';
 
 export interface InstallmentRowItem {
   id: string;
@@ -24,6 +25,7 @@ export interface InstallmentRowItem {
   paidDate?: string;
   paymentMethod?: string;
   reference?: string;
+  depositSlipUrl?: string;
   isOverdue: boolean;
 }
 
@@ -110,6 +112,9 @@ export default function PaymentsTracker({
   const [recordRef, setRecordRef] = useState<string>('');
   const [recordNotes, setRecordNotes] = useState<string>('Progress billing installment');
   const [depositSlipAttached, setDepositSlipAttached] = useState<boolean>(false);
+  const [depositSlipUrl, setDepositSlipUrl] = useState<string>('');
+  const [depositSlipName, setDepositSlipName] = useState<string>('');
+  const [isUploadingSlip, setIsUploadingSlip] = useState<boolean>(false);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
 
@@ -370,12 +375,36 @@ export default function PaymentsTracker({
     }
   };
 
+  const handleDepositSlipUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsUploadingSlip(true);
+    setFeedbackMsg(null);
+    try {
+      const uploaded = await uploadFileToServer(file, true);
+      if (uploaded?.url) {
+        setDepositSlipUrl(uploaded.url);
+        setDepositSlipName(uploaded.originalName || file.name);
+        setDepositSlipAttached(true);
+      }
+    } catch (err: any) {
+      // Fallback object URL preview if upload endpoint is temporarily unreachable
+      setDepositSlipUrl(URL.createObjectURL(file));
+      setDepositSlipName(file.name);
+      setDepositSlipAttached(true);
+      console.warn('Deposit slip disk upload fallback:', err?.message || err);
+    } finally {
+      setIsUploadingSlip(false);
+    }
+  };
+
   const handleRecordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!recordClientId || !recordAmount) return;
+    const exactAmount = Math.round(Number(recordAmount) * 100) / 100;
+    if (!recordClientId || !exactAmount || exactAmount <= 0) return;
 
     if (!depositSlipAttached) {
-      setFeedbackMsg('Error: Verification required. Please confirm Deposit Slip / Wire Confirmation is attached.');
+      setFeedbackMsg('Error: Verification required. Please attach or confirm Deposit Slip / Wire Confirmation.');
       return;
     }
 
@@ -386,10 +415,10 @@ export default function PaymentsTracker({
       if (onRecordPayment) {
         await onRecordPayment({
           clientId: recordClientId,
-          amount: Number(recordAmount),
+          amount: exactAmount,
           paymentMethod: recordMethod,
           reference: recordRef,
-          notes: recordNotes
+          notes: depositSlipUrl ? `${recordNotes ? recordNotes + ' | ' : ''}Slip: ${depositSlipUrl}` : recordNotes
         });
       } else {
         await fetch('/api/payments/record', {
@@ -397,10 +426,11 @@ export default function PaymentsTracker({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             clientId: recordClientId,
-            amount: Number(recordAmount),
+            amount: exactAmount,
             paymentMethod: recordMethod,
             reference: recordRef,
             notes: recordNotes,
+            depositSlipUrl: depositSlipUrl || undefined,
             status: 'Pending Bank Reconciliation'
           })
         });
@@ -414,21 +444,25 @@ export default function PaymentsTracker({
             found = true;
             return {
               ...item,
+              amount: exactAmount,
               status: 'Pending Bank Reconciliation' as const,
               isOverdue: false,
               paidDate: new Date().toISOString().split('T')[0],
-              reference: recordRef || 'VERIFIED-SETTLED'
+              reference: recordRef || 'VERIFIED-SETTLED',
+              depositSlipUrl: depositSlipUrl || undefined
             };
           }
           return item;
         });
       });
 
-      setFeedbackMsg('Payment successfully recorded! Initial status set to Pending Bank Reconciliation.');
+      setFeedbackMsg(`Payment of ₱${exactAmount.toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} recorded!`);
       setTimeout(() => {
         setShowRecordModal(false);
         setFeedbackMsg(null);
         setDepositSlipAttached(false);
+        setDepositSlipUrl('');
+        setDepositSlipName('');
       }, 1200);
     } catch (err: any) {
       setFeedbackMsg(`Error: ${err.message || 'Payment recording failed'}`);
@@ -1029,7 +1063,8 @@ export default function PaymentsTracker({
                   <input
                     type="number"
                     required
-                    min={1}
+                    min="0.01"
+                    step="0.01"
                     value={invoiceAmount}
                     onChange={(e) => setInvoiceAmount(Number(e.target.value))}
                     className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs font-mono focus:border-emerald-500 focus:outline-none"
@@ -1147,11 +1182,13 @@ export default function PaymentsTracker({
               </div>
 
               <div>
-                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Payment Amount (₱)</label>
+                <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Payment Amount (₱ — Centavos Supported)</label>
                 <input
                   type="number"
                   required
-                  min={1}
+                  min="0.01"
+                  step="0.01"
+                  placeholder="e.g. 6043443.10"
                   value={recordAmount}
                   onChange={(e) => setRecordAmount(Number(e.target.value))}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-sm font-mono focus:border-emerald-500 focus:outline-none"
@@ -1191,6 +1228,61 @@ export default function PaymentsTracker({
                   onChange={(e) => setRecordNotes(e.target.value)}
                   className="w-full bg-slate-950 border border-slate-700 text-white rounded-xl px-3 py-2 text-xs focus:border-emerald-500 focus:outline-none"
                 />
+              </div>
+
+              {/* Upload Deposit Slip / Take Photo (saves to server/uploads/) */}
+              <div className="p-3 bg-slate-950/80 border border-slate-800 rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-mono uppercase text-slate-400 font-bold flex items-center gap-1.5">
+                    <Camera className="w-3.5 h-3.5 text-emerald-400" />
+                    Upload Deposit Slip / Take Photo
+                  </span>
+                  {isUploadingSlip && (
+                    <span className="text-[10px] font-mono text-amber-400 flex items-center gap-1">
+                      <Loader2 className="w-3 h-3 animate-spin" /> Uploading...
+                    </span>
+                  )}
+                </div>
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  capture="environment"
+                  onChange={handleDepositSlipUpload}
+                  className="w-full text-xs text-slate-400 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-emerald-500/15 file:text-emerald-300 hover:file:bg-emerald-500/25 cursor-pointer"
+                />
+                {depositSlipUrl && (
+                  <div className="flex items-center justify-between gap-2 p-2 rounded-lg bg-slate-900 border border-emerald-500/30">
+                    <a
+                      href={depositSlipUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center gap-2 min-w-0 text-xs text-emerald-300 hover:text-emerald-200 underline"
+                    >
+                      {/\.(jpe?g|png|webp|gif)$/i.test(depositSlipName || depositSlipUrl) ? (
+                        <img
+                          src={depositSlipUrl}
+                          alt="Deposit slip proof"
+                          className="w-10 h-10 rounded object-cover border border-slate-700 shrink-0"
+                        />
+                      ) : (
+                        <FileText className="w-4 h-4 shrink-0 text-emerald-400" />
+                      )}
+                      <span className="truncate font-mono text-[11px]">{depositSlipName || 'View Uploaded Deposit Slip'}</span>
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDepositSlipUrl('');
+                        setDepositSlipName('');
+                      }}
+                      className="p-1 text-slate-400 hover:text-rose-400 cursor-pointer"
+                      title="Remove attachment"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* Required Deposit Slip / Wire Confirmation Checkbox */}

@@ -1345,7 +1345,7 @@ export default function ProjectProfileHub({
       budget: Number(formBudget) || 0,
       fundsCollected: 0,
       progressPercentage: 0,
-      status: (formStatus || 'PLANNING') as ProjectProfile['status'],
+      status: 'PLANNING',
       targetHandoverDate: formEndDate,
       startDate: formStartDate,
       assignedWorkersCount: formAssignedWorkerIds.length || Number(formWorkers) || 0,
@@ -2183,6 +2183,18 @@ export default function ProjectProfileHub({
                       <Edit3 className="w-3.5 h-3.5" /> Edit
                     </button>
                   )}
+                  {onUpdateProject && selectedProject.status !== 'COMPLETED' && (
+                    <button
+                      onClick={async () => {
+                        if (!window.confirm(`Mark "${selectedProject.name}" as COMPLETED and archive it to Project History?`)) return;
+                        await onUpdateProject(selectedProject.id, { status: 'COMPLETED', progressPercentage: 100 });
+                        setSelectedProject(prev => prev ? { ...prev, status: 'COMPLETED', progressPercentage: 100 } : null);
+                      }}
+                      className="flex items-center gap-1 px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30 text-xs font-semibold transition cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" /> Mark as Completed
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -2978,22 +2990,6 @@ export default function ProjectProfileHub({
                       />
                       <span className="text-[11px] text-slate-500 mt-1 block">
                         Physical progress and WBS milestones are automatically computed and synced from the 14-phase Master CPM Gantt &amp; BOM.
-                      </span>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-mono text-slate-400 uppercase mb-1">Initial Project Status</label>
-                      <select
-                        value={formStatus || 'PLANNING'}
-                        onChange={(e) => setFormStatus(e.target.value as any)}
-                        className="w-full bg-slate-950 border border-slate-700 text-white rounded-lg px-3 py-2.5 text-xs sm:text-sm focus:border-amber-500 focus:outline-none"
-                      >
-                        <option value="PLANNING">Planning Phase</option>
-                        <option value="IN_PROGRESS">In Progress</option>
-                        <option value="PUNCHLIST_QA">Punchlist &amp; QA</option>
-                      </select>
-                      <span className="text-[11px] text-slate-500 mt-1 block">
-                        New projects start in an active pre-handover stage (Completed status is disabled at creation).
                       </span>
                     </div>
 

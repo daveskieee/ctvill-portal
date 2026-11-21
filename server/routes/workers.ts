@@ -214,42 +214,66 @@ workersRouter.post('/', requireRole(['ADMIN']), async (req: Request, res: Respon
       ? Number(hourlyOtRate || hourly_ot_rate)
       : computeDefaultHourlyOtRate(rate);
 
-    const workerId = `CONT-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
     const primaryProjId = assignedProjectId || assigned_project_id || (Array.isArray(projectIds) && projectIds.length > 0 ? projectIds[0] : null);
-
-    await pool.query(`
-      INSERT INTO workers (id, name, first_name, last_name, trade, position, daily_rate, hourly_ot_rate, assigned_project_id, status, created_at, updated_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-    `, [workerId, trimmedName, fName, lName, pos, pos, rate, otRate, primaryProjId, status || 'Active']);
-
-    // Sync to contractors table
     const projMatch = primaryProjId ? await pool.query('SELECT name FROM commercial_projects WHERE id = $1', [primaryProjId]) : null;
     const projSiteName = projMatch?.rows[0]?.name || null;
-    await prisma.contractor.create({
-      data: {
-        id: workerId,
-        name: trimmedName,
-        company: 'CTVill Builders Corporation',
-        specialty: pos,
-        roleTitle: pos,
-        dailyRate: rate,
-        activeProjectSite: projSiteName,
-        status: (status || 'Active').toUpperCase(),
-      }
-    }).catch(e => console.error('Error syncing to contractors table:', e));
-
-    // Assign to initial projects if provided
     const targetProjectIds = Array.from(new Set([
       ...(primaryProjId ? [primaryProjId] : []),
       ...(Array.isArray(projectIds) ? projectIds : [])
     ]));
 
-    for (const pId of targetProjectIds) {
+    // Support comma-separated bulk worker registration (creates separate individual records in PostgreSQL)
+    const individualNames = trimmedName.includes(',') || trimmedName.includes('\n')
+      ? trimmedName.split(/[,\n]+/).map((s: string) => s.trim()).filter(Boolean)
+      : [trimmedName];
+
+    const createdWorkers: any[] = [];
+    for (let i = 0; i < individualNames.length; i++) {
+      const fullName = individualNames[i];
+      const nameParts = fullName.split(/\s+/);
+      const indFirst = individualNames.length === 1 && fName ? fName : (nameParts[0] || fullName);
+      const indLast = individualNames.length === 1 && lName ? lName : (nameParts.slice(1).join(' ') || indFirst);
+      const workerId = `CONT-${Date.now().toString(36).toUpperCase()}-${i + 1}-${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+
       await pool.query(`
-        INSERT INTO project_worker_assignments (id, project_id, worker_id, assigned_at, status)
-        VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 'ACTIVE')
-        ON CONFLICT (project_id, worker_id) DO UPDATE SET status = 'ACTIVE'
-      `, [`PWA-${workerId.slice(-4)}-${pId.slice(-4)}`, pId, workerId]);
+        INSERT INTO workers (id, name, first_name, last_name, trade, position, daily_rate, hourly_ot_rate, assigned_project_id, status, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+      `, [workerId, fullName, indFirst, indLast, pos, pos, rate, otRate, primaryProjId, status || 'Active']);
+
+      await prisma.contractor.create({
+        data: {
+          id: workerId,
+          name: fullName,
+          company: 'LDM Construction Corporation',
+          specialty: pos,
+          roleTitle: pos,
+          dailyRate: rate,
+          activeManpower: primaryProjId ? 1 : 0,
+          activeProjectSite: projSiteName,
+          status: (status || 'Active').toUpperCase(),
+        }
+      }).catch(e => console.error('Error syncing to contractors table:', e));
+
+      for (const pId of targetProjectIds) {
+        await pool.query(`
+          INSERT INTO project_worker_assignments (id, project_id, worker_id, assigned_at, status)
+          VALUES ($1, $2, $3, CURRENT_TIMESTAMP, 'ACTIVE')
+          ON CONFLICT (project_id, worker_id) DO UPDATE SET status = 'ACTIVE'
+        `, [`PWA-${workerId.slice(-5)}-${pId.slice(-4)}`, pId, workerId]);
+      }
+
+      createdWorkers.push({
+        id: workerId,
+        firstName: indFirst,
+        lastName: indLast,
+        name: fullName,
+        dailyRate: rate,
+        hourlyOtRate: otRate,
+        position: pos,
+        trade: pos,
+        assignedProjectId: primaryProjId,
+        status: status || 'Active'
+      });
     }
 
     broadcastChange('workers');
@@ -257,18 +281,9 @@ workersRouter.post('/', requireRole(['ADMIN']), async (req: Request, res: Respon
 
     res.status(201).json({
       success: true,
-      worker: {
-        id: workerId,
-        firstName: fName,
-        lastName: lName,
-        name: trimmedName,
-        dailyRate: rate,
-        hourlyOtRate: otRate,
-        position: pos,
-        trade: pos,
-        assignedProjectId: primaryProjId,
-        status: status || 'Active'
-      }
+      count: createdWorkers.length,
+      worker: createdWorkers[0],
+      workers: createdWorkers
     });
   } catch (error) {
     console.error('Error creating worker:', error);

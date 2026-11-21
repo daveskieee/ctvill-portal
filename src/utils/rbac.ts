@@ -60,6 +60,7 @@ export const hasRoleOrHigher = (userRole: UserRole | string, targetRole: UserRol
 export type AppModuleId =
   | 'dashboard'              // Executive Command Center & Portfolio
   | 'projects'               // Commercial Sites Hub
+  | 'project-history'        // Completed Project History Archive
   | 'gantt'                  // Master Gantt & Timeline
   | 'site-diary'             // Daily Site Diary & Weather
   | 'documents'              // Detailed Engineering & CAD
@@ -103,6 +104,10 @@ export function canAccessModule(roleInput: UserRole | string, moduleId: string):
     // 3. Commercial Sites / Projects Hub (OM, PM, Client)
     case 'projects':
       return role === UserRole.OM || role === UserRole.PM || role === UserRole.CLIENT;
+
+    // 3b. Completed Project History Archive (OM, PM, Finance)
+    case 'project-history':
+      return role === UserRole.OM || role === UserRole.PM || role === UserRole.FINANCE;
 
     // 4. Progress & Activity Reports (OM: Read-Only, PM: Submit & Full Edit)
     case 'kanban':

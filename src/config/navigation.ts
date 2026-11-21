@@ -8,7 +8,7 @@ import {
   CloudSun, FileSpreadsheet, FileText, ShieldAlert,
   Users, ClipboardCheck, Banknote, Receipt, DollarSign,
   Briefcase, FileCode, FileCheck, History, UserCog, Settings2,
-  ShieldCheck, HardHat, FolderKanban, LucideIcon
+  ShieldCheck, HardHat, FolderKanban, Archive, LucideIcon
 } from 'lucide-react';
 import { UserRole } from '../utils/rbac';
 
@@ -38,6 +38,7 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       items: [
         { id: 'dashboard', label: 'Executive Portfolio', icon: TrendingUp },
         { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
+        { id: 'project-history', label: 'Project History Archive', icon: Archive },
         { id: 'kanban', label: 'Progress & Activity Reports', icon: CheckSquare },
         { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
       ]
@@ -85,6 +86,7 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       title: 'Projects & Planning',
       items: [
         { id: 'projects', label: 'Commercial Sites Hub', icon: Building2 },
+        { id: 'project-history', label: 'Project History Archive', icon: Archive },
         { id: 'gantt', label: 'Master Gantt & Timeline', icon: BarChart3 },
         { id: 'kanban', label: 'Progress & Activity Reports', icon: CheckSquare },
         { id: 'schedule', label: 'Company Schedule Calendar', icon: CalendarDays },
@@ -149,6 +151,7 @@ export const ROLE_NAVIGATION_CONFIG: Record<UserRole, NavSectionConfig[]> = {
       id: 'fin-audit',
       title: 'Audit & Compliance',
       items: [
+        { id: 'project-history', label: 'Project History Archive', icon: Archive },
         { id: 'audit-trail', label: 'Audit Trail & Logs', icon: History },
       ]
     },

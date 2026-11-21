@@ -249,6 +249,8 @@ export default function RfiManager({
   const [ledgerCategoryFilter, setLedgerCategoryFilter] = useState<string>('ALL');
   const [ledgerWeekFilter, setLedgerWeekFilter] = useState<string>('ALL');
   const [ledgerSearch, setLedgerSearch] = useState<string>('');
+  const [selectedProjectFilter, setSelectedProjectFilter] = useState<string>('ALL');
+  const [draftLedgerEdits, setDraftLedgerEdits] = useState<Record<string, { received: string; used: string }>>({});
 
   // Add Item to Directory Modal State
   const [showAddDirectoryModal, setShowAddDirectoryModal] = useState<boolean>(false);
@@ -396,11 +398,10 @@ export default function RfiManager({
   };
 
   const handleDecision = async (reqId: string, decision: 'APPROVED' | 'DENIED') => {
-    let approvedTarget: MaterialPurchaseRequest | undefined;
+    const approvedTarget = requests.find(r => r.id === reqId);
     setRequests(prev =>
       prev.map(r => {
         if (r.id === reqId) {
-          approvedTarget = r;
           return {
             ...r,
             approvalStatus: decision,
@@ -414,21 +415,21 @@ export default function RfiManager({
 
     // If APPROVED, automatically sync into the Material Directory ledger!
     if (decision === 'APPROVED' && approvedTarget) {
-      const uCost = (approvedTarget as MaterialPurchaseRequest).unitCostPhp || Math.round((approvedTarget as MaterialPurchaseRequest).estimatedCostPhp / ((approvedTarget as MaterialPurchaseRequest).quantity || 1)) || 270;
+      const uCost = approvedTarget.unitCostPhp || Math.round(approvedTarget.estimatedCostPhp / (approvedTarget.quantity || 1)) || 270;
       const newLedgerItem: MaterialLedgerItem = {
         id: `MAT-DIR-${Date.now().toString().slice(-4)}`,
-        projectName: (approvedTarget as MaterialPurchaseRequest).projectName,
+        projectName: approvedTarget.projectName,
         week: 'Week 1',
         date: new Date().toISOString().split('T')[0],
-        materialDescription: (approvedTarget as MaterialPurchaseRequest).materialType,
-        category: guessMaterialCategory((approvedTarget as MaterialPurchaseRequest).materialType, (approvedTarget as MaterialPurchaseRequest).purposePhase),
-        ordered: (approvedTarget as MaterialPurchaseRequest).quantity,
-        unit: (approvedTarget as MaterialPurchaseRequest).unit,
+        materialDescription: approvedTarget.materialType,
+        category: guessMaterialCategory(approvedTarget.materialType, approvedTarget.purposePhase),
+        ordered: approvedTarget.quantity,
+        unit: approvedTarget.unit,
         received: 0,
         used: 0,
-        supplier: (approvedTarget as MaterialPurchaseRequest).supplierName || 'Approved Supplier',
+        supplier: approvedTarget.supplierName || 'Approved Supplier',
         unitCostPhp: uCost,
-        notes: `PO from requisition ${(approvedTarget as MaterialPurchaseRequest).id} (${(approvedTarget as MaterialPurchaseRequest).purposePhase})`
+        notes: `PO from requisition ${approvedTarget.id} (${approvedTarget.purposePhase})`
       };
       setMaterialLedger(prev => {
         const next = [newLedgerItem, ...prev];
@@ -707,9 +708,42 @@ export default function RfiManager({
     setReceivingModalItem(null);
   };
 
+  const handleCommitLedgerRowEdit = (id: string) => {
+    const draft = draftLedgerEdits[id];
+    if (!draft) return;
+    const targetItem = materialLedger.find(m => m.id === id);
+    if (!targetItem) return;
+    const nextReceived = Math.max(0, Number(draft.received) || 0);
+    const nextUsed = Math.max(0, Number(draft.used) || 0);
+    setMaterialLedger(prev => {
+      const next = prev.map(item =>
+        item.id === id ? { ...item, received: nextReceived, used: nextUsed } : item
+      );
+      persistMaterialLedger(next);
+      return next;
+    });
+    setDraftLedgerEdits(prev => {
+      const copy = { ...prev };
+      delete copy[id];
+      return copy;
+    });
+    showToast(`Saved "${targetItem.materialDescription}" (Received: ${nextReceived}, Used: ${nextUsed}).`);
+  };
+
   const pendingApprovals = requests.filter(r => r.approvalStatus === 'PENDING');
   const approvedDeliveries = requests.filter(r => r.approvalStatus === 'APPROVED');
+  const availableProjectNames = Array.from(
+    new Set([
+      ...projects.map(p => p.name),
+      ...requests.map(r => r.projectName),
+      ...materialLedger.map(m => m.projectName),
+    ].filter(Boolean))
+  );
+
   const filteredRequests = requests.filter(r => {
+    if (selectedProjectFilter !== 'ALL' && r.projectName.toLowerCase() !== selectedProjectFilter.toLowerCase()) {
+      return false;
+    }
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
@@ -721,6 +755,9 @@ export default function RfiManager({
   });
 
   const filteredLedger = materialLedger.filter(item => {
+    if (selectedProjectFilter !== 'ALL' && item.projectName.toLowerCase() !== selectedProjectFilter.toLowerCase()) {
+      return false;
+    }
     if (ledgerCategoryFilter !== 'ALL' && item.category !== ledgerCategoryFilter) return false;
     if (ledgerWeekFilter !== 'ALL' && item.week !== ledgerWeekFilter) return false;
     if (ledgerSearch.trim()) {
@@ -1299,25 +1336,40 @@ export default function RfiManager({
         <div className="space-y-4">
           {/* Instant Keyword Search Bar + Category Filter Pills & Week Dropdown */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-3.5 space-y-3 shadow-xs">
-            <div className="relative">
-              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-              <input
-                type="text"
-                value={ledgerSearch}
-                onChange={(e) => setLedgerSearch(e.target.value)}
-                placeholder="Search Material Directory by item name, supplier, category, phase, or project..."
-                className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pl-9 pr-9 py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition"
-              />
-              {ledgerSearch && (
-                <button
-                  type="button"
-                  onClick={() => setLedgerSearch('')}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
-                  title="Clear search"
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={ledgerSearch}
+                  onChange={(e) => setLedgerSearch(e.target.value)}
+                  placeholder="Search Material Directory by item name, supplier, category, phase, or project..."
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-amber-500 rounded-xl pl-9 pr-9 py-2 text-xs text-white placeholder-slate-500 focus:outline-none transition"
+                />
+                {ledgerSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setLedgerSearch('')}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 rounded-full text-slate-400 hover:text-white hover:bg-slate-800 cursor-pointer"
+                    title="Clear search"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[10px] font-mono uppercase text-slate-500 font-bold">Project:</span>
+                <select
+                  value={selectedProjectFilter}
+                  onChange={(e) => setSelectedProjectFilter(e.target.value)}
+                  className="bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs font-mono text-white focus:border-amber-500 focus:outline-none cursor-pointer max-w-[240px]"
                 >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
+                  <option value="ALL">All Projects ({availableProjectNames.length})</option>
+                  {availableProjectNames.map(pName => (
+                    <option key={pName} value={pName}>{pName}</option>
+                  ))}
+                </select>
+              </div>
             </div>
 
             <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -1425,18 +1477,38 @@ export default function RfiManager({
                     </tr>
                   ) : (
                     filteredLedger.map((item) => {
-                      const remaining = Math.max(0, item.received - item.used);
-                      const balance = Math.max(0, item.ordered - item.received);
-                      const isComplete = balance <= 0;
-                      const stockVal = remaining * item.unitCostPhp;
+                      const draft = draftLedgerEdits[item.id];
+                      const displayReceivedStr = draft !== undefined ? draft.received : String(item.received);
+                      const displayUsedStr = draft !== undefined ? draft.used : String(item.used);
+                      const effectiveReceived = draft !== undefined ? (Number(draft.received) || 0) : item.received;
+                      const effectiveUsed = draft !== undefined ? (Number(draft.used) || 0) : item.used;
+                      const hasUnsavedChanges =
+                        draft !== undefined &&
+                        (effectiveReceived !== item.received || effectiveUsed !== item.used);
+
+                      const remaining = effectiveReceived - effectiveUsed;
+                      const balance = item.ordered - effectiveReceived;
+                      const isOverDelivered = balance < 0;
+                      const isOverUsed = remaining < 0;
+                      const isComplete = balance === 0;
+                      const stockVal = Math.max(0, remaining) * item.unitCostPhp;
+                      const overrunCost = isOverDelivered ? Math.abs(balance) * item.unitCostPhp : 0;
+
+                      const sanitizeNumericInput = (raw: string): string => {
+                        const digitsOnly = raw.replace(/[^0-9]/g, '');
+                        if (digitsOnly === '') return '';
+                        return digitsOnly.replace(/^0+(?=\d)/, '');
+                      };
 
                       return (
-                        <tr key={item.id} className="hover:bg-slate-800/40 transition-colors">
+                        <tr key={item.id} className={`hover:bg-slate-800/40 transition-colors ${hasUnsavedChanges ? 'bg-amber-950/20' : ''}`}>
                           <td className="py-3 px-3 font-mono font-bold text-amber-400">{item.week}</td>
                           <td className="py-3 px-3 font-mono text-slate-300">{item.date}</td>
                           <td className="py-3 px-4">
                             <div className="font-bold text-white">{item.materialDescription}</div>
-                            {item.notes && <div className="text-[10px] text-slate-400">{item.notes}</div>}
+                            <div className="text-[10px] text-slate-400">
+                              {item.projectName}{item.notes ? ` • ${item.notes}` : ''}
+                            </div>
                           </td>
                           <td className="py-3 px-3">
                             <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-300 border border-slate-700">
@@ -1448,47 +1520,73 @@ export default function RfiManager({
                           </td>
                           <td className="py-3 px-2 text-center font-mono text-slate-400">{item.unit}</td>
 
-                          {/* Received Input */}
+                          {/* Received Input (leading-zero stripped, explicit Save required) */}
                           <td className="py-3 px-3 text-right">
                             <input
-                              type="number"
-                              min={0}
-                              value={item.received}
-                              onChange={(e) => handleUpdateLedgerReceived(item.id, parseInt(e.target.value, 10) || 0)}
+                              type="text"
+                              inputMode="numeric"
+                              value={displayReceivedStr}
+                              onChange={(e) => {
+                                const cleaned = sanitizeNumericInput(e.target.value);
+                                setDraftLedgerEdits(prev => ({
+                                  ...prev,
+                                  [item.id]: {
+                                    received: cleaned,
+                                    used: prev[item.id]?.used ?? String(item.used),
+                                  }
+                                }));
+                              }}
                               className="w-16 bg-slate-950 border border-slate-700 focus:border-emerald-500 rounded px-1.5 py-0.5 text-right font-mono text-xs font-bold text-emerald-400 focus:outline-none"
-                              title="Update quantity received on jobsite"
+                              title="Edit quantity received, then click Save"
                             />
                           </td>
 
-                          {/* Used / Issued Input */}
+                          {/* Used / Issued Input (leading-zero stripped, explicit Save required) */}
                           <td className="py-3 px-3 text-right">
                             <input
-                              type="number"
-                              min={0}
-                              value={item.used}
-                              onChange={(e) => handleUpdateLedgerUsed(item.id, parseInt(e.target.value, 10) || 0)}
+                              type="text"
+                              inputMode="numeric"
+                              value={displayUsedStr}
+                              onChange={(e) => {
+                                const cleaned = sanitizeNumericInput(e.target.value);
+                                setDraftLedgerEdits(prev => ({
+                                  ...prev,
+                                  [item.id]: {
+                                    received: prev[item.id]?.received ?? String(item.received),
+                                    used: cleaned,
+                                  }
+                                }));
+                              }}
                               className="w-16 bg-slate-950 border border-slate-700 focus:border-amber-500 rounded px-1.5 py-0.5 text-right font-mono text-xs font-bold text-amber-400 focus:outline-none"
-                              title="Update quantity issued to trades"
+                              title="Edit quantity issued, then click Save"
                             />
                           </td>
 
-                          {/* Remaining Stock = Received - Used */}
-                          <td className="py-3 px-3 text-right font-mono font-bold text-white bg-slate-950/40">
+                          {/* Remaining Stock = Received - Used (negative allowed in red) */}
+                          <td className={`py-3 px-3 text-right font-mono font-bold bg-slate-950/40 ${isOverUsed ? 'text-rose-400' : 'text-white'}`}>
                             {remaining.toLocaleString()}
                           </td>
 
-                          {/* Balance Order = Ordered - Received */}
-                          <td className={`py-3 px-3 text-right font-mono font-bold ${isComplete ? 'text-emerald-400' : 'text-rose-400'}`}>
-                            {balance.toLocaleString()}
+                          {/* Balance Order = Ordered - Received (negative over-delivery shown in red) */}
+                          <td className={`py-3 px-3 text-right font-mono font-bold ${isOverDelivered ? 'text-rose-400' : isComplete ? 'text-emerald-400' : 'text-amber-300'}`}>
+                            <div>{balance.toLocaleString()}</div>
+                            {isOverDelivered && (
+                              <div className="text-[9px] text-rose-400 font-semibold">
+                                -₱{overrunCost.toLocaleString()} var.
+                              </div>
+                            )}
                           </td>
 
                           {/* Status */}
                           <td className="py-3 px-3 text-center">
-                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border ${isComplete
+                            <span className={`px-2 py-0.5 rounded-md text-[10px] font-mono font-bold border ${
+                              isOverDelivered
+                                ? 'bg-rose-500/15 text-rose-400 border-rose-500/40'
+                                : isComplete
                                 ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                                : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                              }`}>
-                              {isComplete ? 'Completed' : 'Incomplete'}
+                                : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                            }`}>
+                              {isOverDelivered ? 'Over-Delivered' : isComplete ? 'Completed' : 'Incomplete'}
                             </span>
                           </td>
 
@@ -1500,14 +1598,27 @@ export default function RfiManager({
                             ₱{stockVal.toLocaleString()}
                           </td>
                           <td className="py-3 px-3 text-center">
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteLedgerItem(item.id)}
-                              className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 cursor-pointer transition-colors"
-                              title="Delete ledger item"
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
+                            <div className="flex items-center justify-center gap-1">
+                              {hasUnsavedChanges && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleCommitLedgerRowEdit(item.id)}
+                                  className="px-2 py-1 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] font-mono flex items-center gap-1 cursor-pointer shadow-xs transition"
+                                  title="Save quantity changes"
+                                >
+                                  <Check className="w-3 h-3" />
+                                  <span>Save</span>
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteLedgerItem(item.id)}
+                                className="p-1 rounded text-slate-500 hover:text-rose-400 hover:bg-slate-800 cursor-pointer transition-colors"
+                                title="Delete ledger item"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       );

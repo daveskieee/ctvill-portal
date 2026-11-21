@@ -1190,6 +1190,89 @@ export default function ProjectScheduleCalendar({
           </div>
         </div>
       )}
+
+      {/* Prominent Centered Dismissible Schedule Overlap Pop-Up Modal */}
+      {detectedConflicts.length > 0 && (
+        <div
+          className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fadeIn"
+          onClick={() => setDetectedConflicts([])}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-lg rounded-2xl bg-slate-900 border-2 border-amber-500/80 shadow-2xl shadow-amber-950/50 overflow-hidden"
+          >
+            <div className="px-5 py-4 bg-amber-950/70 border-b border-amber-500/40 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-amber-500/20 border border-amber-500/50 flex items-center justify-center shrink-0">
+                  <ShieldAlert className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-black text-amber-300 tracking-tight">
+                    Schedule Overlap Conflict Detected
+                  </h3>
+                  <p className="text-[11px] font-mono text-amber-200/80">
+                    Date: {editingEvent ? editEventDate : newEventDate} •{' '}
+                    {(editingEvent ? editStartTime : newStartTime) || '08:00'} –{' '}
+                    {(editingEvent ? editEndTime : newEndTime) || '17:00'}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetectedConflicts([])}
+                className="p-1.5 rounded-lg text-amber-200/80 hover:text-white hover:bg-amber-900/60 transition cursor-pointer"
+                aria-label="Close conflict alert"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-3.5 text-xs">
+              <p className="text-slate-200 leading-relaxed">
+                This event overlaps with <strong className="text-amber-300">{detectedConflicts.length}</strong> existing scheduled{' '}
+                {detectedConflicts.length === 1 ? 'activity' : 'activities'} on the same day. Please review before confirming:
+              </p>
+
+              <ul className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                {detectedConflicts.map((conf) => (
+                  <li
+                    key={conf.id}
+                    className="p-3 rounded-xl bg-slate-950 border border-amber-500/30 flex items-center justify-between gap-3"
+                  >
+                    <div className="min-w-0">
+                      <div className="font-bold text-white truncate">{conf.title}</div>
+                      <div className="text-[11px] text-slate-400 truncate">
+                        {conf.projectName || 'Master Operations'}
+                      </div>
+                    </div>
+                    <span className="font-mono text-[11px] text-amber-300 bg-amber-500/10 border border-amber-500/30 px-2 py-1 rounded-lg shrink-0">
+                      {conf.startTime || '08:00'} – {conf.endTime || '17:00'}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+
+              <div className="pt-3 border-t border-slate-800 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setDetectedConflicts([])}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs cursor-pointer transition"
+                >
+                  Adjust Time
+                </button>
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => (editingEvent ? executeEditEvent() : executeCreateEvent())}
+                  className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs cursor-pointer shadow-md transition disabled:opacity-50"
+                >
+                  {isSubmitting ? 'Saving...' : 'Proceed Anyway & Save'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -407,22 +407,22 @@ export function getGanttStorageKey(projectId: string): string {
 }
 
 export function createDefaultWbsTasksForProject(projectId: string): UnifiedGanttTaskLike[] {
-  const baseDate = new Date('2026-06-01');
+  const baseDate = new Date();
   const defaults: Array<{ name: string; progress: number; duration: number; startOffsetDays: number }> = [
-    { name: 'Earthworks', progress: 1.0, duration: 12, startOffsetDays: 0 },
-    { name: 'Concreting Works', progress: 0.85, duration: 25, startOffsetDays: 10 },
-    { name: 'Reinforcing Bar', progress: 0.70, duration: 20, startOffsetDays: 15 },
-    { name: 'Formworks', progress: 0.60, duration: 18, startOffsetDays: 20 },
-    { name: 'Masonry Works', progress: 0.35, duration: 24, startOffsetDays: 32 },
-    { name: 'Roof Works', progress: 0.20, duration: 16, startOffsetDays: 45 },
+    { name: 'Earthworks', progress: 0.0, duration: 12, startOffsetDays: 0 },
+    { name: 'Concreting Works', progress: 0.0, duration: 25, startOffsetDays: 10 },
+    { name: 'Reinforcing Bar', progress: 0.0, duration: 20, startOffsetDays: 15 },
+    { name: 'Formworks', progress: 0.0, duration: 18, startOffsetDays: 20 },
+    { name: 'Masonry Works', progress: 0.0, duration: 24, startOffsetDays: 32 },
+    { name: 'Roof Works', progress: 0.0, duration: 16, startOffsetDays: 45 },
     { name: 'Finishing & Tiling Works', progress: 0.0, duration: 20, startOffsetDays: 60 },
     { name: 'Ceiling Works', progress: 0.0, duration: 14, startOffsetDays: 70 },
     { name: 'Finishing Carpentry', progress: 0.0, duration: 18, startOffsetDays: 78 },
     { name: 'Doors and Windows', progress: 0.0, duration: 12, startOffsetDays: 85 },
     { name: 'Cabinet Works', progress: 0.0, duration: 15, startOffsetDays: 92 },
     { name: 'Painting Works', progress: 0.0, duration: 18, startOffsetDays: 98 },
-    { name: 'Electrical Works', progress: 0.15, duration: 30, startOffsetDays: 35 },
-    { name: 'Plumbing Works', progress: 0.10, duration: 25, startOffsetDays: 38 },
+    { name: 'Electrical Works', progress: 0.0, duration: 30, startOffsetDays: 35 },
+    { name: 'Plumbing Works', progress: 0.0, duration: 25, startOffsetDays: 38 },
   ];
 
   return defaults.map((d, idx) => {

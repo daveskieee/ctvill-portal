@@ -48,6 +48,7 @@ import DocumentManager from './DocumentManager';
 import DailySiteDiary from './DailySiteDiary';
 import RiskMatrix from './RiskMatrix';
 import ProjectProfileHub from './ProjectProfileHub';
+import ProjectHistory from './ProjectHistory';
 import PaymentsTracker from './PaymentsTracker';
 import ProjectScheduleCalendar from './ProjectScheduleCalendar';
 import GovernmentPermitsTracker from './GovernmentPermitsTracker';
@@ -94,6 +95,11 @@ export const TAB_METADATA: Record<string, { title: string; subtitle: string; dep
   'projects': {
     title: 'Commercial Sites Hub',
     subtitle: 'Manage commercial fit-out projects, scope, contracts, and assigned project teams',
+    department: 'Projects & Planning'
+  },
+  'project-history': {
+    title: 'Project History Archive',
+    subtitle: 'Comprehensive historical dossiers for completed projects — financials, WBS, materials, workforce, diary & audit trail',
     department: 'Projects & Planning'
   },
   'gantt': {
@@ -1634,7 +1640,7 @@ export default function AdminPortal({
     setContMonthlySalary(rate * 22);
   };
 
-  const handleRegisterContractorSubmit = (e: React.FormEvent) => {
+  const handleRegisterContractorSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!contName.trim()) return;
 
@@ -1644,29 +1650,82 @@ export default function AdminPortal({
     const isOutsourced = regTrack === 'OUTSOURCED';
 
     const isAssignedToSite = contSite && contSite !== 'Unassigned' && contSite !== 'None';
+    const targetProjectId = projects.find(p => p.name === contSite || p.id === contSite)?.id;
 
-    // Headcount: strictly 1 for individual personnel (Office & Field Supervision), actual crew count for Trade Gangs & Contractors
-    const effectiveManpower = (isOffice || isFieldSuper)
+    // Parse comma-separated names for individual worker creation (especially for Trade Crew / Artisan bulk registration)
+    const parsedNames = !isOutsourced
+      ? contName.split(/[,\n]+/).map(s => s.trim()).filter(Boolean)
+      : [contName.trim()];
+
+    const baseTs = Date.now();
+
+    if (!isOutsourced && parsedNames.length > 1) {
+      // Create a separate individual worker record in PostgreSQL for each comma-separated name
+      for (let i = 0; i < parsedNames.length; i++) {
+        const individualName = parsedNames[i];
+        const individualWorker: Contractor = {
+          id: `CONT-${baseTs}-${i + 1}`,
+          name: individualName,
+          company: 'LDM Construction Corporation',
+          specialty: isTradeCrew ? (contSpec || 'Skilled Craft') : contRoleTitle,
+          activeManpower: isAssignedToSite ? 1 : 0,
+          milestoneProgress: 0,
+          contractAmount: contDailyRate * 22,
+          paidAmount: 0,
+          rating: 5.0,
+          employmentType: 'INTERNAL',
+          entityType: 'INDIVIDUAL',
+          workforceCategory: isOffice ? 'OFFICE_STAFF' : (isFieldSuper ? 'FIELD_SUPERVISION' : 'SKILLED'),
+          department: (isOffice || isFieldSuper) ? contDepartment : 'Project Management & Construction ("CONSTRUCT" Phase)',
+          roleTitle: (isOffice || isFieldSuper) ? contRoleTitle : (contSpec || 'Skilled Artisan'),
+          dailyRate: contDailyRate > 0 ? contDailyRate : null,
+          hourlyOtRate: contDailyRate > 0 ? Number(((contDailyRate / 8) * 1.25).toFixed(2)) : undefined,
+          monthlySalary: contMonthlySalary > 0 ? contMonthlySalary : (contDailyRate ? contDailyRate * 22 : null),
+          contact: contContact.trim() || undefined,
+          status: 'ACTIVE',
+          allocationStatus: isAssignedToSite ? 'ASSIGNED' : 'STANDBY',
+          activeProjectSite: isAssignedToSite ? contSite : 'Unassigned',
+          assignedProjectId: targetProjectId,
+          avatar: contAvatar.trim() || undefined,
+        };
+        await Promise.resolve(onRegisterContractor(individualWorker));
+      }
+
+      setIsContractorModalOpen(false);
+      setContName('');
+      setContComp('');
+      setContContact('');
+      setContAvatar('');
+      setContDailyRate(1200);
+      setContMonthlySalary(26400);
+      setContManpower(1);
+      setContSite('Unassigned');
+      notify(`✅ Registered ${parsedNames.length} individual workers (${contSpec || contRoleTitle}) at ₱${contDailyRate.toLocaleString()}/day each!`);
+      return;
+    }
+
+    // Single worker / contractor registration
+    const effectiveManpower = !isOutsourced
       ? (isAssignedToSite ? 1 : 0)
       : (isAssignedToSite ? Math.max(1, contManpower || 1) : 0);
 
     const newContractor: Contractor = {
-      id: `CONT-${Date.now()}`,
-      name: contName.trim(),
+      id: `CONT-${baseTs}`,
+      name: parsedNames[0] || contName.trim(),
       company: isOutsourced
         ? (contComp.trim() || contName.trim())
-        : (isTradeCrew ? 'LDM In-House Trade Gang' : 'LDM Construction Corporation'),
+        : 'LDM Construction Corporation',
       specialty: isOutsourced ? contSpec : (isTradeCrew ? (contSpec || 'Skilled Craft') : contRoleTitle),
       activeManpower: effectiveManpower,
       milestoneProgress: 0,
-      contractAmount: isOutsourced ? contAmt : (contDailyRate * 22 * (isTradeCrew ? Math.max(1, contManpower || 1) : 1)),
+      contractAmount: isOutsourced ? contAmt : (contDailyRate * 22),
       paidAmount: 0,
       rating: 5.0,
       employmentType: isOutsourced ? 'OUTSOURCED' : 'INTERNAL',
-      entityType: (isOffice || isFieldSuper) ? 'INDIVIDUAL' : 'CREW',
-      workforceCategory: isOffice ? 'OFFICE_STAFF' : (isFieldSuper ? 'FIELD_SUPERVISION' : 'TRADE_CREW'),
+      entityType: isOutsourced ? 'CREW' : 'INDIVIDUAL',
+      workforceCategory: isOffice ? 'OFFICE_STAFF' : (isFieldSuper ? 'FIELD_SUPERVISION' : (isOutsourced ? 'TRADE_CREW' : 'SKILLED')),
       department: (isOffice || isFieldSuper) ? contDepartment : 'Project Management & Construction ("CONSTRUCT" Phase)',
-      roleTitle: (isOffice || isFieldSuper) ? contRoleTitle : (isTradeCrew ? `Crew Lead (${contSpec || 'Trades'})` : 'Trade Subcontractor'),
+      roleTitle: (isOffice || isFieldSuper) ? contRoleTitle : (isTradeCrew ? (contSpec || 'Skilled Artisan') : 'Trade Subcontractor'),
       dailyRate: !isOutsourced && contDailyRate > 0 ? contDailyRate : null,
       hourlyOtRate: !isOutsourced && contDailyRate > 0 ? Number(((contDailyRate / 8) * 1.25).toFixed(2)) : undefined,
       monthlySalary: !isOutsourced && contMonthlySalary > 0 ? contMonthlySalary : (contDailyRate ? contDailyRate * 22 : null),
@@ -1674,7 +1733,7 @@ export default function AdminPortal({
       status: 'ACTIVE',
       allocationStatus: isAssignedToSite ? 'ASSIGNED' : 'STANDBY',
       activeProjectSite: isAssignedToSite ? contSite : 'Unassigned',
-      assignedProjectId: projects.find(p => p.name === contSite || p.id === contSite)?.id,
+      assignedProjectId: targetProjectId,
       avatar: contAvatar.trim() || undefined,
     };
     onRegisterContractor(newContractor);
@@ -1687,7 +1746,7 @@ export default function AdminPortal({
     setContMonthlySalary(26400);
     setContManpower(1);
     setContSite('Unassigned');
-    const label = isOffice ? 'Corporate Office Staff' : (isFieldSuper ? 'Field Engineer/Supervisor' : (isTradeCrew ? 'In-House Trade Gang' : 'Outsourced Contractor'));
+    const label = isOffice ? 'Corporate Office Staff' : (isFieldSuper ? 'Field Engineer/Supervisor' : (isTradeCrew ? 'In-House Worker' : 'Outsourced Contractor'));
     notify(`✅ ${label} "${newContractor.name}" registered and saved to database!`);
   };
 
@@ -3652,6 +3711,25 @@ export default function AdminPortal({
                         setActiveTab(tab);
                       }
                     }}
+                  />
+                </div>
+              )}
+
+              {/* ------------------------------------------------------------- */}
+              {/* TAB 5.1b: COMPLETED PROJECT HISTORY ARCHIVE */}
+              {/* ------------------------------------------------------------- */}
+              {!isTimekeeper && (visitedTabs.has('project-history') || activeTab === 'project-history') && (
+                <div className={`space-y-6 ${activeTab === 'project-history' ? 'block' : 'hidden'}`}>
+                  <ProjectHistory
+                    projects={projects}
+                    tasks={tasks}
+                    contractors={contractors}
+                    siteLogs={siteLogs}
+                    changeOrders={changeOrders}
+                    rfis={rfis}
+                    auditLogs={auditLogs}
+                    canMarkCompleted={(isAdmin || isProjectManager) && !isFinance}
+                    onUpdateProject={!isFinance ? onUpdateProject : undefined}
                   />
                 </div>
               )}
